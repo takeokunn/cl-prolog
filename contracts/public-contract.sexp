@@ -1,0 +1,120 @@
+(
+ :format-version 1
+ :project-version "0.2.0"
+ :packages
+ ((:name "FX.PROLOG"
+   :nicknames ()
+   :exports ("!"
+             "!="
+             "/="
+             "*GLOBAL-RULEBASE*"
+             "*MAX-PROLOG-DEPTH*"
+             "ASSERT-FACT!"
+             "ASSERT-RULE!"
+             "CLEAR-GLOBAL-RULEBASE!"
+             "DCG-ALT"
+             "DCG-ERROR-RECOVERY"
+             "DCG-OPT"
+             "DCG-PLUS"
+             "DCG-STAR"
+             "DCG-TOKEN-MATCH"
+             "DCG-TOKEN-MATCH-VALUE"
+             "DEF-DCG-RULE"
+             "DEF-RULE"
+             "DEFINE-BUILTIN"
+             "DEFINE-RULEBASE"
+             "EXTEND-RULEBASE"
+             "FACT"
+             "FACT-ARGS"
+             "FACT-PREDICATE"
+             "FRESH-LOGIC-VARIABLE"
+             "INVALID-GOAL-ERROR"
+             "INVALID-GOAL-ERROR-GOAL"
+             "LOGIC-SUBSTITUTE"
+             "LOGIC-VAR-P"
+             "MAKE-EMPTY-RULEBASE"
+             "MAKE-FACT"
+             "MAKE-RULE"
+             "MAKE-RULEBASE"
+             "MAP-PROLOG-SOLUTIONS"
+             "PHRASE"
+             "PHRASE-ALL"
+             "PREDICATE-TRUE-P"
+             "PROLOG"
+             "PROLOG-MATCH"
+             "PROLOG-SUCCEEDS-P"
+             "QUERY-PROLOG"
+             "QUERY-PROLOG-FIRST"
+             "RULE"
+             "RULE-BODY"
+             "RULE-HEAD"
+             "RULEBASE"
+             "RULEBASE-FACTS"
+             "RULEBASE-P"
+             "RULEBASE-RULES"
+             "SOLUTION-BINDING"
+             "UNIFY"
+             "WITH-PROLOG-QUERY")))
+ :asdf-systems
+ ("cl-prolog"
+  "cl-prolog/tests"
+  "cl-prolog/examples"
+  "cl-prolog/benchmark")
+ :fresh-image-systems
+ ("cl-prolog/examples"
+  "cl-prolog/benchmark")
+ :alias-files ()
+ :example-scripts
+ ("examples/quick-start.lisp"
+  "examples/family-tree.lisp"
+  "examples/relational-lists.lisp")
+ :core-docs
+ ("README.md"
+  "docs/api-reference.md"
+  "docs/architecture.md"
+  "docs/oss-readiness-audit.md"
+  "docs/performance.md"
+  "docs/public-contract-verifier.md"
+  "docs/quality-gates.md"
+  "docs/release-audit.md"
+  "docs/release-checklist.md"
+  "docs/troubleshooting.md")
+ :policy-files
+ ("CHANGELOG.md"
+  "CODE_OF_CONDUCT.md"
+  "CONTRIBUTING.md"
+  "SECURITY.md"
+  "SUPPORT.md")
+ :forbidden-content
+ ((:id "legacy-compatibility-references"
+   ;; CHANGELOG.md is exempt: it legitimately names removed symbols.
+   :paths ("README.md"
+           "CONTRIBUTING.md"
+           "SUPPORT.md"
+           "docs/api-reference.md"
+           "docs/architecture.md"
+           "docs/oss-readiness-audit.md"
+           "docs/performance.md"
+           "docs/public-contract-verifier.md"
+           "docs/quality-gates.md"
+           "docs/release-audit.md"
+           "docs/release-checklist.md"
+           "docs/troubleshooting.md")
+   :substrings ("cl-cc/prolog"
+                "cl-prolog2.asd"
+                "cl-cc-prolog.asd"
+                "substitute-term"
+                "*max-proof-depth*"
+                "query-prolog-cps"
+                "prolog-succeeds-p-cps"
+                "unify-failed-p"
+                "scripts/verify-replacements.lisp"
+                "docs/stability-policy.md"
+                "docs/compatibility-matrix.md"
+                "docs/migration-guide.md"
+                "docs/replacement-verifier.md")
+   :message "legacy compatibility and deleted artifact references must not appear in shipped documentation"))
+ :stable-scripts
+ ("scripts/benchmark.lisp"
+  "scripts/release-audit.lisp"
+  "scripts/verify-public-contract.lisp"))
