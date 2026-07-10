@@ -1,0 +1,118 @@
+# Architecture
+
+## Design Direction
+
+`cl-prolog` is a small relational programming library for Common Lisp. The
+codebase optimizes for:
+
+- macro-first authoring: macros own syntax, the runtime only sees data
+- CPS proof search: solutions stream through continuations
+- explicit separation between data and logic
+- immutable rulebase construction as the default style
+- a narrow, machine-verified public API with no compatibility aliases
+
+It is not trying to emulate a full ISO Prolog runtime. It is a focused Lisp
+library.
+
+## Module Layout
+
+Sources live under `src/`, in dependency (and load) order:
+
+- `package.lisp` — public package and export boundary
+- `data.lisp` — facts, rules, rulebase structs (data only, no logic)
+- `unification.lisp` — unification, substitution, variable renaming
+- `engine.lisp` — CPS provers, cut, depth bound, the builtin registry,
+  the `predicate-true-p` hook
+- `builtins.lisp` — control and list builtins, declared with `define-builtin`
+- `dcg-runtime.lisp` — DCG combinator builtins
+- `query.lisp` — public query API over the engine
+- `dsl.lisp` — `prolog`, `def-rule`, and friends; compiles `(:when EXPR)`
+  guards to closures
+- `dcg.lisp` — `def-dcg-rule` expansion, `phrase`
+- `tests/` — split regression suite plus a table-driven expectation DSL
+
+## Data Versus Logic
+
+- data layer: `fact`, `rule`, `rulebase`, constructors, accessors
+- logic layer: unification, CPS proof search, builtin solvers, DSL expansion
+
+A caller can build or transform a rulebase as plain data without depending
+on the query engine, and the engine treats rulebases as read-only input.
+
+## The CPS Engine
+
+Every prover receives an `EMIT` continuation and calls it once per solution
+environment:
+
+```
+%prove-goal-sequence (goals rb env depth emit)  ; conjunction
+%prove-goal          (goal  rb env depth emit)  ; dispatch
+%prove-with-clauses  (goal  rb env depth emit)  ; hook -> facts -> rules
+%prove-with-rule     (goal rule rb env depth emit)
+```
+
+Nothing in the engine accumulates result lists — `query-prolog` is a fold
+over `map-prolog-solutions`, which exposes the CPS contract directly.
+Builtins follow the same contract; `define-builtin` registers a solver
+function in a hash table the dispatcher consults, which is also the public
+extension point.
+
+### Cut
+
+Cut is implemented with the condition system, the idiomatic Lisp tool for
+dynamically scoped control flow:
+
+- `!` emits its solution, then signals the internal `%cut` condition
+- `%with-cut-barrier` (a `handler-case`) marks each choice point; the
+  dynamically nearest barrier absorbs the signal and reports "a cut fired"
+  as its return value
+- barrier owners re-signal to propagate the cut outward: a cut in a rule
+  body prunes the body's earlier choice points and then the predicate's
+  remaining clauses
+
+### Guards
+
+`(:when EXPR)` guards are compiled by the DSL macros into
+`(:when FUNCTION ?var...)` goals at macroexpansion time. The engine
+substitutes solved values and funcalls — there is no `eval` anywhere in the
+runtime, so rule data can be treated as inert.
+
+### Search order and termination
+
+- for each goal: `predicate-true-p` hook, then facts, then rules
+- facts and rules keep definition order within their group
+- rule and fact variables are freshly renamed per use
+- `:max-depth` decrements per rule resolution, bounding left recursion
+- `dcg-star` refuses zero-progress repetitions, bounding nullable grammars
+
+## Macro-First Surface
+
+```lisp
+(prolog
+  ((parent tom bob))
+  ((score bob 42))
+  ((rich ?x) (score ?x ?n) (:when (> ?n 10))))
+```
+
+expands into `make-fact` / `make-rule` forms (guards become closures).
+Macros keep relational source compact; runtime code only executes
+normalized data; tests can assert both syntax-level intent and runtime
+behavior.
+
+## Mutable Surface
+
+`*global-rulebase*`, `assert-fact!`, `assert-rule!`, and `def-rule` are the
+narrow mutable edge, kept for REPL and DCG workflows. The default style is
+immutable: build with `prolog`, extend with `extend-rulebase`, query with
+`query-prolog`.
+
+## Verification Layers
+
+1. `scripts/verify-public-contract.lisp` — exact public surface and shipped files
+2. `asdf:test-system :cl-prolog` — regression behavior
+3. `sbcl --script scripts/run-tests-noasdf.lisp` — same core suite without ASDF
+4. `scripts/benchmark.lisp` — proof-search and DCG performance smoke
+5. `scripts/release-audit.lisp` — release orchestration
+6. `nix flake check` — packaging and clean-source verification
+
+When architecture changes land, update the narrowest affected layer first.

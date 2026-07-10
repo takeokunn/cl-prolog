@@ -1,0 +1,91 @@
+# Troubleshooting
+
+## `query-prolog` returned `(nil)`
+
+That means the query succeeded and projected no variables.
+
+```lisp
+(query-prolog rulebase '(parent tom bob))
+;; => (nil)
+```
+
+Success with variables returns binding alists. Failure returns `nil`.
+
+## `query-prolog-first` returned `nil`
+
+That means no proof succeeded.
+
+If you need the first successful binding only, this is the right entry point.
+If you need every solution, use `query-prolog`.
+
+## `solution-binding` returned `nil`
+
+The variable may be unbound in that solution, or the variable may not exist in
+the projected environment.
+
+Inspect the whole solution first:
+
+```lisp
+(first (query-prolog rulebase '(ancestor tom ?who)))
+```
+
+## `unify` returned `:unify-fail`
+
+`unify` returns two values.
+
+- first value: environment or `:unify-fail`
+- second value: success flag
+
+Ground success therefore looks like `nil` plus `t`, not an empty alist.
+
+## `:max-depth 0` made a derived rule fail
+
+That is expected. Depth limits apply to rule expansion.
+
+- `0`: facts and built-ins only
+- `1`: one rule expansion
+- larger values: deeper derived proofs
+
+## `predicate-true-p` did not run
+
+Built-in predicates bypass `predicate-true-p`.
+
+Use a different predicate name if you want custom truth evaluation.
+
+## `phrase` returned `nil`
+
+This has two meanings depending on the grammar:
+
+- full token consumption on success
+- no parse when the caller expected a non-`nil` remainder
+
+Use `phrase-all` when you need to inspect every successful remainder stream.
+
+## Example or verifier scripts fail under Nix but not locally
+
+Check whether the file is tracked in git. The release checks intentionally
+validate the tracked tree, not only the working directory.
+
+## ASDF cannot load `cl-prolog`
+
+Confirm:
+
+- `(require :asdf)` ran first
+- `cl-prolog.asd` is visible to ASDF
+- you are not relying on removed alias systems
+
+Direct smoke:
+
+```lisp
+(require :asdf)
+(asdf:load-system :cl-prolog)
+```
+
+## What To Include In A Bug Report
+
+- exact query or macro form
+- expected result
+- actual result
+- SBCL version
+- output of `sbcl --script tests.lisp`
+- output of `sbcl --script scripts/verify-public-contract.lisp --json`

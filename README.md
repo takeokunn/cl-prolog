@@ -1,106 +1,124 @@
 # cl-prolog
 
-`cl-prolog` is a small, dependency-free Common Lisp Prolog engine.
+[![CI](https://github.com/takeokunn/cl-prolog/actions/workflows/ci.yml/badge.svg)](https://github.com/takeokunn/cl-prolog/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-The public API is shaped to replace the lightweight Prolog layers currently
-embedded in `cl-cc`, `private-trade-fx`, and `nshell`.
+A small, dependency-free Prolog engine for Common Lisp, built around three ideas:
 
-It provides:
+- **macro-first rule definition** — clauses are data, macros own the syntax
+- **CPS proof search** — solutions stream through continuations, nothing buffers
+- **data / logic separation** — rulebases are plain structs the engine walks
 
-- `fx.prolog` as the primary package
-- `cl-cc/prolog` as a compatibility nickname
-- immutable rulebase construction helpers and mutable assertion helpers
-- unification with occurs-check
-- depth-first proof search
-- `query-prolog`, `query-prolog-first`, `prolog-succeeds-p`
-- CPS adapters for `query-prolog`, `prolog-succeeds-p`, and `merge-rulebase-facts`
-- `define-rulebase`, `extend-rulebase`, `with-prolog-query`, `prolog-match`
-- `def-rule`, `register-prolog-rule`, `query-all`
-- `cl-cc/prolog` globals such as `*prolog-rules*` and peephole rule data
-- built-ins for `=`, `!=`, `/=`, `not`, `and`, `or`, `:when`, and cut (`!`)
-- raw list/atom fact compatibility
-- a minimal DCG layer with `def-dcg-rule`, `phrase`, and `phrase-all`
+The public package is `fx.prolog`.
 
-## Quick start
+## Quick Start
 
 ```lisp
-(ql:quickload :cl-prolog)
+(ql:quickload :cl-prolog) ; or (asdf:load-system :cl-prolog)
 
 (in-package #:fx.prolog)
 
 (define-rulebase *family*
-  (:facts (parent tom bob) (parent bob alice))
-  (:rules
-   ((ancestor ?x ?y) (parent ?x ?y))
-   ((ancestor ?x ?y) (parent ?x ?z) (ancestor ?z ?y))))
+  ((parent tom bob))
+  ((parent bob alice))
+  ((ancestor ?x ?y) (parent ?x ?y))
+  ((ancestor ?x ?y) (parent ?x ?z) (ancestor ?z ?y)))
 
 (query-prolog *family* '(ancestor tom ?who))
+;; => (((?WHO . BOB)) ((?WHO . ALICE)))
 ```
 
-`query-prolog` returns projected variable bindings. `query-all` uses the
-global rule registry populated by `def-rule`/`register-prolog-rule` and
-returns substituted goals for `cl-cc/prolog` compatibility.
+Facts are one-element clauses; rules are a head followed by body goals.
+Logic variables are `?`-prefixed symbols.
 
-Ground success returns a single empty binding list:
+## Querying
 
 ```lisp
-(query-prolog *family* '(parent tom bob))
-;; => (nil)
+(query-prolog rb '(ancestor tom ?who))          ; all solutions
+(query-prolog rb '(ancestor tom ?who) :limit 2) ; bounded search
+(query-prolog-first rb '(ancestor ?x bob))      ; first solution or NIL
+(prolog-succeeds-p rb '(ancestor tom eve))      ; boolean, stops at first proof
+
+;; streaming: the function is called as each solution is proven
+(map-prolog-solutions
+ (lambda (solution) (format t "~&=> ~S~%" solution))
+ rb '(ancestor tom ?who))
 ```
 
-For lower-level `cl-cc/prolog` compatibility, `unify` returns two values:
-`(env success-p)`. On failure, the first value is `:unify-fail`, so existing
-single-value callers can use `unify-failed-p`. Ground success still returns
-`nil` as the environment and `t` as the second value.
+`with-prolog-query` binds variables from the first solution; `prolog-match`
+dispatches like `cond` over queries.
+
+## Builtin Goals
+
+| Goal | Meaning |
+|---|---|
+| `(= a b)` / `(!= a b)` / `(/= a b)` | unification and disequality |
+| `!` | cut: commit to the current choice |
+| `(not g)` | negation as failure |
+| `(and g...)` / `(or g...)` | conjunction / disjunction |
+| `(:when fn ?x...)` | Lisp guard function over solved values |
+| `(member ?x list)` `(append ?a ?b ?c)` `(reverse ?a ?b)` `(length ?l ?n)` | relational list operations |
+
+In the `prolog` / `def-rule` DSL you write guards as expressions —
+`(:when (> ?n 10))` — and the macro compiles them to closures. The engine
+never evaluates user expressions at runtime.
+
+The builtin set is extensible:
 
 ```lisp
-(unify '(:const ?r ?v) '(:const :r1 42))
-;; => ((?v . 42) (?r . :r1)), T
-
-(unify 1 2)
-;; => :UNIFY-FAIL, NIL
+(define-builtin (twice input output) (rulebase environment depth emit)
+  (let ((value (logic-substitute input environment)))
+    (when (numberp value)
+      (multiple-value-bind (extended ok) (unify output (* 2 value) environment)
+        (when ok (funcall emit extended))))))
 ```
 
-The `cl-cc/prolog` package nickname also exposes `*prolog-rules*`,
-`*peephole-copy-prop-rules*`, `*peephole-arithmetic-rules*`,
-`*peephole-control-flow-rules*`, and `*peephole-rules*`.
-
-## Rulebase APIs
-
-```lisp
-(let ((kb (make-empty-rule-knowledge-base)))
-  (assert-fact! kb (make-fact :predicate 'parent :args '(tom bob)))
-  (prove-all kb '(parent tom ?child)))
-```
-
-`make-rulebase` also accepts existing raw fact forms for compatibility:
-
-```lisp
-(query-prolog (make-rulebase :facts '((tagged ok) :ready))
-              '(tagged ?value))
-```
+For a Lisp-side truth predicate without new bindings, specialize
+`predicate-true-p` instead.
 
 ## DCG
 
 ```lisp
-(clear-global-rulebase!)
+(def-dcg-rule noun (terminal :noun))
+(def-dcg-rule verb (terminal :verb))
 
-(def-dcg-rule accept-int
-  (terminal :T-INT))
+(def-dcg-rule sentence
+  (dcg-star noun)
+  (verb)
+  (brace (= 1 1)))          ; Lisp guard, like (:when ...)
 
-(phrase 'accept-int '((:T-INT . 1) (:T-EOF . nil)))
-;; => ((:T-EOF . nil))
+(phrase 'sentence '(:noun :noun :verb))
+;; => NIL, T   (remainder, matched-p)
 ```
 
-`terminal` matches both atom tokens and `(kind . value)` token pairs. The
-`dcg-token-match-value` builtin can bind token values when needed.
+Combinators: `dcg-alt`, `dcg-opt`, `dcg-star`, `dcg-plus`,
+`dcg-error-recovery`, plus token matchers `dcg-token-match` and
+`dcg-token-match-value`.
 
-## Nix
+## Semantics Notes
+
+- **Clause order**: facts are always tried before rules; within each group,
+  definition order is preserved.
+- **Cut** prunes the running clause's remaining choice points and the
+  predicate's remaining rule clauses.
+- **Depth bound**: rule resolution is bounded by `:max-depth`
+  (default `*max-prolog-depth*`, 64), so left-recursive rulebases terminate.
+- **Occurs check** is always on; unification never builds cyclic terms.
+
+## Documentation
+
+- [API reference](docs/api-reference.md)
+- [Architecture](docs/architecture.md)
+- [Performance notes](docs/performance.md)
+- [Troubleshooting](docs/troubleshooting.md)
+- [Quality gates](docs/quality-gates.md)
+
+## Examples
 
 ```sh
-nix develop
-nix run .#test
-nix flake check
+sbcl --script examples/quick-start.lisp
+sbcl --script examples/family-tree.lisp
+sbcl --script examples/relational-lists.lisp
 ```
 
 ## Testing
@@ -108,3 +126,29 @@ nix flake check
 ```lisp
 (asdf:test-system :cl-prolog)
 ```
+
+The full suite includes CLI-contract tests that spawn fresh SBCL images.
+For a fast, ASDF-free core run:
+
+```sh
+sbcl --script scripts/run-tests-noasdf.lisp
+```
+
+Release-level verification:
+
+```sh
+sbcl --script scripts/verify-public-contract.lisp
+sbcl --script scripts/release-audit.lisp --with-benchmarks
+nix flake check
+```
+
+## Design Constraints
+
+- no runtime dependencies, SBCL-tested, ANSI-leaning core
+- no compatibility layers or duplicate query APIs
+- the exact export set is machine-checked against
+  [`contracts/public-contract.sexp`](contracts/public-contract.sexp)
+
+## License
+
+MIT — see [LICENSE](LICENSE).
