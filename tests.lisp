@@ -21,7 +21,14 @@
 (load (test-file "tests/core.lisp") :verbose nil :print nil)
 (load (test-file "tests/engine.lisp") :verbose nil :print nil)
 (load (test-file "tests/dcg.lisp") :verbose nil :print nil)
-(load (test-file "tests/scripts.lisp") :verbose nil :print nil)
+
+;; The script JSON-contract tests spawn a tree of fresh SBCL images (the
+;; contract verifier itself spawns more), which is too heavy for sandboxed
+;; or memory-constrained environments (nix build sandboxes, CI runners).
+;; CI exercises the scripts directly as workflow steps instead; set
+;; CL_PROLOG_TEST_SCRIPTS=1 to include the meta-tests here.
+(when (uiop:getenvp "CL_PROLOG_TEST_SCRIPTS")
+  (load (test-file "tests/scripts.lisp") :verbose nil :print nil))
 
 (let ((runner (find-symbol "RUN-TESTS" "FX.PROLOG.TESTS")))
   (unless runner

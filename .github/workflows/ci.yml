@@ -34,9 +34,11 @@ jobs:
         run: brew install sbcl
 
       - name: Core test suite (no ASDF)
+        timeout-minutes: 5
         run: sbcl --script scripts/run-tests-noasdf.lisp
 
       - name: Full test suite (ASDF test-op)
+        timeout-minutes: 10
         run: |
           sbcl --non-interactive \
             --eval '(require :asdf)' \
@@ -44,12 +46,15 @@ jobs:
             --eval '(asdf:test-system :cl-prolog)'
 
       - name: Public contract verifier
+        timeout-minutes: 10
         run: sbcl --script scripts/verify-public-contract.lisp --json
 
       - name: Benchmark smoke
+        timeout-minutes: 5
         run: sbcl --script scripts/benchmark.lisp --json --iterations 10
 
       - name: Example scripts
+        timeout-minutes: 5
         run: |
           sbcl --script examples/quick-start.lisp
           sbcl --script examples/family-tree.lisp

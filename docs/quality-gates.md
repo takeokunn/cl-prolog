@@ -58,6 +58,12 @@ It should cover:
 script-contract tests, which spawn nested SBCL images) with plain `load`
 and no ASDF dependency.
 
+The script JSON-contract tests (`tests/scripts.lisp`) are opt-in: set
+`CL_PROLOG_TEST_SCRIPTS=1` before running `tests.lisp` or
+`asdf:test-system`. They spawn a tree of fresh SBCL images, which is too
+heavy for nix build sandboxes and memory-constrained CI runners; CI runs
+the underlying scripts directly as workflow steps instead.
+
 ## Coverage Gate
 
 ```sh
