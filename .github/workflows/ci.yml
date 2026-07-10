@@ -1,0 +1,65 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Tests (SBCL, ${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install SBCL (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y sbcl
+
+      - name: Install SBCL (macOS)
+        if: runner.os == 'macOS'
+        run: brew install sbcl
+
+      - name: Core test suite (no ASDF)
+        run: sbcl --script scripts/run-tests-noasdf.lisp
+
+      - name: Full test suite (ASDF test-op)
+        run: |
+          sbcl --non-interactive \
+            --eval '(require :asdf)' \
+            --eval '(asdf:load-asd (truename "cl-prolog.asd"))' \
+            --eval '(asdf:test-system :cl-prolog)'
+
+      - name: Public contract verifier
+        run: sbcl --script scripts/verify-public-contract.lisp --json
+
+      - name: Benchmark smoke
+        run: sbcl --script scripts/benchmark.lisp --json --iterations 10
+
+      - name: Example scripts
+        run: |
+          sbcl --script examples/quick-start.lisp
+          sbcl --script examples/family-tree.lisp
+          sbcl --script examples/relational-lists.lisp
+
+  nix:
+    name: nix flake check
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: DeterminateSystems/nix-installer-action@v16
+      - run: nix flake check --print-build-logs
