@@ -1,0 +1,88 @@
+;;;; DCG surface and runtime tests.
+
+(in-package #:fx.prolog.tests)
+
+(deftest dcg-phrase-surface ()
+  (with-clean-global-rulebase
+    (def-dcg-rule greeting
+      (terminal :hello)
+      (terminal :world))
+    (multiple-value-bind (rest matched-p)
+        (phrase 'greeting '(:hello :world))
+      (is matched-p)
+      (is (null rest)))
+    (multiple-value-bind (rest matched-p)
+        (phrase 'greeting '(:hello))
+      (is (not matched-p))
+      (is (null rest)))
+    (is-equal '(:extra) (phrase 'greeting '(:hello :world :extra)))
+    (is-equal '(nil) (phrase-all 'greeting '(:hello :world)))
+    (is-equal '() (phrase-all 'greeting '(:goodbye)))))
+
+(deftest dcg-combinators ()
+  (with-clean-global-rulebase
+    (def-dcg-rule noun (terminal :noun))
+    (def-dcg-rule verb (terminal :verb))
+    (def-dcg-rule optional-noun (dcg-opt noun))
+    (def-dcg-rule noun-sequence (dcg-plus noun))
+    (def-dcg-rule noun-run (dcg-star noun))
+    (def-dcg-rule maybe-word (dcg-alt noun verb))
+    (def-dcg-rule epsilon)
+    (def-dcg-rule epsilon-run (dcg-star epsilon))
+    (is-equal nil (phrase 'optional-noun '()))
+    (is-equal '(:noun) (phrase 'noun-sequence '(:noun :noun)))
+    (is (not (nth-value 1 (phrase 'noun-sequence '(:verb)))))
+    (is-equal nil (phrase 'noun-run '()))
+    (is-same-set '(((?rest . (:noun :noun :verb)))
+                   ((?rest . (:noun :verb)))
+                   ((?rest . (:verb))))
+                 (query-prolog *global-rulebase*
+                               '(noun-run (:noun :noun :verb) ?rest)))
+    (is-equal nil (phrase 'maybe-word '(:verb)))
+    (is-equal nil (phrase 'maybe-word '(:noun)))
+    ;; a nullable rule under dcg-star must not loop forever
+    (is-equal '(((?rest . (:noun))))
+              (query-prolog *global-rulebase* '(epsilon-run (:noun) ?rest)))))
+
+(deftest-queries dcg-token-builtins ((make-empty-rulebase))
+  ((dcg-token-match :noun (:noun :verb) ?rest)  => (((?rest . (:verb)))))
+  ((dcg-token-match :noun ((:noun . cat) :verb) ?rest) => (((?rest . (:verb)))))
+  ((dcg-token-match :noun (:verb) ?rest)        :fails)
+  ((dcg-token-match :noun () ?rest)             :fails)
+  ((dcg-token-match ?kind (:noun) ?rest)        => (((?kind . :noun) (?rest))))
+  ((dcg-token-match-value :name "alice" ((:name . "alice")) ?rest) => (((?rest))))
+  ((dcg-token-match-value :name "bob" ((:name . "alice")) ?rest)   :fails)
+  ((dcg-token-match-value :age 30 (:age) ?rest) :fails)
+  ((dcg-token-match-value :name ?v () ?rest)    :fails))
+
+(deftest-queries dcg-error-recovery ((make-empty-rulebase))
+  ((dcg-error-recovery (:noise (:t-rparen . ")") :tail) ?rest)
+   => (((?rest . ((:t-rparen . ")") :tail)))))
+  ((dcg-error-recovery (:noise :more-noise) ?rest) => (((?rest))))
+  ((dcg-error-recovery () ?rest)                   => (((?rest)))))
+
+(deftest dcg-brace-guards ()
+  (with-clean-global-rulebase
+    (def-dcg-rule guarded-noun
+      (terminal :noun)
+      (brace (= 1 1)))
+    (def-dcg-rule blocked-noun
+      (terminal :noun)
+      (brace (= 1 2)))
+    (is (nth-value 1 (phrase 'guarded-noun '(:noun))))
+    (is (not (nth-value 1 (phrase 'blocked-noun '(:noun)))))))
+
+(deftest dcg-expansion-internals ()
+  (is-equal '((:when t) (= ?in ?out))
+            (fx.prolog::%dcg-element-goals '(brace t) '?in '?out))
+  (is-equal '((node ?in ?out))
+            (fx.prolog::%dcg-element-goals 'node '?in '?out))
+  (is-equal '((node ?x ?in ?out))
+            (fx.prolog::%dcg-element-goals '(node ?x) '?in '?out))
+  (is (signals-error (macroexpand-1 '(def-dcg-rule broken 42)))
+      "Unknown DCG body elements must fail at expansion time")
+  (with-clean-global-rulebase
+    (def-dcg-rule empty)
+    (is-equal nil (phrase 'empty '()))
+    (is-equal '(:token) (phrase 'empty '(:token))
+              "An empty rule consumes nothing and leaves the input intact")))
