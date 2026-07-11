@@ -15,6 +15,13 @@
    :timeout 120
    :directory (cl-prolog.bootstrap:repo-root)))
 
+(defun run-script-with-timeout (timeout script &rest arguments)
+  (cl-prolog.bootstrap:run-command-capture
+   (sbcl-program)
+   (append (list "--script" script) arguments)
+   :timeout timeout
+   :directory (cl-prolog.bootstrap:repo-root)))
+
 (defun compact-json (string)
   (with-output-to-string (out)
     (loop with in-string = nil
@@ -109,3 +116,21 @@
                "\"check\":\"tests\""
                "\"check\":\"core\""
                "\"check\":\"benchmarks\"")))
+
+(deftest coverage-gate-contract (:timeout 600)
+  (let* ((report (cl-prolog.bootstrap:repo-file "coverage/cover-index.html"))
+         (result (run-script-with-timeout 540 "scripts/coverage.lisp"))
+         (output (concatenate 'string
+                              (getf result :output)
+                              (getf result :error-output)))
+         (passed-p (not (null (search ";; coverage gate: PASS" output
+                                      :test #'char=))))
+         (failed-p (not (null (search ";; coverage gate: FAIL" output
+                                      :test #'char=)))))
+    (is (or passed-p failed-p)
+        (format nil "Coverage script emitted no gate result:~%~A" output))
+    (is-equal (if passed-p 0 1)
+              (getf result :exit-code)
+              (format nil "Coverage gate and exit code disagree:~%~A" output))
+    (is (probe-file report)
+        "Coverage gate must preserve the HTML report.")))

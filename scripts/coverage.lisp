@@ -43,6 +43,7 @@
   (format stream "       sbcl --script scripts/coverage.lisp --version~%")
   (format stream "~%")
   (format stream "Writes an sb-cover HTML report to coverage/cover-index.html.~%")
+  (format stream "Exits successfully only at 100% expression and branch coverage.~%")
   (format stream "Runs only the core suites; script-contract tests stay out of this gate.~%"))
 
 (defun compile-command-arguments (source-file output)
@@ -120,12 +121,61 @@
       (sb-ext:with-timeout *report-timeout*
         (sb-cover:report report-directory))
     (sb-ext:timeout ()
-      (format *error-output* "~&;; coverage report timed out after ~A seconds~%"
-              *report-timeout*)))
+      (error "Coverage report timed out after ~A seconds" *report-timeout*)))
   #-sbcl
   (sb-cover:report report-directory))
+
+(defun coverage-counts ()
+  "Return covered and total expression and branch counts for this image."
+  (let ((expressions-covered 0)
+        (expressions-total 0)
+        (branches-covered 0)
+        (branches-total 0))
+    (maphash
+     (lambda (source-file coverage-data)
+       (declare (ignore coverage-data))
+       (let* ((counts (nth-value 0 (sb-cover::compute-file-info source-file :default)))
+              (expressions (getf counts :expression))
+              (branches (getf counts :branch)))
+         (incf expressions-covered (sb-cover::ok-of expressions))
+         (incf expressions-total (sb-cover::all-of expressions))
+         (incf branches-covered (sb-cover::ok-of branches))
+         (incf branches-total (sb-cover::all-of branches))))
+     (sb-cover::code-coverage-hashtable))
+    (list :expressions-covered expressions-covered
+          :expressions-total expressions-total
+          :branches-covered branches-covered
+          :branches-total branches-total)))
+
+(defun coverage-complete-p (counts)
+  (and (plusp (getf counts :expressions-total))
+       (= (getf counts :expressions-covered)
+          (getf counts :expressions-total))
+       (= (getf counts :branches-covered)
+          (getf counts :branches-total))))
+
+(defun coverage-percentage (covered total)
+  (if (zerop total)
+      100.0
+      (* 100.0 (/ covered total))))
+
+(defun print-coverage-gate (counts)
+  (let ((complete-p (coverage-complete-p counts)))
+    (format t "~&;; coverage gate: ~:[FAIL~;PASS~] (required: 100.00%)~%"
+            complete-p)
+    (format t ";; expressions: ~D/~D (~,2F%)~%"
+            (getf counts :expressions-covered)
+            (getf counts :expressions-total)
+            (coverage-percentage (getf counts :expressions-covered)
+                                 (getf counts :expressions-total)))
+    (format t ";; branches: ~D/~D (~,2F%)~%"
+            (getf counts :branches-covered)
+            (getf counts :branches-total)
+            (coverage-percentage (getf counts :branches-covered)
+                                 (getf counts :branches-total)))
+    complete-p))
 
 (let ((report-directory (cl-prolog.bootstrap:repo-file "coverage/")))
   (report-coverage report-directory)
   (format t "~&;; HTML report: ~Acover-index.html~%" (namestring report-directory))
-  (sb-ext:exit :code 0))
+  (sb-ext:exit :code (if (print-coverage-gate (coverage-counts)) 0 1)))
