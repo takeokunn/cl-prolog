@@ -135,8 +135,10 @@ Combinators: `dcg-alt`, `dcg-opt`, `dcg-star`, `dcg-plus`,
   definition order is preserved.
 - **Cut** prunes the running clause's remaining choice points and the
   predicate's remaining rule clauses.
-- **Depth bound**: rule resolution is bounded by `:max-depth`
-  (default `*max-prolog-depth*`, 64), so left-recursive rulebases terminate.
+- **Optional depth bound**: rule resolution is unbounded by default.  Set
+  `:max-depth` to a non-negative integer to bound user-rule resolution;
+  exhaustion signals `prolog-depth-limit-exceeded` rather than masquerading
+  as logical failure.
 - **Occurs check** is always on; unification never builds cyclic terms.
 
 ## Documentation

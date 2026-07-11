@@ -10,37 +10,36 @@
           (%unify-sequence (cdr pairs) extended continuation)))))
 
 (define-builtin (member item list-term) (rulebase environment depth emit)
-  (labels ((visit (tail current-environment remaining-depth)
-             (when (plusp remaining-depth)
-               (let ((head (fresh-logic-variable "?MEMBER-HEAD"))
-                     (rest (fresh-logic-variable "?MEMBER-TAIL")))
-                 (%unify-sequence
-                  (list (cons tail (cons head rest)))
-                  current-environment
-                  (lambda (extended)
-                    (%unify-emit item head extended emit)
-                    (visit rest extended (1- remaining-depth))))))))
-    (visit list-term environment depth)))
+  (declare (ignore rulebase depth))
+  (labels ((visit (tail current-environment)
+             (let ((head (fresh-logic-variable "?MEMBER-HEAD"))
+                   (rest (fresh-logic-variable "?MEMBER-TAIL")))
+               (%unify-sequence
+                (list (cons tail (cons head rest)))
+                current-environment
+                (lambda (extended)
+                  (%unify-emit item head extended emit)
+                  (visit rest extended))))))
+    (visit list-term environment)))
 
 (define-builtin (append left right result) (rulebase environment depth emit)
-  (labels ((join (left-tail result-tail current-environment remaining-depth)
+  (declare (ignore rulebase depth))
+  (labels ((join (left-tail result-tail current-environment)
              ;; append([], Ys, Ys).
              (%unify-sequence
               (list (cons left-tail nil) (cons right result-tail))
               current-environment emit)
              ;; append([X|Xs], Ys, [X|Zs]) :- append(Xs, Ys, Zs).
-             (when (plusp remaining-depth)
-               (let ((head (fresh-logic-variable "?APPEND-HEAD"))
-                     (left-rest (fresh-logic-variable "?APPEND-LEFT"))
-                     (result-rest (fresh-logic-variable "?APPEND-RESULT")))
-                 (%unify-sequence
-                  (list (cons left-tail (cons head left-rest))
-                        (cons result-tail (cons head result-rest)))
-                  current-environment
-                  (lambda (extended)
-                    (join left-rest result-rest extended
-                          (1- remaining-depth))))))))
-    (join left result environment depth)))
+             (let ((head (fresh-logic-variable "?APPEND-HEAD"))
+                   (left-rest (fresh-logic-variable "?APPEND-LEFT"))
+                   (result-rest (fresh-logic-variable "?APPEND-RESULT")))
+               (%unify-sequence
+                (list (cons left-tail (cons head left-rest))
+                      (cons result-tail (cons head result-rest)))
+                current-environment
+                (lambda (extended)
+                  (join left-rest result-rest extended))))))
+    (join left result environment)))
 
 (define-builtin (reverse forward backward) (rulebase environment depth emit)
   (let ((forward-value (logic-substitute forward environment))

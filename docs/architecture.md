@@ -83,7 +83,7 @@ runtime, so rule data can be treated as inert.
 - for each goal: `predicate-true-p` hook, then facts, then rules
 - facts and rules keep definition order within their group
 - rule and fact variables are freshly renamed per use
-- `:max-depth` decrements per rule resolution, bounding left recursion
+- `:max-depth` decrements only per user-rule resolution; `NIL` is unbounded
 - `dcg-star` refuses zero-progress repetitions, bounding nullable grammars
 
 ## Macro-First Surface

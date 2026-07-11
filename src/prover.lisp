@@ -13,7 +13,9 @@
   "Immutable data carried through the proof-search continuation."
   (rulebase (make-rulebase) :type rulebase :read-only t)
   (bindings '() :type list :read-only t)
-  (remaining-depth *max-prolog-depth* :type integer :read-only t))
+  (remaining-depth *max-prolog-depth*
+                   :type (or null (integer 0 *))
+                   :read-only t))
 
 (defun %state-with-bindings (state bindings)
   "Return STATE advanced with BINDINGS while preserving its search budget."
@@ -21,11 +23,14 @@
                      bindings
                      (proof-state-remaining-depth state)))
 
-(defun %state-descending-into-rule (state bindings)
+(defun %state-descending-into-rule (state bindings goal)
   "Return the state for proving a matched rule body."
-  (%make-proof-state (proof-state-rulebase state)
-                     bindings
-                     (1- (proof-state-remaining-depth state))))
+  (let ((remaining (proof-state-remaining-depth state)))
+    (when (eql remaining 0)
+      (error 'prolog-depth-limit-exceeded :goal goal))
+    (%make-proof-state (proof-state-rulebase state)
+                       bindings
+                       (and remaining (1- remaining)))))
 
 (defun %conjunction-p (query)
   "True when QUERY is already a list of goals rather than a single goal."
@@ -76,33 +81,31 @@
 
 Return true when a cut fired inside GOALS, so the caller can prune its own
 alternatives as well."
-  (%with-depth-guard (proof-state-remaining-depth state)
-    (if (endp goals)
-        (progn (funcall succeed state) nil)
-        (%with-cut-barrier
-          (%prove-goal/k (first goals) state
+  (if (endp goals)
+      (progn (funcall succeed state) nil)
+      (%with-cut-barrier
+        (%prove-goal/k (first goals) state
                        (lambda (next-state)
                          (when (%prove-goals/k (rest goals) next-state succeed)
-                           (%propagate-cut))))))))
+                           (%propagate-cut)))))))
 
 (defun %prove-goal/k (goal state succeed)
   "Prove GOAL from STATE, dispatching each result to SUCCEED."
-  (%with-depth-guard (proof-state-remaining-depth state)
-    (let ((normalized-goal (%ensure-goal-form goal)))
-      (cond
-        ((not (%goal-form-p normalized-goal))
-         (%invalid-goal goal "a goal must be a symbol or a list headed by a symbol"))
-        (t
-         (let ((solver (%goal-solver (first normalized-goal))))
-           (if solver
-               (funcall solver
-                        normalized-goal
-                        (proof-state-rulebase state)
-                        (proof-state-bindings state)
-                        (proof-state-remaining-depth state)
-                        (lambda (bindings)
-                          (funcall succeed (%state-with-bindings state bindings))))
-               (%prove-clauses/k normalized-goal state succeed))))))))
+  (let ((normalized-goal (%ensure-goal-form goal)))
+    (cond
+      ((not (%goal-form-p normalized-goal))
+       (%invalid-goal goal "a goal must be a symbol or a list headed by a symbol"))
+      (t
+       (let ((solver (%goal-solver (first normalized-goal))))
+         (if solver
+             (funcall solver
+                      normalized-goal
+                      (proof-state-rulebase state)
+                      (proof-state-bindings state)
+                      (proof-state-remaining-depth state)
+                      (lambda (bindings)
+                        (funcall succeed (%state-with-bindings state bindings))))
+             (%prove-clauses/k normalized-goal state succeed)))))))
 
 (defun %prove-bindings/k (query rulebase bindings remaining-depth succeed)
   "Prove QUERY and call SUCCEED with each resulting binding environment."
@@ -117,8 +120,7 @@ alternatives as well."
   (dolist (clause (copy-list (rulebase-clauses (proof-state-rulebase state))))
     (if (null (clause-body clause))
         (%continue-matching-fact goal clause state succeed)
-        (when (and (plusp (proof-state-remaining-depth state))
-                   (%matching-rule-p goal clause))
+        (when (%matching-rule-p goal clause)
           (%prove-rule/k goal clause state succeed)))))
 
 (defun %prove-rule/k (goal clause state succeed)
@@ -129,7 +131,7 @@ alternatives as well."
       (when ok
         (when (%prove-goals/k
                (clause-body fresh-rule)
-               (%state-descending-into-rule state extended)
+               (%state-descending-into-rule state extended goal)
                succeed)
           (%propagate-cut))))))
 

@@ -20,7 +20,8 @@
 
 (defun %decode-query-options (options)
   "Return query option values as (VALUES MAX-DEPTH ENVIRONMENT PROJECT LIMIT)."
-  (values (%query-option options :max-depth *max-prolog-depth*)
+  (values (%validate-max-depth
+           (%query-option options :max-depth *max-prolog-depth*))
           (%query-option options :environment nil)
           (%query-option options :project t)
           (%query-option options :limit nil)))
@@ -88,7 +89,7 @@ when PROJECT is NIL).  LIMIT bounds the number of solutions returned."
 
 (defun prolog-succeeds-p (rulebase query &key (max-depth *max-prolog-depth*))
   "Return true when QUERY has at least one proof in RULEBASE."
-  (%provable-p query rulebase '() max-depth))
+  (%provable-p query rulebase '() (%validate-max-depth max-depth)))
 
 (defun solution-binding (variable solution)
   "Return VARIABLE's value from a solution alist."

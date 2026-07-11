@@ -46,7 +46,8 @@ Conventions:
 - a solution is an alist of query-variable bindings; ground success is `nil`,
   so "one ground proof" is `(nil)` and failure is `()`
 - `:project nil` returns raw proof environments instead
-- `:max-depth` bounds rule resolution (default `*max-prolog-depth*`, 64);
+- `:max-depth` optionally bounds user-rule resolution (the default is `NIL`,
+  meaning unbounded); exhaustion signals `prolog-depth-limit-exceeded`;
   `0` disables rule expansion entirely, facts still match
 - `:limit` must be `nil` or a positive integer
 
@@ -110,7 +111,7 @@ not a symbol or symbol-headed list — signal `invalid-goal-error`
 - goals are resolved against `predicate-true-p`, then facts, then rules —
   facts always come before rules, in definition order within each group
 - rule variables (and variables inside facts) are freshly renamed per use
-- the depth bound decrements per rule resolution, so left recursion
+- an explicit depth bound decrements per user-rule resolution, so left recursion
   terminates with the solutions found within the bound
 
 ## DCG

@@ -12,8 +12,28 @@
 
 (in-package #:cl-prolog)
 
-(defparameter *max-prolog-depth* 64
-  "Default bound on rule-resolution depth during proof search.")
+(defparameter *max-prolog-depth* nil
+  "Default rule-resolution depth bound; NIL means unbounded search.")
+
+(define-condition invalid-max-depth-error (error)
+  ((value :initarg :value :reader invalid-max-depth-error-value))
+  (:report (lambda (condition stream)
+             (format stream ":MAX-DEPTH must be NIL or a non-negative integer, got ~S."
+                     (invalid-max-depth-error-value condition))))
+  (:documentation "Signalled when a query receives an invalid :MAX-DEPTH option."))
+
+(define-condition prolog-depth-limit-exceeded (error)
+  ((goal :initarg :goal :reader prolog-depth-limit-exceeded-goal))
+  (:report (lambda (condition stream)
+             (format stream "Prolog rule-resolution depth limit reached while proving ~S."
+                     (prolog-depth-limit-exceeded-goal condition))))
+  (:documentation "Signalled when proof search would exceed an explicit rule depth bound."))
+
+(defun %validate-max-depth (value)
+  "Return VALUE when it is a valid rule depth bound, otherwise signal an error."
+  (unless (typep value '(or null (integer 0 *)))
+    (error 'invalid-max-depth-error :value value))
+  value)
 
 (define-condition invalid-goal-error (error)
   ((goal :initarg :goal :reader invalid-goal-error-goal)
@@ -67,11 +87,6 @@
   `(handler-case
        (progn ,@body nil)
      (%cut () t)))
-
-(defmacro %with-depth-guard (depth &body body)
-  "Run BODY unless DEPTH is exhausted."
-  `(unless (minusp ,depth)
-     ,@body))
 
 ;;; Builtin goal dispatch
 

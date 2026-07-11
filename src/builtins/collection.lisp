@@ -17,7 +17,7 @@
   (let ((solutions '()))
     (%prove-bindings/k
      (logic-substitute goal environment)
-     rulebase environment (1- depth)
+     rulebase environment depth
      (lambda (extended)
        (push (%freshen-term (logic-substitute template extended)
                             (make-hash-table :test #'eq))
@@ -38,7 +38,7 @@
   (let ((solutions '()))
     (%prove-bindings/k
      (logic-substitute goal environment)
-     rulebase environment (1- depth)
+     rulebase environment depth
      (lambda (extended)
        (let ((table (make-hash-table :test #'eq)))
          (push (cons (%freshen-term

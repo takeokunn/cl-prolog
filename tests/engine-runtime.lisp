@@ -37,11 +37,43 @@
       ((color ?x) (= ?x derived))))
   ((color ?x) => (((?x . red)) ((?x . derived)))))
 
-(deftest-queries depth-bound-terminates-recursion
+(deftest-queries depth-bound-signals-incomplete-search
     ((prolog
       ((loop-forever) (loop-forever))))
-  ((loop-forever) => () :max-depth 16)
-  ((loop-forever) :fails :max-depth 16))
+  ((loop-forever) :signals :max-depth 16))
+
+(deftest depth-counts-only-user-rule-resolution ()
+  (let ((rb (prolog
+              ((ready))
+              ((through-call) (call ready))
+              ((through-not) (not missing)))))
+    (is-equal '(nil) (query-prolog rb '(ready) :max-depth 0))
+    (is-equal '(nil) (query-prolog rb '(through-call) :max-depth 1))
+    (is-equal '(nil) (query-prolog rb '(through-not) :max-depth 1))
+    (handler-case
+        (progn
+          (query-prolog rb '(through-call) :max-depth 0)
+          (error "Expected a PROLOG-DEPTH-LIMIT-EXCEEDED"))
+      (prolog-depth-limit-exceeded (condition)
+        (is-equal '(through-call)
+                  (prolog-depth-limit-exceeded-goal condition))))))
+
+(deftest finite-proofs-are-unbounded-by-default ()
+  (let ((rb (make-rulebase)))
+    (labels ((predicate-at (index)
+               (intern (format nil "DEPTH-~D" index) *package*)))
+      (rulebase-insert-clause! rb (make-clause (list (predicate-at 0))))
+      (loop for index from 1 to 65
+            do (rulebase-insert-clause!
+                rb
+                (make-clause (list (predicate-at index))
+                             (list (list (predicate-at (1- index)))))))
+      (is-equal '(nil) (query-prolog rb (list (predicate-at 65))))
+      (is (handler-case
+              (progn
+                (query-prolog rb (list (predicate-at 65)) :max-depth 64)
+                nil)
+            (prolog-depth-limit-exceeded () t))))))
 
 (deftest foreign-predicate-hook ()
   (let ((rb (make-family-rulebase))
@@ -71,7 +103,14 @@
     (let ((raw (query-prolog rb '(ancestor ?x bob) :project nil)))
       (is-equal 1 (length raw))
       (is (assoc '?x (first raw))))
-    (assert-query rb (ancestor tom ?who) => () :max-depth -1)))
+    (handler-case
+        (progn
+          (query-prolog rb '(ancestor tom ?who) :max-depth -1)
+          (error "Expected an INVALID-MAX-DEPTH-ERROR"))
+      (invalid-max-depth-error (condition)
+        (is-equal -1 (invalid-max-depth-error-value condition))))
+    (is (signals-error
+         (prolog-succeeds-p rb '(ancestor tom ?who) :max-depth 1.5)))))
 
 (deftest-table default-query-projection-paths ()
   (:equal '(((?x . tom)))
@@ -150,7 +189,4 @@
           (cl-prolog::%normalize-query '((parent tom bob) (parent bob alice))))
   (:equal '(!) (cl-prolog::%normalize-query '!))
   (:equal nil (cl-prolog::%with-cut-barrier :ok))
-  (:is (cl-prolog::%with-cut-barrier (cl-prolog::%propagate-cut)))
-  (:equal '(unless (minusp depth) (run))
-          (with-macroexpansion (expansion '(cl-prolog::%with-depth-guard depth (run)))
-            expansion)))
+  (:is (cl-prolog::%with-cut-barrier (cl-prolog::%propagate-cut))))

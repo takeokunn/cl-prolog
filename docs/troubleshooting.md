@@ -38,9 +38,11 @@ Inspect the whole solution first:
 
 Ground success therefore looks like `nil` plus `t`, not an empty alist.
 
-## `:max-depth 0` made a derived rule fail
+## `:max-depth 0` rejected a derived rule
 
-That is expected. Depth limits apply to rule expansion.
+That is expected. Depth limits apply to user-rule expansion, and exhaustion
+signals `prolog-depth-limit-exceeded` so an incomplete search is never
+reported as logical failure.
 
 - `0`: facts and built-ins only
 - `1`: one rule expansion
