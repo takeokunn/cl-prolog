@@ -11,7 +11,7 @@
 
 Rulebases are plain data (see PROLOG, DEFINE-RULEBASE), proof search is
 continuation-passing (see MAP-PROLOG-SOLUTIONS), and the builtin goal set
-is extensible (see DEFINE-BUILTIN).")
+is extensible (see DEFINE-FOREIGN-PREDICATE).")
   (:export
    ;; data
    #:clause
@@ -82,6 +82,7 @@ is extensible (see DEFINE-BUILTIN).")
    #:soft-if-then-else
    #:catch
    #:throw
+   #:unify_with_occurs_check
    #:repeat
    #:findall
    #:bagof

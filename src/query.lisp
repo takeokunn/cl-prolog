@@ -47,7 +47,9 @@ after that many solutions.  Returns NIL."
       (block search
         (%prove-goals/k
          (%normalize-query query)
-         (%make-proof-state rulebase environment max-depth)
+         (%make-proof-state rulebase environment max-depth
+                            +default-prolog-module+
+                            (%make-rulebase-table-session rulebase))
          (lambda (state)
            (let ((bindings (proof-state-bindings state)))
              (funcall function (if project

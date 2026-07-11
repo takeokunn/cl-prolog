@@ -158,12 +158,35 @@
 
 ;;; Builtin goal dispatch
 
-(defgeneric %goal-solver (predicate)
-  (:documentation "Return the immutable builtin solver associated with PREDICATE."))
+(defvar *fixed-builtin-solvers* (make-hash-table :test #'equal))
+(defvar *variadic-builtin-solvers* (make-hash-table :test #'eq))
 
-(defmethod %goal-solver (predicate)
-  (declare (cl:ignore predicate))
-  nil)
+(defun %goal-solver (predicate arity)
+  "Return the builtin solver registered for PREDICATE/ARITY, if any."
+  (or (gethash (cons predicate arity) *fixed-builtin-solvers*)
+      (let ((entry (gethash predicate *variadic-builtin-solvers*)))
+        (when (and entry (>= arity (car entry)))
+          (cdr entry)))))
+
+(defvar *builtin-predicate-indicators* '())
+
+(defun %register-builtin-predicate! (predicate arity)
+  "Register the canonical indicator exposed by CURRENT-PREDICATE/1."
+  (pushnew (list predicate '/ arity) *builtin-predicate-indicators*
+           :test #'equal)
+  predicate)
+
+(defun %register-builtin-solver! (predicate minimum maximum solver)
+  "Register SOLVER for PREDICATE, replacing a definition loaded previously."
+  (if maximum
+      (setf (gethash (cons predicate maximum) *fixed-builtin-solvers*) solver)
+      (setf (gethash predicate *variadic-builtin-solvers*)
+            (cons minimum solver)))
+  (%register-builtin-predicate! predicate minimum))
+
+(defun %builtin-predicate-indicators ()
+  "Return a detached snapshot of builtin predicate indicators."
+  (reverse (copy-list *builtin-predicate-indicators*)))
 
 (defun %check-goal-arity (goal minimum maximum)
   (let ((arity (length (rest goal))))
@@ -186,7 +209,8 @@
 
 NAME may also be a list of head symbols sharing one solver.  ARGUMENT-LIST
 is an ordinary lambda list (only required parameters and &REST are
-supported); its arity is enforced against each goal before BODY runs.
+supported).  Fixed-arity builtins dispatch on their exact predicate indicator;
+variadic builtins dispatch only at or above their required arity.
 BODY must call EMIT with one extended environment per solution."
   (multiple-value-bind (minimum maximum)
       (%argument-list-arity argument-list)
@@ -195,17 +219,24 @@ BODY must call EMIT with one extended environment per solution."
       `(progn
          ,@(mapcar
             (lambda (builtin-name)
-              `(defmethod %goal-solver ((predicate (eql ',builtin-name)))
-                 (declare (cl:ignore predicate))
-                 (lambda (,goal ,rulebase ,environment ,depth ,emit)
-                   (declare (ignorable ,rulebase ,environment ,depth ,emit))
-                   (%check-goal-arity ,goal ,minimum ,maximum)
-                   (destructuring-bind ,argument-list (rest ,goal)
-                     ,@body))))
+              `(eval-when (:load-toplevel :execute)
+                 (%register-builtin-solver!
+                  ',builtin-name ,minimum ,maximum
+                  (lambda (,goal ,rulebase ,environment ,depth ,emit)
+                    (declare (ignorable ,rulebase ,environment ,depth ,emit))
+                    (%check-goal-arity ,goal ,minimum ,maximum)
+                    (destructuring-bind ,argument-list (rest ,goal)
+                      ,@body)))))
             names)
          ',(first names)))))
 
 ;;; Foreign predicate dispatch
+
+(defvar *foreign-predicate-indicators* '())
+
+(defun %foreign-predicate-indicators ()
+  "Return a detached snapshot of registered foreign predicate indicators."
+  (reverse (copy-list *foreign-predicate-indicators*)))
 
 (defgeneric %foreign-goal-solver (predicate arity)
   (:documentation
@@ -229,10 +260,14 @@ zero times fails; calling it repeatedly produces multiple solutions."
            argument-list))
   (let ((goal (gensym "GOAL"))
         (arity (length argument-list)))
-    `(defmethod %foreign-goal-solver ((predicate (eql ',name))
-                                     (arity (eql ,arity)))
-       (declare (cl:ignore predicate arity))
-       (lambda (,goal ,rulebase ,environment ,depth ,emit)
-         (declare (ignorable ,rulebase ,environment ,depth ,emit))
-         (destructuring-bind ,argument-list (rest ,goal)
-           ,@body)))))
+    `(progn
+       (eval-when (:load-toplevel :execute)
+         (pushnew (list ',name '/ ,arity) *foreign-predicate-indicators*
+                  :test #'equal))
+       (defmethod %foreign-goal-solver ((predicate (eql ',name))
+                                       (arity (eql ,arity)))
+         (declare (cl:ignore predicate arity))
+         (lambda (,goal ,rulebase ,environment ,depth ,emit)
+           (declare (ignorable ,rulebase ,environment ,depth ,emit))
+           (destructuring-bind ,argument-list (rest ,goal)
+             ,@body))))))

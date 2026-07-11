@@ -15,6 +15,11 @@
 (define-builtin (= left right) (rulebase environment depth emit)
   (%unify-emit left right environment emit))
 
+(define-builtin (unify_with_occurs_check left right)
+    (rulebase environment depth emit)
+  ;; UNIFY always performs the occurs check.
+  (%unify-emit left right environment emit))
+
 (define-builtin ((/= !=) left right) (rulebase environment depth emit)
   (unless (nth-value 1 (unify left right environment))
     (funcall emit environment)))
@@ -24,17 +29,19 @@
                        rulebase environment depth)
     (funcall emit environment)))
 
-(defun %extend-callable-goal (closure arguments)
+(defun %extend-callable-goal (closure arguments environment)
   "Append ARGUMENTS to CLOSURE, returning an engine-level goal form."
   (cond
     ((logic-var-p closure)
-     (%invalid-goal closure "CALL/N requires an instantiated callable term"))
+     (%raise-instantiation-error environment (%iso-atom "CALL")
+                                 "CALL/N requires an instantiated callable term"))
     ((symbolp closure)
      (cons closure arguments))
     ((and (consp closure) (symbolp (first closure)))
      (append closure arguments))
     (t
-     (%invalid-goal closure "CALL/N requires a callable atom or compound term"))))
+     (%raise-type-error "CALLABLE" closure environment (%iso-atom "CALL")
+                        "CALL/N requires a callable atom or compound term"))))
 
 (define-builtin (call closure &rest arguments) (rulebase environment depth emit)
   (let ((resolved-closure (logic-substitute closure environment))
@@ -43,7 +50,7 @@
                     (logic-substitute argument environment))
                   arguments)))
     (%prove-bindings/k
-     (%extend-callable-goal resolved-closure resolved-arguments)
+     (%extend-callable-goal resolved-closure resolved-arguments environment)
      rulebase environment depth emit)))
 
 (define-builtin (once goal) (rulebase environment depth emit)
@@ -150,7 +157,11 @@
 
 (define-builtin (throw ball) (rulebase environment depth emit)
   (declare (cl:ignore rulebase depth emit))
-  (%raise-prolog-exception (logic-substitute ball environment) environment))
+  (let ((resolved-ball (logic-substitute ball environment)))
+    (when (logic-var-p resolved-ball)
+      (%raise-instantiation-error environment (%iso-atom "THROW")
+                                  "THROW/1 requires a non-variable ball"))
+    (%raise-prolog-exception resolved-ball environment)))
 
 (define-builtin (catch goal catcher recover) (rulebase environment depth emit)
   (handler-case
@@ -158,17 +169,15 @@
        (logic-substitute goal environment)
        rulebase environment depth emit)
     (prolog-exception (condition)
-      (let ((thrown-environment
-              (or (%prolog-exception-environment condition) environment)))
-        (multiple-value-bind (recovery-environment matched-p)
-            (unify (prolog-exception-term condition)
-                   (logic-substitute catcher thrown-environment)
-                   thrown-environment)
-          (if matched-p
-              (%prove-bindings/k
-               (logic-substitute recover recovery-environment)
-               rulebase recovery-environment depth emit)
-              (error condition)))))))
+      (multiple-value-bind (recovery-environment matched-p)
+          (unify (prolog-exception-term condition)
+                 (logic-substitute catcher environment)
+                 environment)
+        (if matched-p
+            (%prove-bindings/k
+             (logic-substitute recover recovery-environment)
+             rulebase recovery-environment depth emit)
+            (error condition))))))
 
 (define-builtin (repeat) (rulebase environment depth emit)
   (declare (cl:ignore rulebase depth))

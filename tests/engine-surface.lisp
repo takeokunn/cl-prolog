@@ -16,6 +16,11 @@
   (:exported "RULEBASE-VISIBLE-CLAUSES" "CL-PROLOG")
   (:not-exported "RULEBASE-CLAUSES" "CL-PROLOG")
   (:not-exported "RULEBASE-REMOVE-CLAUSE!" "CL-PROLOG")
+  (:exported "TERM_VARIABLES" "CL-PROLOG")
+  (:not-exported "TERM-VARIABLES" "CL-PROLOG")
+  (:exported "COPY_TERM" "CL-PROLOG")
+  (:exported "UNIFY_WITH_OCCURS_CHECK" "CL-PROLOG")
+  (:not-exported "COPY-TERM" "CL-PROLOG")
   (:exported "INVALID-GOAL-ERROR" "CL-PROLOG")
   (:not-exported "SUBSTITUTE-TERM" "CL-PROLOG")
   (:not-exported "*MAX-PROOF-DEPTH*" "CL-PROLOG")
@@ -30,6 +35,17 @@
   (:is-not (logic-var-p 'plain))
   (:is-not (logic-var-p (make-symbol "")))
   (:is-not (logic-var-p 42)))
+
+(deftest exported-term-builtin-names-dispatch ()
+  (let ((rulebase (make-rulebase)))
+    (is-equal '(((?x . ?x) (?y . ?y) (?variables ?x ?y)))
+              (query-prolog rulebase
+                            '(term_variables (pair ?x ?y ?x) ?variables)))
+    (let* ((solution (query-prolog-first
+                      rulebase '(copy_term (pair ?x ?x) ?copy)))
+           (copy (solution-binding '?copy solution)))
+      (is (logic-var-p (second copy)))
+      (is (eq (second copy) (third copy))))))
 
 (deftest rulebase-data-model ()
   (let ((rb (prolog
