@@ -7,7 +7,7 @@
   (:exported "PROLOG" "FX.PROLOG")
   (:exported "QUERY-PROLOG" "FX.PROLOG")
   (:exported "MAP-PROLOG-SOLUTIONS" "FX.PROLOG")
-  (:exported "DEFINE-BUILTIN" "FX.PROLOG")
+  (:not-exported "DEFINE-BUILTIN" "FX.PROLOG")
   (:exported "DEF-RULE" "FX.PROLOG")
   (:exported "PHRASE" "FX.PROLOG")
   (:exported "UNIFY" "FX.PROLOG")
@@ -55,26 +55,22 @@
   (:signals (macroexpand-1 '(prolog ready))
             "A clause must be a list"))
 
-(deftest-tree-contains def-rule-expands-to-load-time-registration
+(deftest-tree-contains def-rule-expands-to-clause-construction
     ((macroexpand-1 '(def-rule (warm ?x) (planet ?x))))
-  eval-when
-  fx.prolog::%register-global-rule
+  make-clause
   '(warm ?x)
   '(list '(planet ?x)))
 
-(deftest mutable-global-rulebase ()
-  (with-clean-global-rulebase
-    (rulebase-insert-clause! *global-rulebase* (make-clause '(planet earth)))
-    (rulebase-insert-clause! *global-rulebase*
-                             (make-clause '(inhabited ?x) '((planet ?x))))
-    (is-equal '(warm ?x)
-              (fx.prolog::%register-global-rule '(warm ?x) '((planet ?x))))
-    (is-equal '(nil) (query-prolog *global-rulebase* '(planet earth)))
-    (is-equal '(nil) (query-prolog *global-rulebase* '(inhabited earth)))
-    (is-equal '(nil) (query-prolog *global-rulebase* '(warm earth)))
-    (clear-global-rulebase!)
-    (is-equal '() (query-prolog *global-rulebase* '(planet earth)))
-    (is-equal '() (rulebase-clauses *global-rulebase*))))
+(deftest explicit-rulebase-composition ()
+  (let* ((warm-rule (def-rule (warm ?x) (planet ?x)))
+         (rulebase (make-rulebase
+                    :clauses (list (make-clause '(planet earth))
+                                   (make-clause '(inhabited ?x) '((planet ?x)))
+                                   warm-rule))))
+    (is-equal '(warm ?x) (clause-head warm-rule))
+    (is-equal '(nil) (query-prolog rulebase '(planet earth)))
+    (is-equal '(nil) (query-prolog rulebase '(inhabited earth)))
+    (is-equal '(nil) (query-prolog rulebase '(warm earth)))))
 
 (deftest extend-rulebase-shadowing ()
   (let* ((base (prolog ((color apple red))))
@@ -148,10 +144,10 @@
                         '(def-rule (even ?x)
                            (n ?x)
                            (:when (evenp ?x))))
-    (is (%tree-contains-p expansion 'eval-when))
-    (is (%tree-contains-p expansion 'fx.prolog::%register-global-rule))
+    (is (%tree-contains-p expansion 'make-clause))
     (is (%tree-contains-p expansion 'lambda))
     (is (%tree-contains-p expansion 'evenp))
+    (is (not (%tree-contains-p expansion 'eval-when)))
     (is (not (%tree-contains-p expansion 'eval)))))
 
 (deftest with-prolog-query-and-match ()

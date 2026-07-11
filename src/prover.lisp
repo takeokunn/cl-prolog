@@ -32,10 +32,6 @@
       (list goal)
       goal))
 
-(defun %goal-solver (goal)
-  "Return the builtin solver for GOAL, or NIL when clause search should run."
-  (gethash (first goal) *builtin-solvers*))
-
 (defun %emit-foreign-proof (goal environment emit)
   "Emit ENVIRONMENT when the foreign predicate hook proves GOAL."
   (when (predicate-true-p (first goal) (rest goal) environment)
@@ -77,7 +73,7 @@ alternatives as well."
         ((not (%goal-form-p normalized-goal))
          (%invalid-goal goal "a goal must be a symbol or a list headed by a symbol"))
         (t
-         (let ((solver (%goal-solver normalized-goal)))
+         (let ((solver (%goal-solver (first normalized-goal))))
            (if solver
                (funcall solver normalized-goal rulebase environment depth emit)
                (%prove-with-clauses normalized-goal rulebase environment depth emit))))))))

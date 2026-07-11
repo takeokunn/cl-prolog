@@ -11,8 +11,7 @@
            #:is-equal
            #:is-same-set
            #:signals-error
-           #:make-family-rulebase
-           #:with-clean-global-rulebase))
+           #:make-family-rulebase))
 
 (in-package #:fx.prolog.tests)
 

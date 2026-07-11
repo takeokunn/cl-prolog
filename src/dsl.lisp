@@ -27,15 +27,9 @@ over their logic variables."
        (make-rulebase :clauses (append (rulebase-clauses ,extension)
                                        (rulebase-clauses ,base))))))
 
-(defun %register-global-rule (head body)
-  "Insert the rule HEAD :- BODY into *GLOBAL-RULEBASE* and return HEAD."
-  (rulebase-insert-clause! *global-rulebase* (make-clause head body))
-  head)
-
 (defmacro def-rule (head &body body)
-  "Register the rule HEAD :- BODY in *GLOBAL-RULEBASE* at load time."
-  `(eval-when (:load-toplevel :execute)
-     (%register-global-rule ',head ,(%rule-body-form body))))
+  "Return a clause value for HEAD :- BODY without mutating a rulebase."
+  `(make-clause ',head ,(%rule-body-form body)))
 
 (defmacro with-prolog-query (binding-vars (rulebase query &key (max-depth '*max-prolog-depth*))
                              &body body)

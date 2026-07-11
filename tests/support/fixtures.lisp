@@ -31,8 +31,3 @@
     ((ancestor ?x ?y) (parent ?x ?y))
     ((ancestor ?x ?y) (parent ?x ?z) (ancestor ?z ?y))
     ((grandparent ?x ?z) (parent ?x ?y) (parent ?y ?z))))
-
-(defmacro with-clean-global-rulebase (&body body)
-  `(let ((*global-rulebase* (make-rulebase))
-         (*recorded-colors* '()))
-     ,@body))

@@ -1,4 +1,4 @@
-;;;; Query expectation helpers and temporary builtin registration.
+;;;; Query expectation helpers.
 
 (in-package #:fx.prolog.tests)
 
@@ -71,42 +71,3 @@ Trailing OPTIONS are passed to QUERY-PROLOG or QUERY-PROLOG-FIRST."
         (:succeeds `(is (not (null ,run))))
         (:fails    `(is (null ,run)))
         (:signals  `(signals-error ,run))))))
-
-(defmacro with-test-builtin (((names-form &rest argument-list)
-                              (rulebase environment depth emit)
-                              &body body)
-                             &body forms)
-  "Register a temporary builtin for test FORMS and evaluate them.
-
-NAMES-FORM may evaluate to a symbol or a list of alias symbols.  The
-lambda list follows DEFINE-BUILTIN so tests can exercise the same arity
-rules without going through EVAL inside the timeout harness."
-  (let ((arguments (gensym "ARGUMENTS"))
-        (names (gensym "NAMES"))
-        (saved-solvers (gensym "SAVED-SOLVERS")))
-    `(let* ((,names (let ((value ,names-form))
-                      (if (listp value) value (list value))))
-            (,saved-solvers
-              (mapcar (lambda (builtin-name)
-                        (multiple-value-bind (solver present-p)
-                            (gethash builtin-name fx.prolog::*builtin-solvers*)
-                          (list builtin-name present-p solver)))
-                      ,names)))
-       (unwind-protect
-            (progn
-              (multiple-value-bind (minimum maximum)
-                  (fx.prolog::%argument-list-arity ',argument-list)
-                (fx.prolog::%register-builtins
-                 ,names
-                 minimum
-                 maximum
-                 (lambda (,arguments ,rulebase ,environment ,depth ,emit)
-                   (declare (ignorable ,rulebase ,environment ,depth ,emit))
-                   (destructuring-bind ,argument-list ,arguments
-                     ,@body))))
-              ,@forms)
-         (dolist (entry ,saved-solvers)
-           (destructuring-bind (builtin-name present-p previous) entry
-             (if present-p
-                 (setf (gethash builtin-name fx.prolog::*builtin-solvers*) previous)
-                 (remhash builtin-name fx.prolog::*builtin-solvers*))))))))

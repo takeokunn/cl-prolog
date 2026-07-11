@@ -18,8 +18,6 @@ is extensible (see DEFINE-BUILTIN).")
    #:rulebase-p
    #:rulebase-clauses
    #:make-rulebase
-   #:*global-rulebase*
-   #:clear-global-rulebase!
    #:rulebase-insert-clause!
    #:rulebase-remove-clause!
    ;; unification
@@ -34,7 +32,6 @@ is extensible (see DEFINE-BUILTIN).")
    #:arithmetic-evaluation-error
    #:arithmetic-error-expression
    #:arithmetic-error-reason
-   #:define-builtin
    #:predicate-true-p
    ;; queries
    #:map-prolog-solutions

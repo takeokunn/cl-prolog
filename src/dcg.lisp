@@ -51,26 +51,26 @@
   (%thread-dcg-elements body stream-in stream-out #'%dcg-element-goals))
 
 (defmacro def-dcg-rule (name &body body)
-  "Define grammar rule NAME in *GLOBAL-RULEBASE*.
+  "Return a grammar clause named NAME.
 
-Expands into a DEF-RULE whose head is (NAME STREAM-IN STREAM-OUT)."
+The clause head is (NAME STREAM-IN STREAM-OUT)."
   (let ((stream-in (fresh-logic-variable "?S-IN"))
         (stream-out (fresh-logic-variable "?S-OUT")))
     `(def-rule (,name ,stream-in ,stream-out)
        ,@(%dcg-body-goals body stream-in stream-out))))
 
-(defun phrase (rule-name input)
-  "Parse INPUT with RULE-NAME against *GLOBAL-RULEBASE*.
+(defun phrase (rulebase rule-name input)
+  "Parse INPUT with RULE-NAME against RULEBASE.
 
 Returns (VALUES REMAINDER MATCHED-P): the unconsumed remainder of the
 first parse and whether any parse exists."
-  (let ((solution (query-prolog-first *global-rulebase*
+  (let ((solution (query-prolog-first rulebase
                                       (list rule-name input '?dcg-rest))))
     (values (solution-binding '?dcg-rest solution)
             (not (null solution)))))
 
-(defun phrase-all (rule-name input)
+(defun phrase-all (rulebase rule-name input)
   "Return the unconsumed remainder of every parse of INPUT with RULE-NAME."
   (mapcar (lambda (solution)
             (solution-binding '?dcg-rest solution))
-          (query-prolog *global-rulebase* (list rule-name input '?dcg-rest))))
+          (query-prolog rulebase (list rule-name input '?dcg-rest))))

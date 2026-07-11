@@ -7,11 +7,12 @@
 
 (in-package #:fx.prolog)
 
-(format t "~&append(?l ?r (a b c)) => ~S~%"
-        (query-prolog *global-rulebase* '(append ?l ?r (a b c))))
-(format t "reverse(?xs (c b a)) => ~S~%"
-        (query-prolog *global-rulebase* '(reverse ?xs (c b a))))
-(format t "length(?xs 3) => ~S~%"
-        (query-prolog-first *global-rulebase* '(length ?xs 3)))
-(format t "member(?x (a b c)) => ~S~%"
-        (query-prolog *global-rulebase* '(member ?x (a b c))))
+(let ((rulebase (make-rulebase)))
+  (format t "~&append(?l ?r (a b c)) => ~S~%"
+          (query-prolog rulebase '(append ?l ?r (a b c))))
+  (format t "reverse(?xs (c b a)) => ~S~%"
+          (query-prolog rulebase '(reverse ?xs (c b a))))
+  (format t "length(?xs 3) => ~S~%"
+          (query-prolog-first rulebase '(length ?xs 3)))
+  (format t "member(?x (a b c)) => ~S~%"
+          (query-prolog rulebase '(member ?x (a b c)))))

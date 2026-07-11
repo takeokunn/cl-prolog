@@ -2,6 +2,18 @@
 
 (in-package #:fx.prolog.tests)
 
+(fx.prolog::define-builtin (test-twice input output)
+    (rulebase environment depth emit)
+  (declare (ignore rulebase depth))
+  (let ((value (logic-substitute input environment)))
+    (when (numberp value)
+      (fx.prolog::%unify-emit output (* 2 value) environment emit))))
+
+(fx.prolog::define-builtin ((test-collect test-collect-alias) output &rest arguments)
+    (rulebase environment depth emit)
+  (declare (ignore rulebase depth))
+  (fx.prolog::%unify-emit output (copy-list arguments) environment emit))
+
 (deftest-queries cut-prunes-clause-alternatives
     ((prolog
       ((choice left))
@@ -79,27 +91,13 @@
                   => (((?p . 1) (?q . 2))))))
 
 (deftest define-builtin-is-extensible ()
-  (let ((name (gensym "TWICE")))
-    (with-test-builtin ((name input output) (rulebase environment depth emit)
-                         (let ((value (logic-substitute input environment)))
-                           (when (numberp value)
-                             (fx.prolog::%unify-emit output (* 2 value) environment emit))))
-      (is-equal '(((?y . 6)))
-                (query-prolog (make-rulebase) (list name 3 '?y))))))
+  (is-equal '(((?y . 6)))
+            (query-prolog (make-rulebase) '(test-twice 3 ?y))))
 
 (deftest define-builtin-supports-aliases-and-rest-arguments ()
-  (let ((primary (gensym "COLLECT"))
-        (alias (gensym "COLLECT-ALIAS")))
-    (with-test-builtin (((list primary alias) output &rest arguments)
-                        (rulebase environment depth emit)
-                        (declare (ignore rulebase depth))
-                        (fx.prolog::%unify-emit output
-                                                (copy-list arguments)
-                                                environment
-                                                emit))
-      (is-equal '(((?arguments . (a b c))))
-                (query-prolog (make-rulebase)
-                              (list alias '?arguments 'a 'b 'c))))))
+  (is-equal '(((?arguments . (a b c))))
+            (query-prolog (make-rulebase)
+                          '(test-collect-alias ?arguments a b c))))
 
 (deftest define-builtin-macroexpand-registers-single-name ()
   (with-macroexpansion (expansion
@@ -110,10 +108,10 @@
                                                    (* 2 (logic-substitute input environment))
                                                    environment
                                                    emit)))
-    (is-equal 'fx.prolog::%register-builtins (first expansion))
-    (is-equal '(quote (twice)) (second expansion))
-    (is-equal 2 (third expansion))
-    (is-equal 2 (fourth expansion))))
+    (is (%tree-contains-p expansion 'defmethod))
+    (is (%tree-contains-p expansion 'fx.prolog::%goal-solver))
+    (is (%tree-contains-p expansion 'eql))
+    (is (%tree-contains-p expansion 'twice))))
 
 (deftest define-builtin-macroexpand-registers-aliases-and-rest ()
   (with-macroexpansion (expansion
@@ -124,10 +122,10 @@
                                                    (copy-list arguments)
                                                    environment
                                                    emit)))
-    (is-equal 'fx.prolog::%register-builtins (first expansion))
-    (is-equal '(quote (collect collect-alias)) (second expansion))
-    (is-equal 1 (third expansion))
-    (is-equal nil (fourth expansion))))
+    (is (%tree-contains-p expansion 'defmethod))
+    (is (%tree-contains-p expansion 'fx.prolog::%goal-solver))
+    (is (%tree-contains-p expansion 'collect))
+    (is (%tree-contains-p expansion 'collect-alias))))
 
 (deftest-table invalid-goal-error-reports-context ()
   (:equal '(= a)

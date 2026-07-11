@@ -17,13 +17,6 @@
   "Return a rulebase containing CLAUSES in resolution order."
   (%make-rulebase (copy-list clauses)))
 
-(defparameter *global-rulebase* (make-rulebase)
-  "Mutable top-level rulebase used by DEF-RULE and the DCG helpers.")
-
-(defun clear-global-rulebase! ()
-  "Reset the mutable top-level rulebase and return it."
-  (setf *global-rulebase* (make-rulebase)))
-
 (defun rulebase-insert-clause! (rulebase clause &key (position :last))
   "Insert CLAUSE at POSITION (:FIRST or :LAST) and return RULEBASE."
   (ecase position

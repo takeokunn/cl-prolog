@@ -36,7 +36,7 @@
   (%freshen-clause clause))
 
 (defun %builtin-predicate-p (predicate)
-  (and (symbolp predicate) (gethash predicate *builtin-solvers*)))
+  (and (symbolp predicate) (%goal-solver predicate)))
 
 (defun %ensure-dynamic-predicate (predicate goal)
   (when (%builtin-predicate-p predicate)

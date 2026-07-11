@@ -49,13 +49,14 @@
   `(unless (minusp ,depth)
      ,@body))
 
-;;; Builtin goal registry
+;;; Builtin goal dispatch
 
-(defvar *builtin-solvers* (make-hash-table :test #'eq)
-  "Map from goal head symbol to its solver function.
+(defgeneric %goal-solver (predicate)
+  (:documentation "Return the immutable builtin solver associated with PREDICATE."))
 
-A solver receives (GOAL RULEBASE ENVIRONMENT DEPTH EMIT) and calls EMIT
-with one extended environment per solution.")
+(defmethod %goal-solver (predicate)
+  (declare (ignore predicate))
+  nil)
 
 (defun %check-goal-arity (goal minimum maximum)
   (let ((arity (length (rest goal))))
@@ -72,25 +73,9 @@ with one extended environment per solution.")
         (values required nil)
         (values (length argument-list) (length argument-list)))))
 
-(defun %register-builtin-solver (names solver)
-  "Register SOLVER for each symbol in NAMES and return the primary name."
-  (dolist (builtin-name names (first names))
-    (setf (gethash builtin-name *builtin-solvers*) solver)))
-
-(defun %register-builtins (names minimum maximum implementation)
-  "Register IMPLEMENTATION as a builtin shared by NAMES.
-
-IMPLEMENTATION receives (ARGUMENTS RULEBASE ENVIRONMENT DEPTH EMIT), where
-ARGUMENTS is the raw goal tail after arity validation."
-  (%register-builtin-solver
-   names
-   (lambda (goal rulebase environment depth emit)
-     (%check-goal-arity goal minimum maximum)
-     (funcall implementation (rest goal) rulebase environment depth emit))))
-
 (defmacro define-builtin ((name &rest argument-list) (rulebase environment depth emit)
                           &body body)
-  "Register a builtin solver for goals of shape (NAME . ARGUMENT-LIST).
+  "Define builtin solvers for goals of shape (NAME . ARGUMENT-LIST).
 
 NAME may also be a list of head symbols sharing one solver.  ARGUMENT-LIST
 is an ordinary lambda list (only required parameters and &REST are
@@ -98,16 +83,20 @@ supported); its arity is enforced against each goal before BODY runs.
 BODY must call EMIT with one extended environment per solution."
   (multiple-value-bind (minimum maximum)
       (%argument-list-arity argument-list)
-    (let ((arguments (gensym "ARGUMENTS"))
+    (let ((goal (gensym "GOAL"))
           (names (if (listp name) name (list name))))
-      `(%register-builtins
-        ',names
-        ,minimum
-        ,maximum
-        (lambda (,arguments ,rulebase ,environment ,depth ,emit)
-          (declare (ignorable ,rulebase ,environment ,depth ,emit))
-          (destructuring-bind ,argument-list ,arguments
-            ,@body))))))
+      `(progn
+         ,@(mapcar
+            (lambda (builtin-name)
+              `(defmethod %goal-solver ((predicate (eql ',builtin-name)))
+                 (declare (ignore predicate))
+                 (lambda (,goal ,rulebase ,environment ,depth ,emit)
+                   (declare (ignorable ,rulebase ,environment ,depth ,emit))
+                   (%check-goal-arity ,goal ,minimum ,maximum)
+                   (destructuring-bind ,argument-list (rest ,goal)
+                     ,@body))))
+            names)
+         ',(first names)))))
 
 ;;; Foreign predicate hook
 

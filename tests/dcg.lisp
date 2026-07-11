@@ -3,46 +3,48 @@
 (in-package #:fx.prolog.tests)
 
 (deftest dcg-phrase-surface ()
-  (with-clean-global-rulebase
-    (def-dcg-rule greeting
-      (terminal :hello)
-      (terminal :world))
+  (let ((rulebase
+          (make-rulebase
+           :clauses (list (def-dcg-rule greeting
+                            (terminal :hello)
+                            (terminal :world))))))
     (multiple-value-bind (rest matched-p)
-        (phrase 'greeting '(:hello :world))
+        (phrase rulebase 'greeting '(:hello :world))
       (is matched-p)
       (is (null rest)))
     (multiple-value-bind (rest matched-p)
-        (phrase 'greeting '(:hello))
+        (phrase rulebase 'greeting '(:hello))
       (is (not matched-p))
       (is (null rest)))
-    (is-equal '(:extra) (phrase 'greeting '(:hello :world :extra)))
-    (is-equal '(nil) (phrase-all 'greeting '(:hello :world)))
-    (is-equal '() (phrase-all 'greeting '(:goodbye)))))
+    (is-equal '(:extra) (phrase rulebase 'greeting '(:hello :world :extra)))
+    (is-equal '(nil) (phrase-all rulebase 'greeting '(:hello :world)))
+    (is-equal '() (phrase-all rulebase 'greeting '(:goodbye)))))
 
 (deftest dcg-combinators ()
-  (with-clean-global-rulebase
-    (def-dcg-rule noun (terminal :noun))
-    (def-dcg-rule verb (terminal :verb))
-    (def-dcg-rule optional-noun (dcg-opt noun))
-    (def-dcg-rule noun-sequence (dcg-plus noun))
-    (def-dcg-rule noun-run (dcg-star noun))
-    (def-dcg-rule maybe-word (dcg-alt noun verb))
-    (def-dcg-rule epsilon)
-    (def-dcg-rule epsilon-run (dcg-star epsilon))
-    (is-equal nil (phrase 'optional-noun '()))
-    (is-equal '(:noun) (phrase 'noun-sequence '(:noun :noun)))
-    (is (not (nth-value 1 (phrase 'noun-sequence '(:verb)))))
-    (is-equal nil (phrase 'noun-run '()))
+  (let ((rulebase
+          (make-rulebase
+           :clauses (list (def-dcg-rule noun (terminal :noun))
+                          (def-dcg-rule verb (terminal :verb))
+                          (def-dcg-rule optional-noun (dcg-opt noun))
+                          (def-dcg-rule noun-sequence (dcg-plus noun))
+                          (def-dcg-rule noun-run (dcg-star noun))
+                          (def-dcg-rule maybe-word (dcg-alt noun verb))
+                          (def-dcg-rule epsilon)
+                          (def-dcg-rule epsilon-run (dcg-star epsilon))))))
+    (is-equal nil (phrase rulebase 'optional-noun '()))
+    (is-equal '(:noun) (phrase rulebase 'noun-sequence '(:noun :noun)))
+    (is (not (nth-value 1 (phrase rulebase 'noun-sequence '(:verb)))))
+    (is-equal nil (phrase rulebase 'noun-run '()))
     (is-same-set '(((?rest . (:noun :noun :verb)))
                    ((?rest . (:noun :verb)))
                    ((?rest . (:verb))))
-                 (query-prolog *global-rulebase*
+                 (query-prolog rulebase
                                '(noun-run (:noun :noun :verb) ?rest)))
-    (is-equal nil (phrase 'maybe-word '(:verb)))
-    (is-equal nil (phrase 'maybe-word '(:noun)))
+    (is-equal nil (phrase rulebase 'maybe-word '(:verb)))
+    (is-equal nil (phrase rulebase 'maybe-word '(:noun)))
     ;; a nullable rule under dcg-star must not loop forever
     (is-equal '(((?rest . (:noun))))
-              (query-prolog *global-rulebase* '(epsilon-run (:noun) ?rest)))))
+              (query-prolog rulebase '(epsilon-run (:noun) ?rest)))))
 
 (deftest-queries dcg-token-builtins ((make-rulebase))
   ((dcg-token-match :noun (:noun :verb) ?rest)  => (((?rest . (:verb)))))
@@ -62,15 +64,16 @@
   ((dcg-error-recovery () ?rest)                   => (((?rest)))))
 
 (deftest dcg-brace-guards ()
-  (with-clean-global-rulebase
-    (def-dcg-rule guarded-noun
-      (terminal :noun)
-      (brace (= 1 1)))
-    (def-dcg-rule blocked-noun
-      (terminal :noun)
-      (brace (= 1 2)))
-    (is (nth-value 1 (phrase 'guarded-noun '(:noun))))
-    (is (not (nth-value 1 (phrase 'blocked-noun '(:noun)))))))
+  (let ((rulebase
+          (make-rulebase
+           :clauses (list (def-dcg-rule guarded-noun
+                            (terminal :noun)
+                            (brace (= 1 1)))
+                          (def-dcg-rule blocked-noun
+                            (terminal :noun)
+                            (brace (= 1 2)))))))
+    (is (nth-value 1 (phrase rulebase 'guarded-noun '(:noun))))
+    (is (not (nth-value 1 (phrase rulebase 'blocked-noun '(:noun)))))))
 
 (deftest dcg-expansion-internals ()
   (is-equal '((:when t) (= ?in ?out))
@@ -82,8 +85,7 @@
   (is (signals-error (with-macroexpansion (expansion '(def-dcg-rule broken 42))
                        expansion))
       "Unknown DCG body elements must fail at expansion time")
-  (with-clean-global-rulebase
-    (def-dcg-rule empty)
-    (is-equal nil (phrase 'empty '()))
-    (is-equal '(:token) (phrase 'empty '(:token))
+  (let ((rulebase (make-rulebase :clauses (list (def-dcg-rule empty)))))
+    (is-equal nil (phrase rulebase 'empty '()))
+    (is-equal '(:token) (phrase rulebase 'empty '(:token))
               "An empty rule consumes nothing and leaves the input intact")))
