@@ -50,6 +50,50 @@
 (defun %dcg-body-goals (body stream-in stream-out)
   (%thread-dcg-elements body stream-in stream-out #'%dcg-element-goals))
 
+(defun %dcg-call-with-streams (call stream-in stream-out)
+  (append (if (consp call) call (list call))
+          (list stream-in stream-out)))
+
+(defun %prolog-dcg-goal (body stream-in stream-out)
+  "Translate a parsed Prolog DCG body into one ordinary engine goal."
+  (cond
+    ((null body) `(= ,stream-in ,stream-out))
+    ((and (consp body) (eq (first body) 'and))
+     (let ((midpoint (fresh-logic-variable "?DCG")))
+       `(and ,(%prolog-dcg-goal (second body) stream-in midpoint)
+             ,(%prolog-dcg-goal
+               (if (cdddr body) (cons 'and (cddr body)) (third body))
+               midpoint stream-out))))
+    ((and (consp body) (eq (first body) 'or))
+     (cons 'or
+           (mapcar (lambda (alternative)
+                     (%prolog-dcg-goal alternative stream-in stream-out))
+                   (rest body))))
+    ((%dcg-tag-p body "BRACE")
+     `(and ,(second body) (= ,stream-in ,stream-out)))
+    ((and (consp body) (eq (first body) 'if-then-else))
+     (let ((condition-out (fresh-logic-variable "?DCG-IF")))
+       `(if-then-else
+         ,(%prolog-dcg-goal (second body) stream-in condition-out)
+         ,(%prolog-dcg-goal (third body) condition-out stream-out)
+         ,(%prolog-dcg-goal (fourth body) stream-in stream-out))))
+    ((%dcg-tag-p body "DCG-TERMINALS")
+     (let ((terminals (second body)))
+       (unless (listp terminals)
+         (error "DCG terminal sequence must be a proper list, got ~S." terminals))
+       `(= ,stream-in ,(append terminals stream-out))))
+    ((eq body '!) `(and ! (= ,stream-in ,stream-out)))
+    (t (%dcg-call-with-streams body stream-in stream-out))))
+
+(defun %expand-prolog-dcg-clause (head body)
+  "Expand parsed `HEAD --> BODY` into an ordinary difference-list clause."
+  (unless (or (symbolp head) (consp head))
+    (error "Invalid DCG clause head ~S." head))
+  (let ((stream-in (fresh-logic-variable "?DCG-IN"))
+        (stream-out (fresh-logic-variable "?DCG-OUT")))
+    (make-clause (%dcg-call-with-streams head stream-in stream-out)
+                 (list (%prolog-dcg-goal body stream-in stream-out)))))
+
 (defmacro def-dcg-rule (name &body body)
   "Return a grammar clause named NAME.
 
@@ -74,3 +118,14 @@ first parse and whether any parse exists."
   (mapcar (lambda (solution)
             (solution-binding '?dcg-rest solution))
           (query-prolog rulebase (list rule-name input '?dcg-rest))))
+
+(defun %prove-phrase/k (grammar input rest rulebase environment depth emit)
+  (%with-cut-barrier
+    (%prove-bindings/k (%dcg-call-with-streams grammar input rest)
+                       rulebase environment depth emit)))
+
+(define-builtin (phrase grammar input) (rulebase environment depth emit)
+  (%prove-phrase/k grammar input '() rulebase environment depth emit))
+
+(define-builtin (phrase grammar input rest) (rulebase environment depth emit)
+  (%prove-phrase/k grammar input rest rulebase environment depth emit))

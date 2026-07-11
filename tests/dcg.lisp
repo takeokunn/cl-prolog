@@ -93,3 +93,27 @@
   (let ((rulebase (make-rulebase :clauses (list (def-dcg-rule empty)))))
     (assert-phrase nil t rulebase 'empty '())
     (assert-phrase '(:token) t rulebase 'empty '(:token))))
+
+(deftest prolog-dcg-expansion-is-a-difference-list-clause ()
+  (let* ((clause (cl-prolog::%expand-prolog-dcg-clause
+                  '(pair ?x)
+                  '(and (dcg-terminals (?x))
+                        (dcg-terminals (?x)))))
+         (rulebase (make-rulebase :clauses (list clause))))
+    (is (prolog-succeeds-p rulebase '(phrase (pair a) (a a))))
+    (is (prolog-succeeds-p rulebase '(phrase (pair b) (b b tail) (tail))))
+    (is (not (prolog-succeeds-p rulebase '(phrase (pair a) (a b)))))))
+
+(deftest prolog-dcg-if-then-else-threads-condition-stream ()
+  (let* ((clause
+           (cl-prolog::%expand-prolog-dcg-clause
+            'p
+            '(if-then-else
+              (dcg-terminals (a))
+              (dcg-terminals (b))
+              (dcg-terminals (c)))))
+         (rulebase (make-rulebase :clauses (list clause))))
+    (is (prolog-succeeds-p rulebase '(phrase p (a b))))
+    (is (prolog-succeeds-p rulebase '(phrase p (c))))
+    (is (not (prolog-succeeds-p rulebase '(phrase p (a c)))))
+    (is (not (prolog-succeeds-p rulebase '(phrase p (b)))))))
