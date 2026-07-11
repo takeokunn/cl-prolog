@@ -35,6 +35,9 @@ is extensible (see DEFINE-BUILTIN).")
    #:*max-prolog-depth*
    #:invalid-goal-error
    #:invalid-goal-error-goal
+   #:arithmetic-evaluation-error
+   #:arithmetic-error-expression
+   #:arithmetic-error-reason
    #:define-builtin
    #:predicate-true-p
    ;; queries
@@ -52,7 +55,15 @@ is extensible (see DEFINE-BUILTIN).")
    #:prolog-match
    ;; builtin goal names
    #:!
+   #:!=
    #:/=
+   #:is
+   #:|=:=|
+   #:|=\=|
+   #:<
+   #:=<
+   #:>
+   #:>=
    ;; DCG
    #:def-dcg-rule
    #:phrase

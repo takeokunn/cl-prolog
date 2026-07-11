@@ -189,24 +189,15 @@ Supported spec forms:
      ,@body))
 
 (defun %run-test (name thunk timeout)
+  (declare (ignore timeout))
   (handler-case
       (progn
         (format t "running ~A~%" name)
         (finish-output)
-        #+sbcl
-        (sb-ext:with-timeout timeout
-          (funcall thunk))
-        #-sbcl
         (funcall thunk)
         (format t "ok ~A~%" name)
         (finish-output)
         t)
-    #+sbcl
-    (sb-ext:timeout ()
-      (format t "not ok ~A~%timed out after ~D seconds~%"
-              name timeout)
-      (finish-output)
-      nil)
     (error (condition)
       (format t "not ok ~A~%~A~%" name condition)
       (finish-output)

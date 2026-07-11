@@ -4,12 +4,17 @@
 ;;;; the ASDF system source directory (not *LOAD-TRUENAME*), so this works even
 ;;;; when tests.lisp is loaded as a compiled fasl from the ASDF output cache.
 
+#.(progn (require :asdf) nil)
+
 (eval-when (:compile-toplevel :load-toplevel :execute)
   (require :asdf)
   (unless (find-package "FX.PROLOG")
-    (let ((repo-root (asdf:system-source-directory "cl-prolog/tests")))
-      (asdf:load-asd (merge-pathnames "cl-prolog.asd" repo-root))
-      (asdf:load-system :cl-prolog))))
+    (unless (asdf:find-system "cl-prolog/tests" nil)
+      (asdf:load-asd
+       (merge-pathnames "cl-prolog.asd"
+                        (or *load-truename* *load-pathname*
+                            (error "Cannot determine the repository path.")))))
+    (asdf:load-system :cl-prolog)))
 
 ;; The shared bootstrap defines the CL-PROLOG.BOOTSTRAP loader that the test
 ;; support files use to pull in fixtures and table-driven assertion macros.
