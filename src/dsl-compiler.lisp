@@ -47,35 +47,20 @@
   "Compile GOALS into forms constructing engine-level goal data."
   (mapcar #'%goal-form goals))
 
-(defun %fact-form (head)
-  "Return a form constructing a fact for HEAD."
-  `(make-fact :predicate ',(first head)
-              :args ',(rest head)))
-
 (defun %rule-body-form (goals)
   "Return a form constructing the body list for GOALS."
   `(list ,@(%goal-forms goals)))
 
-(defun %rule-form (head goals)
-  "Return a form constructing a rule with HEAD and GOALS."
-  `(make-rule :head ',head
-              :body ,(%rule-body-form goals)))
+(defun %clause-constructor-form (head goals)
+  "Return a form constructing a clause with HEAD and GOALS."
+  `(make-clause ',head ,(%rule-body-form goals)))
 
 (defun %clause-form (clause)
   "Return a form constructing CLAUSE as a fact or rule; validate its shape."
   (unless (and (consp clause) (consp (first clause)))
     (error "Invalid PROLOG clause: ~S" clause))
-  (if (null (rest clause))
-      (%fact-form (first clause))
-      (%rule-form (first clause) (rest clause))))
+  (%clause-constructor-form (first clause) (rest clause)))
 
-(defun %partition-clause-forms (clauses)
-  "Split CLAUSES into (VALUES FACT-FORMS RULE-FORMS) preserving order."
-  (let ((fact-forms '())
-        (rule-forms '()))
-    (dolist (clause clauses)
-      (let ((form (%clause-form clause)))
-        (if (null (rest clause))
-            (push form fact-forms)
-            (push form rule-forms))))
-    (values (nreverse fact-forms) (nreverse rule-forms))))
+(defun %clause-forms (clauses)
+  "Compile CLAUSES while preserving source resolution order."
+  (mapcar #'%clause-form clauses))

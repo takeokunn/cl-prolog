@@ -20,30 +20,20 @@
     ((consp value) (%proper-list-p (cdr value)))
     (t nil)))
 
-(defun %entry-head (entry)
-  (ecase (clause-entry-kind entry)
-    (:fact
-     (let ((fact (clause-entry-clause entry)))
-       (cons (fact-predicate fact) (fact-args fact))))
-    (:rule (rule-head (clause-entry-clause entry)))))
+(defun %entry-head (clause)
+  (clause-head clause))
 
-(defun %entry-body-term (entry)
-  (if (eq (clause-entry-kind entry) :fact)
+(defun %entry-body-term (clause)
+  (if (null (clause-body clause))
       'true
-      (let ((body (rule-body (clause-entry-clause entry))))
+      (let ((body (clause-body clause)))
         (cond
           ((null body) 'true)
           ((null (rest body)) (first body))
           (t (cons 'and body))))))
 
-(defun %freshen-clause-entry (entry)
-  (ecase (clause-entry-kind entry)
-    (:fact
-     (let* ((fact (clause-entry-clause entry))
-            (fresh (%freshen-fact-args fact)))
-       (%clause-entry-for-fact
-        (make-fact :predicate (fact-predicate fact) :args fresh))))
-    (:rule (%clause-entry-for-rule (%freshen-rule (clause-entry-clause entry))))))
+(defun %freshen-dynamic-clause (clause)
+  (%freshen-clause clause))
 
 (defun %builtin-predicate-p (predicate)
   (and (symbolp predicate) (gethash predicate *builtin-solvers*)))
@@ -63,14 +53,11 @@
      (let ((body (cddr term)))
        (unless (every #'%goal-form-p (mapcar #'%ensure-goal-form body))
          (%invalid-goal goal "every rule body element must be a callable goal"))
-       (%clause-entry-for-rule
-        (%freshen-rule (make-rule :head (second term) :body body)))))
+       (%freshen-clause (make-clause (second term) body))))
     ((%goal-form-p term)
      (%ensure-dynamic-predicate (first term) goal)
-     (%clause-entry-for-fact
-      (let ((table (make-hash-table :test #'eq)))
-        (make-fact :predicate (first term)
-                   :args (%freshen-term (rest term) table)))))
+     (let ((table (make-hash-table :test #'eq)))
+       (make-clause (%freshen-term term table))))
     (t
      (%invalid-goal goal "a dynamic clause must be a fact or (:- HEAD BODY...)"))))
 
@@ -338,13 +325,13 @@
 (define-builtin (asserta clause) (rulebase environment depth emit)
   (let* ((goal (list 'asserta clause))
          (entry (%clause-term-entry (logic-substitute clause environment) goal)))
-    (%assert-clause-entry! rulebase entry :first)
+    (rulebase-insert-clause! rulebase entry :position :first)
     (funcall emit environment)))
 
 (define-builtin (assertz clause) (rulebase environment depth emit)
   (let* ((goal (list 'assertz clause))
          (entry (%clause-term-entry (logic-substitute clause environment) goal)))
-    (%assert-clause-entry! rulebase entry :last)
+    (rulebase-insert-clause! rulebase entry :position :last)
     (funcall emit environment)))
 
 (define-builtin (retract clause) (rulebase environment depth emit)
@@ -357,15 +344,15 @@
                (consp (rest pattern)) (consp (second pattern)))
       (%ensure-dynamic-predicate (first (second pattern)) goal))
     (dolist (entry (copy-list (rulebase-clauses rulebase)))
-      (let* ((fresh (%freshen-clause-entry entry))
-             (stored (if (eq (clause-entry-kind fresh) :fact)
+      (let* ((fresh (%freshen-dynamic-clause entry))
+            (stored (if (null (clause-body fresh))
                          (%entry-head fresh)
                          (list* ':- (%entry-head fresh)
-                                (rule-body (clause-entry-clause fresh))))))
+                                (clause-body fresh)))))
         (multiple-value-bind (extended ok)
             (unify clause stored environment)
           (when ok
-            (%remove-clause-entry! rulebase entry)
+            (rulebase-remove-clause! rulebase entry)
             (funcall emit extended)))))))
 
 (define-builtin (abolish indicator) (rulebase environment depth emit)
@@ -384,7 +371,7 @@
         (multiple-value-bind (entry-predicate entry-arity)
             (%entry-predicate-arity entry)
           (when (and (eq predicate entry-predicate) (= arity entry-arity))
-            (%remove-clause-entry! rulebase entry)))))
+            (rulebase-remove-clause! rulebase entry)))))
     (funcall emit environment)))
 
 (define-builtin (clause head body) (rulebase environment depth emit)
@@ -392,7 +379,7 @@
     (when (consp resolved-head)
       (%ensure-dynamic-predicate (first resolved-head) (list 'clause head body)))
     (dolist (entry (copy-list (rulebase-clauses rulebase)))
-      (let ((fresh (%freshen-clause-entry entry)))
+      (let ((fresh (%freshen-dynamic-clause entry)))
         (multiple-value-bind (head-environment head-ok)
             (unify head (%entry-head fresh) environment)
           (when head-ok

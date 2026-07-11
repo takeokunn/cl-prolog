@@ -13,10 +13,10 @@
   ((and (choice ?x) !) => (((?x . left))))
   )
 
-(deftest degenerate-rules-are-ignored ()
+(deftest malformed-clauses-are-ignored ()
   (let ((rb (make-rulebase)))
-    (assert-rule! rb (make-rule :body '((anything))))
-    (assert-fact! rb (make-fact :predicate 'ready))
+    (rulebase-insert-clause! rb (make-clause '() '((anything))))
+    (rulebase-insert-clause! rb (make-clause '(ready)))
     (is-equal '(nil) (query-prolog rb '(ready)))))
 
 (deftest-queries facts-are-tried-before-rules

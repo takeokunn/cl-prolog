@@ -14,10 +14,7 @@
 A one-element clause ((PRED . ARGS)) is a fact; a longer clause
 (HEAD GOAL...) is a rule.  (:when EXPR) goals are compiled to closures
 over their logic variables."
-  (multiple-value-bind (fact-forms rule-forms)
-      (%partition-clause-forms clauses)
-    `(make-rulebase :facts (list ,@fact-forms)
-                    :rules (list ,@rule-forms))))
+  `(make-rulebase :clauses (list ,@(%clause-forms clauses))))
 
 (defmacro define-rulebase (name &body clauses)
   "Define NAME as a special variable holding the rulebase built from CLAUSES."
@@ -27,16 +24,12 @@ over their logic variables."
   "Return a new rulebase whose clauses shadow-extend BASE."
   (let ((extension (gensym "EXTENSION")))
     `(let ((,extension (prolog ,@clauses)))
-       (make-rulebase
-        :facts (append (rulebase-facts ,extension) (rulebase-facts ,base))
-        :rules (append (rulebase-rules ,extension) (rulebase-rules ,base))
-        :clauses (append (fx.prolog::rulebase-clauses ,extension)
-                         (fx.prolog::rulebase-clauses ,base))))))
+       (make-rulebase :clauses (append (rulebase-clauses ,extension)
+                                       (rulebase-clauses ,base))))))
 
 (defun %register-global-rule (head body)
   "Insert the rule HEAD :- BODY into *GLOBAL-RULEBASE* and return HEAD."
-  (assert-rule! *global-rulebase*
-                (make-rule :head head :body body))
+  (rulebase-insert-clause! *global-rulebase* (make-clause head body))
   head)
 
 (defmacro def-rule (head &body body)

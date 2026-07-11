@@ -9,23 +9,19 @@ continuation-passing (see MAP-PROLOG-SOLUTIONS), and the builtin goal set
 is extensible (see DEFINE-BUILTIN).")
   (:export
    ;; data
-   #:fact
-   #:fact-predicate
-   #:fact-args
-   #:make-fact
-   #:rule
-   #:rule-head
-   #:rule-body
-   #:make-rule
+   #:clause
+   #:clause-p
+   #:clause-head
+   #:clause-body
+   #:make-clause
    #:rulebase
    #:rulebase-p
-   #:rulebase-facts
-   #:rulebase-rules
+   #:rulebase-clauses
    #:make-rulebase
    #:*global-rulebase*
    #:clear-global-rulebase!
-   #:assert-fact!
-   #:assert-rule!
+   #:rulebase-insert-clause!
+   #:rulebase-remove-clause!
    ;; unification
    #:logic-var-p
    #:fresh-logic-variable

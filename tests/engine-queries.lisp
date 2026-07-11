@@ -39,10 +39,10 @@
 
 (deftest-queries solution-collection-builtins
     ((make-rulebase
-      :facts (list (make-fact :predicate 'edge :args '(a 2))
-                   (make-fact :predicate 'edge :args '(a 1))
-                   (make-fact :predicate 'edge :args '(a 2))
-                   (make-fact :predicate 'edge :args '(b 3)))))
+      :clauses (list (make-clause '(edge a 2))
+                     (make-clause '(edge a 1))
+                     (make-clause '(edge a 2))
+                     (make-clause '(edge b 3)))))
   ((findall ?value (edge a ?value) ?bag)
                                    => (((?value . ?value) (?bag 2 1 2))))
   ((findall ?value (edge missing ?value) ?bag)
@@ -61,10 +61,10 @@
 
 (deftest dynamic-database-builtins ()
   (let ((rulebase (make-rulebase)))
-    (assert-fact! rulebase (make-fact :predicate 'legacy-order :args '(fact)))
-    (assert-rule! rulebase (make-rule :head '(legacy-order rule) :body '()))
-    (assert-query rulebase (legacy-order ?value)
-                  => (((?value . fact)) ((?value . rule))))
+    (rulebase-insert-clause! rulebase (make-clause '(ordered first)))
+    (rulebase-insert-clause! rulebase (make-clause '(ordered second)))
+    (assert-query rulebase (ordered ?value)
+                  => (((?value . first)) ((?value . second))))
     (assert-query rulebase (assertz (color apple red)) :succeeds)
     (assert-query rulebase (assertz (color apple blue)) :succeeds)
     (assert-query rulebase (asserta (color apple green)) :succeeds)

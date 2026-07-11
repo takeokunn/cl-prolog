@@ -41,18 +41,18 @@
   (when (predicate-true-p (first goal) (rest goal) environment)
     (funcall emit environment)))
 
-(defun %emit-matching-fact (goal fact environment emit)
-  "Unify GOAL against FACT and emit each successful environment."
-  (when (eq (first goal) (fact-predicate fact))
+(defun %emit-matching-fact (goal clause environment emit)
+  "Unify GOAL against fact CLAUSE and emit each successful environment."
+  (when (eq (first goal) (first (clause-head clause)))
     (multiple-value-bind (extended ok)
-        (unify (rest goal) (%freshen-fact-args fact) environment)
+        (unify goal (clause-head (%freshen-clause clause)) environment)
       (when ok
         (funcall emit extended)))))
 
-(defun %matching-rule-p (goal rule)
-  "True when RULE can be considered for GOAL."
-  (and (consp (rule-head rule))
-       (eq (first goal) (first (rule-head rule)))))
+(defun %matching-rule-p (goal clause)
+  "True when CLAUSE can be considered for GOAL."
+  (and (consp (clause-head clause))
+       (eq (first goal) (first (clause-head clause)))))
 
 (defun %prove-goal-sequence (goals rulebase environment depth emit)
   "Prove the conjunction GOALS, calling EMIT with each solution environment.
@@ -85,22 +85,19 @@ alternatives as well."
 (defun %prove-with-clauses (goal rulebase environment depth emit)
   "Prove GOAL against the foreign hook and a logical-update-view snapshot."
   (%emit-foreign-proof goal environment emit)
-  (dolist (entry (copy-list (rulebase-clauses rulebase)))
-    (ecase (clause-entry-kind entry)
-      (:fact
-       (%emit-matching-fact goal (clause-entry-clause entry) environment emit))
-      (:rule
-       (let ((rule (clause-entry-clause entry)))
-         (when (and (plusp depth) (%matching-rule-p goal rule))
-           (%prove-with-rule goal rule rulebase environment depth emit)))))))
+  (dolist (clause (copy-list (rulebase-clauses rulebase)))
+    (if (null (clause-body clause))
+        (%emit-matching-fact goal clause environment emit)
+        (when (and (plusp depth) (%matching-rule-p goal clause))
+          (%prove-with-rule goal clause rulebase environment depth emit)))))
 
-(defun %prove-with-rule (goal rule rulebase environment depth emit)
-  "Resolve GOAL against one RULE; a cut in the body prunes the clause list."
-  (let ((fresh-rule (%freshen-rule rule)))
+(defun %prove-with-rule (goal clause rulebase environment depth emit)
+  "Resolve GOAL against one CLAUSE; a cut in the body prunes the clause list."
+  (let ((fresh-rule (%freshen-clause clause)))
     (multiple-value-bind (extended ok)
-        (unify goal (rule-head fresh-rule) environment)
+        (unify goal (clause-head fresh-rule) environment)
       (when ok
-        (when (%prove-goal-sequence (rule-body fresh-rule) rulebase
+        (when (%prove-goal-sequence (clause-body fresh-rule) rulebase
                                     extended (1- depth) emit)
           (%propagate-cut))))))
 

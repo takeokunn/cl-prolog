@@ -102,19 +102,10 @@ Returns (VALUES EXTENDED-ENV T) on success and (VALUES NIL NIL) on failure."
          (%term-has-variables-p (cdr term))))
     (t nil)))
 
-(defun %freshen-fact-args (fact)
-  "Return FACT's argument list with any logic variables freshly renamed.
-
-Ground facts (the common case) are returned as-is without consing."
-  (let ((args (fact-args fact)))
-    (if (%term-has-variables-p args)
-        (%freshen-term args (make-hash-table :test #'eq))
-        args)))
-
-(defun %freshen-rule (rule)
-  "Return RULE with all logic variables consistently renamed to fresh ones."
+(defun %freshen-clause (clause)
+  "Return CLAUSE with all logic variables consistently renamed to fresh ones."
   (let ((table (make-hash-table :test #'eq)))
-    (make-rule :head (%freshen-term (rule-head rule) table)
-               :body (mapcar (lambda (goal)
-                               (%freshen-term goal table))
-                             (rule-body rule)))))
+    (make-clause (%freshen-term (clause-head clause) table)
+                 (mapcar (lambda (goal)
+                           (%freshen-term goal table))
+                         (clause-body clause)))))
