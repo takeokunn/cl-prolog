@@ -55,6 +55,9 @@ is extensible (see DEFINE-BUILTIN).")
    #:prolog-match
    ;; builtin goal names
    #:!
+   #:call
+   #:once
+   #:repeat
    #:!=
    #:/=
    #:is

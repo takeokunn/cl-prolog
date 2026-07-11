@@ -103,6 +103,24 @@
   (unless (%provable-p goal rulebase environment (1- depth))
     (funcall emit environment)))
 
+(define-builtin (call goal) (rulebase environment depth emit)
+  (%prove-goal-sequence
+   (%normalize-query (logic-substitute goal environment))
+   rulebase environment (1- depth) emit))
+
+(define-builtin (once goal) (rulebase environment depth emit)
+  (block first-proof
+    (%prove-goal-sequence
+     (%normalize-query (logic-substitute goal environment))
+     rulebase environment (1- depth)
+     (lambda (extended)
+       (funcall emit extended)
+       (return-from first-proof nil)))))
+
+(define-builtin (repeat) (rulebase environment depth emit)
+  (declare (ignore rulebase depth))
+  (loop (funcall emit environment)))
+
 (define-builtin (and &rest goals) (rulebase environment depth emit)
   (when (%prove-goal-sequence goals rulebase environment depth emit)
     (%propagate-cut)))
