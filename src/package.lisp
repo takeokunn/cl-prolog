@@ -64,7 +64,9 @@ is extensible (see DEFINE-FOREIGN-PREDICATE).")
    #:prolog-term-string
    #:parse-prolog
    #:consult-prolog
+   #:ensure-prolog-loaded
    #:consult
+   #:ensure_loaded
    #:load_files
    ;; rule DSL
    #:prolog

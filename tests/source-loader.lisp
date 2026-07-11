@@ -242,6 +242,115 @@
            rulebase
            "catch((transient_clause, fail), error(existence_error(procedure, _), _), true)")))))
 
+(deftest load-files-defers-initialization-until-every-source-is-valid ()
+  (with-temporary-prolog-files
+      ((initializing ":- initialization(write(should_not_run)).")
+       (invalid ":- unsupported_directive(value)."))
+    (let* ((output (make-string-output-stream))
+           (context (cl-prolog::make-prolog-io-context :output output))
+           (rulebase (make-rulebase :io-context context)))
+      (signals-error (consult-prolog (list initializing invalid) rulebase))
+      (is-equal "" (get-output-stream-string output)))))
+
+(deftest source-loader-resolves-nested-directives-relative-to-their-source ()
+  (let* ((base (%temporary-prolog-pathname))
+         (directory (make-pathname :directory
+                                   (append (pathname-directory base)
+                                           (list (pathname-name base)))
+                                   :name nil :type nil :defaults base))
+         (entry (merge-pathnames "entry.pl" directory))
+         (nested-directory (merge-pathnames "nested/" directory))
+         (consulted (merge-pathnames "consulted.pl" nested-directory))
+         (loaded (merge-pathnames "loaded.pl" nested-directory)))
+    (unwind-protect
+         (progn
+           (ensure-directories-exist consulted)
+           (with-open-file (output consulted :direction :output
+                                              :if-exists :supersede)
+             (write-string "nested_consulted." output))
+           (with-open-file (output loaded :direction :output
+                                           :if-exists :supersede)
+             (write-string "nested_loaded." output))
+           (with-open-file (output entry :direction :output
+                                          :if-exists :supersede)
+             (write-string
+              ":- consult('nested/consulted.pl'). :- load_files(['nested/loaded.pl'])."
+              output))
+           (let ((rulebase (consult-prolog entry)))
+             (is (%source-query-succeeds-p rulebase "nested_consulted"))
+             (is (%source-query-succeeds-p rulebase "nested_loaded"))))
+      (uiop:delete-directory-tree directory :validate t :if-does-not-exist :ignore))))
+
+(deftest ensure-loaded-is-idempotent-across-pathname-spellings ()
+  (with-temporary-prolog-files
+      ((source "loaded_once."))
+    (let* ((rulebase (make-rulebase))
+           (relative (enough-namestring source (truename "."))))
+      (ensure-prolog-loaded source rulebase)
+      (ensure-prolog-loaded (pathname relative) rulebase)
+      (is-equal 1
+                (count 'cl-prolog::loaded_once
+                       (rulebase-visible-clauses rulebase)
+                       :key (lambda (clause) (first (clause-head clause))))))))
+
+(deftest ensure-loaded-breaks-circular-source-directives ()
+  (with-temporary-prolog-files
+      ((first "first_loaded. :- ensure_loaded('__SECOND__').")
+       (second "second_loaded. :- ensure_loaded('__FIRST__')."))
+    (with-open-file (output first :direction :output :if-exists :supersede)
+      (format output "first_loaded. :- ensure_loaded(~A)."
+              (%prolog-path-atom second)))
+    (with-open-file (output second :direction :output :if-exists :supersede)
+      (format output "second_loaded. :- ensure_loaded(~A)."
+              (%prolog-path-atom first)))
+    (let ((rulebase (ensure-prolog-loaded first)))
+      (is (%source-query-succeeds-p rulebase "first_loaded"))
+      (is (%source-query-succeeds-p rulebase "second_loaded"))
+      (is-equal 2 (hash-table-count
+                   (cl-prolog::rulebase-source-registry rulebase))))))
+
+(deftest load-files-if-not-loaded-is-idempotent-and-atomic ()
+  (with-temporary-prolog-files
+      ((first "first_once.")
+       (second "second_once."))
+    (let ((rulebase (make-rulebase))
+          (sources (%prolog-path-list (list first second))))
+      (is (%source-query-succeeds-p
+           rulebase (format nil "load_files(~A, [if(not_loaded)])" sources)))
+      (is (%source-query-succeeds-p
+           rulebase (format nil "load_files(~A, [if(not_loaded)])" sources)))
+      (is-equal 2 (length (rulebase-visible-clauses rulebase))))))
+
+(deftest load-files-if-not-loaded-rolls-back-source-registry ()
+  (with-temporary-prolog-files
+      ((valid "must_rollback.")
+       (invalid ":- unsupported_directive(value)."))
+    (let* ((rulebase (make-rulebase))
+           (query (format nil "load_files(~A, [if(not_loaded)])"
+                          (%prolog-path-list (list valid invalid)))))
+      (signals-error (%source-query-succeeds-p rulebase query))
+      (is (null (rulebase-visible-clauses rulebase)))
+      (is-equal 0
+                (hash-table-count
+                 (cl-prolog::rulebase-source-registry rulebase))))))
+
+(deftest-table load-files-options-are-strict ()
+  (:is (%source-query-succeeds-p
+        (make-rulebase)
+        "catch(load_files([], Options), error(instantiation_error, _), true)"))
+  (:is (%source-query-succeeds-p
+        (make-rulebase)
+        "catch(load_files([], [if(Mode)]), error(instantiation_error, _), true)"))
+  (:is (%source-query-succeeds-p
+        (make-rulebase)
+        "catch(load_files([], [if(not_loaded) | tail]), error(type_error(list, _), _), true)"))
+  (:is (%source-query-succeeds-p
+        (make-rulebase)
+        "catch(load_files([], [unknown]), error(domain_error(load_option, unknown), _), true)"))
+  (:is (%source-query-succeeds-p
+        (make-rulebase)
+        "catch(load_files([], [if(not_loaded), if(not_loaded)]), error(domain_error(load_option, _), _), true)")))
+
 (defmacro deftest-source-loading-error (name &body query-form)
   `(deftest ,name ()
      (let ((rulebase (make-rulebase))
@@ -260,6 +369,14 @@
            error(type_error(list, [~A | tail]), _), true)"
           (%prolog-path-atom missing)
           (%prolog-path-atom missing)))
+
+(deftest-source-loading-error source-loading-partial-list-instantiation-error
+  (format nil
+          "catch(load_files([~A | Tail]), error(instantiation_error, _), true)"
+          (%prolog-path-atom missing)))
+
+(deftest-source-loading-error source-loading-variable-list-item-instantiation-error
+  "catch(load_files([Source]), error(instantiation_error, _), true)")
 
 (deftest-source-loading-error source-loading-missing-source-error
   (format nil

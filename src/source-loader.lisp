@@ -4,10 +4,20 @@
 
 (defvar *current-prolog-source-directory* nil)
 
+(define-condition prolog-source-not-found (file-error) ())
+
 (defun %resolve-prolog-source-pathname (pathname)
   (merge-pathnames pathname
                    (or *current-prolog-source-directory*
                        *default-pathname-defaults*)))
+
+(defun %canonical-prolog-source-pathname (pathname)
+  "Return PATHNAME's canonical existing identity or signal a source error."
+  (let ((resolved (%resolve-prolog-source-pathname pathname)))
+    (handler-case
+        (truename resolved)
+      (file-error ()
+        (error 'prolog-source-not-found :pathname resolved)))))
 
 (defun %call-with-prolog-source-stream (source function)
   (etypecase source
@@ -19,31 +29,45 @@
      (let* ((resolved (%resolve-prolog-source-pathname source))
             (directory (make-pathname :name nil :type nil :version nil
                                       :defaults resolved)))
-       (with-open-file (stream resolved :direction :input)
+       (with-open-file (stream resolved :direction :input
+                                       :if-does-not-exist nil)
+         (unless stream
+           (error 'prolog-source-not-found :pathname resolved))
          (let ((*current-prolog-source-directory* directory))
            (funcall function stream)))))))
 
 (defun %source-file-pathnames (term environment operation)
   "Resolve TERM, an atom or proper list of atoms, to source pathnames."
-  (let ((value (logic-substitute term environment)))
-    (cond
-      ((logic-var-p value)
-       (%raise-instantiation-error environment operation
-                                   "Source must be instantiated"))
-      ((null value)
-       '())
-      ((symbolp value)
-       (list (pathname (%io-pathname value environment operation))))
-      ((atom value)
-       (%raise-type-error "ATOM" value environment operation
-                          "Source must be an atom or proper list of atoms"))
-      ((not (%proper-list-p value))
-       (%raise-type-error "LIST" value environment operation
-                          "Source must be an atom or proper list of atoms"))
-      (t
-       (mapcar (lambda (item)
-                 (pathname (%io-pathname item environment operation)))
-               value)))))
+  (labels ((source-pathname (value)
+             (let ((resolved (logic-substitute value environment)))
+               (when (logic-var-p resolved)
+                 (%raise-instantiation-error environment operation
+                                             "Source must be instantiated"))
+               (pathname (%io-pathname resolved environment operation))))
+           (source-list (value original)
+             (let ((resolved (logic-substitute value environment)))
+               (cond
+                 ((logic-var-p resolved)
+                  (%raise-instantiation-error environment operation
+                                              "Source list must be instantiated"))
+                 ((null resolved) '())
+                 ((consp resolved)
+                  (cons (source-pathname (car resolved))
+                        (source-list (cdr resolved) original)))
+                 (t
+                  (%raise-type-error "LIST" original environment operation
+                                     "Source must be a proper list of atoms"))))))
+    (let ((value (logic-substitute term environment)))
+      (cond
+        ((logic-var-p value)
+         (%raise-instantiation-error environment operation
+                                     "Source must be instantiated"))
+        ((null value) '())
+        ((symbolp value) (list (source-pathname value)))
+        ((consp value) (source-list value value))
+        (t
+         (%raise-type-error "ATOM" value environment operation
+                            "Source must be an atom or proper list of atoms"))))))
 
 (defun %read-source-term (stream operator-table)
   (let* ((source (%read-prolog-term-source stream))
@@ -95,12 +119,22 @@
      (unless (= (length goal) 2)
        (error "INITIALIZATION directive requires one callable goal."))
      (push (cons module (second goal)) (car initializations)))
-    ((consult load_files)
+    ((consult ensure_loaded)
      (unless (= (length goal) 2)
        (error "~A directive requires one source argument." (first goal)))
      (%load-prolog-pathnames-into-rulebase
       (%source-file-pathnames (second goal) nil (first goal))
-      rulebase))
+      rulebase initializations
+      :if-loaded (if (eq (first goal) 'ensure_loaded) :skip :reload)))
+    (load_files
+     (unless (member (length goal) '(2 3))
+       (error "LOAD_FILES directive requires sources and optional options."))
+     (%load-prolog-pathnames-into-rulebase
+      (%source-file-pathnames (second goal) nil 'load_files)
+      rulebase initializations
+      :if-loaded (if (= (length goal) 2)
+                     :reload
+                     (%load-files-if-loaded-policy (third goal) nil 'load_files))))
     (otherwise
      (error "Unknown Prolog directive ~S." goal))))
 
@@ -130,9 +164,8 @@
         (%set-rulebase-predicate-property! rulebase predicate arity :static module)))
     (rulebase-insert-clause! rulebase clause :module module)))
 
-(defun %load-prolog-source-transaction (stream rulebase)
-  (let ((initializations (list '()))
-        (module +default-prolog-module+)
+(defun %load-prolog-source-transaction (stream rulebase initializations)
+  (let ((module +default-prolog-module+)
         (module-declared-p nil)
         (content-seen-p nil))
     (loop
@@ -170,31 +203,111 @@
        (lambda (candidate predicate arity)
          (not (null (%rulebase-predicate-property
                      rulebase predicate arity candidate))))))
-    (dolist (initialization (nreverse (car initializations)))
+    rulebase))
+
+(defun %run-source-initializations! (initializations rulebase)
+  (dolist (initialization (nreverse (car initializations)))
       (unless (prolog-succeeds-p
                rulebase
                (list (%prolog-symbol ":")
                      (car initialization) (cdr initialization)))
         (error "Prolog initialization failed: ~S." (cdr initialization))))
-    rulebase))
+  rulebase)
 
-(defun %load-prolog-pathnames-into-rulebase (pathnames rulebase)
+(defun %load-prolog-pathname-into-rulebase
+    (pathname rulebase initializations if-loaded)
+  "Load one canonical source, respecting IF-LOADED and breaking load cycles."
+  (let* ((canonical (%canonical-prolog-source-pathname pathname))
+         (state (%rulebase-source-state rulebase canonical)))
+    (unless (or (eq state :loading)
+                (and (eq state :loaded) (eq if-loaded :skip)))
+      (%set-rulebase-source-state! rulebase canonical :loading)
+      (%call-with-prolog-source-stream
+       canonical
+       (lambda (stream)
+         (%load-prolog-source-transaction stream rulebase initializations)))
+      (%set-rulebase-source-state! rulebase canonical :loaded)))
+  rulebase)
+
+(defun %load-prolog-pathnames-into-rulebase
+    (pathnames rulebase &optional (initializations (list '()))
+                          &key (if-loaded :reload))
   (dolist (pathname pathnames rulebase)
-    (%call-with-prolog-source-stream
-     pathname
-     (lambda (stream)
-       (%load-prolog-source-transaction stream rulebase)))))
+    (%load-prolog-pathname-into-rulebase
+     pathname rulebase initializations if-loaded)))
 
 (defun consult-prolog (source &optional (rulebase (make-rulebase)))
   "Consult SOURCE and atomically replace RULEBASE after successful validation."
-  (let ((transaction (%copy-rulebase rulebase)))
+  (let ((transaction (%copy-rulebase rulebase))
+        (initializations (list '())))
     (if (and (listp source) (not (stringp source)))
-        (%load-prolog-pathnames-into-rulebase source transaction)
+        (%load-prolog-pathnames-into-rulebase source transaction initializations)
         (%call-with-prolog-source-stream
          source
          (lambda (stream)
-           (%load-prolog-source-transaction stream transaction))))
+           (%load-prolog-source-transaction stream transaction initializations))))
+    (%run-source-initializations! initializations transaction)
     (%replace-rulebase! rulebase transaction)))
+
+(defun ensure-prolog-loaded (source &optional (rulebase (make-rulebase)))
+  "Load existing pathname SOURCE once, atomically updating RULEBASE."
+  (let ((transaction (%copy-rulebase rulebase))
+        (initializations (list '())))
+    (%load-prolog-pathnames-into-rulebase
+     (if (listp source) source (list source))
+     transaction initializations :if-loaded :skip)
+    (%run-source-initializations! initializations transaction)
+    (%replace-rulebase! rulebase transaction)))
+
+(defun %load-files-options (term environment operation)
+  "Return a resolved proper option list, reporting ISO list errors."
+  (labels ((resolve-list (tail original)
+             (let ((resolved (logic-substitute tail environment)))
+               (cond
+                 ((logic-var-p resolved)
+                  (%raise-instantiation-error environment operation
+                                              "Load options must be instantiated"))
+                 ((null resolved) '())
+                 ((consp resolved)
+                  (cons (logic-substitute (car resolved) environment)
+                        (resolve-list (cdr resolved) original)))
+                 (t
+                  (%raise-type-error "LIST" original environment operation
+                                     "Load options must be a proper list"))))))
+    (resolve-list term term)))
+
+(defun %load-files-if-loaded-policy (term environment operation)
+  "Validate LOAD_FILES options and return :SKIP for IF(NOT_LOADED)."
+  (let ((options (%load-files-options term environment operation)))
+    (labels ((contains-variable-p (value)
+               (cond
+                 ((logic-var-p value) t)
+                  ((consp value)
+                   (or (contains-variable-p (car value))
+                       (contains-variable-p (cdr value))))
+                  (t nil)))
+             (atom-named-p (value name)
+               (and (symbolp value)
+                    (string= (symbol-name value) name)))
+             (if-not-loaded-option-p (option)
+               (and (consp option)
+                    (atom-named-p (first option) "IF")
+                    (consp (rest option))
+                    (null (cddr option))
+                    (atom-named-p (second option) "NOT_LOADED")))
+             (invalid-option (option message)
+               (%raise-domain-error "LOAD_OPTION" option environment operation
+                                    message)))
+      (dolist (option options)
+        (when (contains-variable-p option)
+          (%raise-instantiation-error environment operation
+                                      "Load options must be instantiated"))
+        (unless (if-not-loaded-option-p option)
+          (invalid-option option "Expected if(not_loaded)")))
+      (unless (= (length options) 1)
+        (invalid-option (if options (second options) options)
+                        "Exactly one if(not_loaded) option is required"))
+      :skip)))
 
 (defun %consult-source-files (term environment rulebase emit operation)
   (let ((pathnames (%source-file-pathnames term environment operation)))
@@ -202,9 +315,12 @@
         (progn
           (consult-prolog pathnames rulebase)
           (funcall emit environment))
-      (file-error ()
+      (prolog-source-not-found (condition)
         (%raise-existence-error "SOURCE_SINK"
-                                (logic-substitute term environment)
+                                (%prolog-atom-symbol
+                                 (namestring
+                                  (file-error-pathname condition))
+                                 :preserve-case t)
                                 environment operation
                                 "Source file does not exist")))))
 
@@ -215,3 +331,37 @@
 (define-builtin (load_files sources) (rulebase environment depth emit)
   (declare (ignore depth))
   (%consult-source-files sources environment rulebase emit 'load_files))
+
+(define-builtin (ensure_loaded sources) (rulebase environment depth emit)
+  (declare (ignore depth))
+  (let ((pathnames (%source-file-pathnames sources environment 'ensure_loaded)))
+    (handler-case
+        (progn
+          (ensure-prolog-loaded pathnames rulebase)
+          (funcall emit environment))
+      (prolog-source-not-found (condition)
+        (%raise-existence-error
+         "SOURCE_SINK"
+         (%prolog-atom-symbol (namestring (file-error-pathname condition))
+                              :preserve-case t)
+         environment 'ensure_loaded "Source file does not exist")))))
+
+(define-builtin (load_files sources options) (rulebase environment depth emit)
+  (declare (ignore depth))
+  (let ((if-loaded (%load-files-if-loaded-policy
+                    options environment 'load_files))
+        (pathnames (%source-file-pathnames sources environment 'load_files)))
+    (handler-case
+        (let ((transaction (%copy-rulebase rulebase))
+              (initializations (list '())))
+          (%load-prolog-pathnames-into-rulebase
+           pathnames transaction initializations :if-loaded if-loaded)
+          (%run-source-initializations! initializations transaction)
+          (%replace-rulebase! rulebase transaction)
+          (funcall emit environment))
+      (prolog-source-not-found (condition)
+        (%raise-existence-error
+         "SOURCE_SINK"
+         (%prolog-atom-symbol (namestring (file-error-pathname condition))
+                              :preserve-case t)
+         environment 'load_files "Source file does not exist")))))
