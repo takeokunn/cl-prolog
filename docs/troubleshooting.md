@@ -48,11 +48,11 @@ reported as logical failure.
 - `1`: one rule expansion
 - larger values: deeper derived proofs
 
-## `predicate-true-p` did not run
+## A foreign predicate did not run
 
-Built-in predicates bypass `predicate-true-p`.
-
-Use a different predicate name if you want custom truth evaluation.
+`define-foreign-predicate` dispatches by exact name and arity. Check both
+parts of the predicate indicator. Builtins remain authoritative when names
+overlap.
 
 ## `phrase` returned `nil`
 

@@ -61,12 +61,6 @@
       (list goal)
       goal))
 
-(defun %continue-foreign-proof (goal state succeed)
-  "Call SUCCEED with STATE when the foreign predicate hook proves GOAL."
-  (when (predicate-true-p (first goal) (rest goal)
-                          (proof-state-bindings state))
-    (funcall succeed state)))
-
 (defun %continue-matching-fact (goal clause state succeed)
   "Unify GOAL against fact CLAUSE and continue with the extended state."
   (when (eq (first goal) (first (clause-head clause)))
@@ -101,7 +95,11 @@ alternatives as well."
       ((not (%goal-form-p normalized-goal))
        (%invalid-goal goal "a goal must be a symbol or a list headed by a symbol"))
       (t
-       (let ((solver (%goal-solver (first normalized-goal))))
+       (let* ((predicate (first normalized-goal))
+              (arity (length (rest normalized-goal)))
+              (builtin-solver (%goal-solver predicate))
+              (foreign-solver (%foreign-goal-solver predicate arity))
+              (solver (or builtin-solver foreign-solver)))
          (if solver
              (funcall solver
                       normalized-goal
@@ -122,7 +120,6 @@ alternatives as well."
 (defun %prove-clauses/k (goal state succeed)
   "Prove GOAL within one predicate invocation and consume its cut."
   (%with-cut-barrier
-    (%continue-foreign-proof goal state succeed)
     (dolist (clause (rulebase-visible-clauses (proof-state-rulebase state)))
       (if (null (clause-body clause))
           (%continue-matching-fact goal clause state succeed)

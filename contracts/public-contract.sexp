@@ -59,7 +59,7 @@
              "ONCE"
              "PHRASE"
              "PHRASE-ALL"
-             "PREDICATE-TRUE-P"
+             "DEFINE-FOREIGN-PREDICATE"
              "PROLOG"
              "PROLOG-MATCH"
              "PROLOG-SUCCEEDS-P"

@@ -4,13 +4,23 @@
 
 (defvar *recorded-colors* '())
 
-(defmethod predicate-true-p ((predicate (eql 'record-color)) args bindings)
-  (push (logic-substitute (first args) bindings) *recorded-colors*)
-  t)
+(define-foreign-predicate (record-color color) (rulebase environment depth emit)
+  (declare (cl:ignore rulebase depth))
+  (push (logic-substitute color environment) *recorded-colors*)
+  (funcall emit environment))
 
-(defmethod predicate-true-p ((predicate (eql 'accept-ok)) args bindings)
-  (equal (mapcar (lambda (arg) (logic-substitute arg bindings)) args)
-         '(:ok)))
+(define-foreign-predicate (accept-ok value) (rulebase environment depth emit)
+  (declare (cl:ignore rulebase depth))
+  (when (eql (logic-substitute value environment) :ok)
+    (funcall emit environment)))
+
+(define-foreign-predicate (foreign-choice value) (rulebase environment depth emit)
+  (declare (cl:ignore rulebase depth))
+  (dolist (choice '(left right))
+    (multiple-value-bind (extended matched)
+        (unify value choice environment)
+      (when matched
+        (funcall emit extended)))))
 
 (define-rulebase *macro-rulebase*
   ((parent tom bob))

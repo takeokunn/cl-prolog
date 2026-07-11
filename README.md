@@ -107,8 +107,16 @@ The builtin set is extensible:
         (when ok (funcall emit extended))))))
 ```
 
-For a Lisp-side truth predicate without new bindings, specialize
-`predicate-true-p` instead.
+Foreign predicates use the same CPS solution protocol and dispatch by exact
+name and arity:
+
+```lisp
+(define-foreign-predicate (choose output) (rulebase environment depth emit)
+  (declare (ignore rulebase depth))
+  (dolist (value '(left right))
+    (multiple-value-bind (extended ok) (unify output value environment)
+      (when ok (funcall emit extended)))))
+```
 
 ## DCG
 

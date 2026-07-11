@@ -103,13 +103,13 @@ not a symbol or symbol-headed list — signal `invalid-goal-error`
 - the head name may be a list of symbols sharing one solver
 - EMIT must be called once per solution with the extended environment;
   builtins must not collect result lists
-- `predicate-true-p` is the simpler hook: specialize it with
-  `(eql 'name)` for a Lisp-side truth check that introduces no bindings
+- `define-foreign-predicate` registers one exact name/arity pair; its body
+  uses the same zero-to-many `EMIT` CPS protocol
 
 ## Proof-Search Semantics
 
-- goals are resolved against `predicate-true-p`, then facts, then rules —
-  facts always come before rules, in definition order within each group
+- registered builtins and foreign predicates are authoritative for their
+  predicate indicator; otherwise facts precede rules in definition order
 - rule variables (and variables inside facts) are freshly renamed per use
 - an explicit depth bound decrements per user-rule resolution, so left recursion
   terminates with the solutions found within the bound

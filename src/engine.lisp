@@ -205,14 +205,34 @@ BODY must call EMIT with one extended environment per solution."
             names)
          ',(first names)))))
 
-;;; Foreign predicate hook
+;;; Foreign predicate dispatch
 
-(defgeneric predicate-true-p (predicate args bindings)
+(defgeneric %foreign-goal-solver (predicate arity)
   (:documentation
-   "Extension hook: return true when the foreign PREDICATE succeeds.
+   "Return the CPS foreign solver registered for PREDICATE/ARITY."))
 
-Specialize with (EQL 'NAME) to make NAME provable from Lisp; the default
-method fails so ordinary fact/rule search proceeds.")
-  (:method ((predicate symbol) args bindings)
-    (declare (cl:ignore args bindings))
-    nil))
+(defmethod %foreign-goal-solver (predicate arity)
+  (declare (cl:ignore predicate arity))
+  nil)
+
+(defmacro define-foreign-predicate ((name &rest argument-list)
+                                    (rulebase environment depth emit)
+                                    &body body)
+  "Define the authoritative foreign solver for the exact predicate NAME/ARITY.
+
+BODY must call EMIT with one extended environment per solution.  Calling EMIT
+zero times fails; calling it repeatedly produces multiple solutions."
+  (when (find-if (lambda (parameter)
+                   (member parameter lambda-list-keywords))
+                 argument-list)
+    (error "Foreign predicates require a fixed argument list: ~S"
+           argument-list))
+  (let ((goal (gensym "GOAL"))
+        (arity (length argument-list)))
+    `(defmethod %foreign-goal-solver ((predicate (eql ',name))
+                                     (arity (eql ,arity)))
+       (declare (cl:ignore predicate arity))
+       (lambda (,goal ,rulebase ,environment ,depth ,emit)
+         (declare (ignorable ,rulebase ,environment ,depth ,emit))
+         (destructuring-bind ,argument-list (rest ,goal)
+           ,@body)))))

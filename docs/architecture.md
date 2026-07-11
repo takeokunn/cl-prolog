@@ -21,8 +21,8 @@ Sources live under `src/`, in dependency (and load) order:
 - `package.lisp` — public package and export boundary
 - `data.lisp` — facts, rules, rulebase structs (data only, no logic)
 - `unification.lisp` — unification, substitution, variable renaming
-- `engine.lisp` — CPS provers, cut, depth bound, the builtin registry,
-  the `predicate-true-p` hook
+- `engine.lisp` — CPS provers, cut, depth bound, and exact-indicator builtin
+  and foreign predicate dispatch
 - `builtin-term.lisp` — ISO-style term inspection and ordering builtins
 - `builtins/` — control, collection, database, arithmetic, and list builtins
 - `dcg-runtime.lisp` — DCG combinator builtins
@@ -48,15 +48,15 @@ environment:
 ```
 %prove-goal-sequence (goals rb env depth emit)  ; conjunction
 %prove-goal          (goal  rb env depth emit)  ; dispatch
-%prove-with-clauses  (goal  rb env depth emit)  ; hook -> facts -> rules
+%prove-with-clauses  (goal  rb env depth emit)  ; facts -> rules
 %prove-with-rule     (goal rule rb env depth emit)
 ```
 
 Nothing in the engine accumulates result lists — `query-prolog` is a fold
 over `map-prolog-solutions`, which exposes the CPS contract directly.
-Builtins follow the same contract; `define-builtin` registers a solver
-function in a hash table the dispatcher consults, which is also the public
-extension point.
+Builtins and foreign predicates follow the same contract. `define-builtin`
+and `define-foreign-predicate` register CPS solvers through generic dispatch;
+foreign predicates are keyed by exact name and arity.
 
 ### Cut
 
@@ -81,7 +81,8 @@ runtime, so rule data can be treated as inert.
 
 ### Search order and termination
 
-- for each goal: `predicate-true-p` hook, then facts, then rules
+- registered builtins and foreign predicates are authoritative; unregistered
+  indicators search facts and then rules
 - facts and rules keep definition order within their group
 - rule and fact variables are freshly renamed per use
 - `:max-depth` decrements only per user-rule resolution; `NIL` is unbounded

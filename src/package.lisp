@@ -50,7 +50,7 @@ is extensible (see DEFINE-BUILTIN).")
    #:arithmetic-evaluation-error
    #:arithmetic-error-expression
    #:arithmetic-error-reason
-   #:predicate-true-p
+   #:define-foreign-predicate
    ;; queries
    #:map-prolog-solutions
    #:query-prolog
