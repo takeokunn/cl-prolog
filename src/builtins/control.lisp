@@ -5,6 +5,9 @@
 (define-builtin (true) (rulebase environment depth emit)
   (funcall emit environment))
 
+(define-builtin ((fail false)) (rulebase environment depth emit)
+  (declare (ignore rulebase environment depth emit)))
+
 (define-builtin (!) (rulebase environment depth emit)
   (funcall emit environment)
   (%propagate-cut))
@@ -16,8 +19,9 @@
   (unless (nth-value 1 (unify left right environment))
     (funcall emit environment)))
 
-(define-builtin (not goal) (rulebase environment depth emit)
-  (unless (%provable-p goal rulebase environment (1- depth))
+(define-builtin ((not |\+|) goal) (rulebase environment depth emit)
+  (unless (%provable-p (logic-substitute goal environment)
+                       rulebase environment (1- depth))
     (funcall emit environment)))
 
 (define-builtin (call goal) (rulebase environment depth emit)
@@ -33,6 +37,27 @@
      (lambda (extended)
        (funcall emit extended)
        (return-from first-proof nil)))))
+
+(define-builtin (throw ball) (rulebase environment depth emit)
+  (declare (ignore rulebase depth emit))
+  (%raise-prolog-exception (logic-substitute ball environment) environment))
+
+(define-builtin (catch goal catcher recover) (rulebase environment depth emit)
+  (handler-case
+      (%prove-bindings/k
+       (logic-substitute goal environment)
+       rulebase environment (1- depth) emit)
+    (prolog-exception (condition)
+      (let ((thrown-environment (%prolog-exception-environment condition)))
+        (multiple-value-bind (recovery-environment matched-p)
+            (unify (prolog-exception-term condition)
+                   (logic-substitute catcher thrown-environment)
+                   thrown-environment)
+          (if matched-p
+              (%prove-bindings/k
+               (logic-substitute recover recovery-environment)
+               rulebase recovery-environment (1- depth) emit)
+              (error condition)))))))
 
 (define-builtin (repeat) (rulebase environment depth emit)
   (declare (ignore rulebase depth))

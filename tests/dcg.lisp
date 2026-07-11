@@ -2,21 +2,26 @@
 
 (in-package #:cl-prolog.tests)
 
+(defun assert-phrase (expected-remainder expected-matched-p
+                      rulebase rule-name input)
+  "Assert both parts of the PHRASE result contract."
+  (multiple-value-bind (remainder matched-p)
+      (phrase rulebase rule-name input)
+    (is-equal expected-remainder remainder)
+    (is (eq expected-matched-p matched-p))))
+
 (deftest dcg-phrase-surface ()
   (let ((rulebase
           (make-rulebase
            :clauses (list (def-dcg-rule greeting
                             (terminal :hello)
                             (terminal :world))))))
-    (multiple-value-bind (rest matched-p)
-        (phrase rulebase 'greeting '(:hello :world))
-      (is matched-p)
-      (is (null rest)))
-    (multiple-value-bind (rest matched-p)
-        (phrase rulebase 'greeting '(:hello))
-      (is (not matched-p))
-      (is (null rest)))
-    (is-equal '(:extra) (phrase rulebase 'greeting '(:hello :world :extra)))
+    ;; NIL remainder is ambiguous without MATCHED-P: it denotes either full
+    ;; consumption or failure depending on the second value.
+    (assert-phrase nil t rulebase 'greeting '(:hello :world))
+    (assert-phrase nil nil rulebase 'greeting '(:hello))
+    (assert-phrase '(:extra) t
+                   rulebase 'greeting '(:hello :world :extra))
     (is-equal '(nil) (phrase-all rulebase 'greeting '(:hello :world)))
     (is-equal '() (phrase-all rulebase 'greeting '(:goodbye)))))
 
@@ -31,17 +36,17 @@
                           (def-dcg-rule maybe-word (dcg-alt noun verb))
                           (def-dcg-rule epsilon)
                           (def-dcg-rule epsilon-run (dcg-star epsilon))))))
-    (is-equal nil (phrase rulebase 'optional-noun '()))
-    (is-equal '(:noun) (phrase rulebase 'noun-sequence '(:noun :noun)))
-    (is (not (nth-value 1 (phrase rulebase 'noun-sequence '(:verb)))))
-    (is-equal nil (phrase rulebase 'noun-run '()))
+    (assert-phrase nil t rulebase 'optional-noun '())
+    (assert-phrase '(:noun) t rulebase 'noun-sequence '(:noun :noun))
+    (assert-phrase nil nil rulebase 'noun-sequence '(:verb))
+    (assert-phrase nil t rulebase 'noun-run '())
     (is-same-set '(((?rest . (:noun :noun :verb)))
                    ((?rest . (:noun :verb)))
                    ((?rest . (:verb))))
                  (query-prolog rulebase
                                '(noun-run (:noun :noun :verb) ?rest)))
-    (is-equal nil (phrase rulebase 'maybe-word '(:verb)))
-    (is-equal nil (phrase rulebase 'maybe-word '(:noun)))
+    (assert-phrase nil t rulebase 'maybe-word '(:verb))
+    (assert-phrase nil t rulebase 'maybe-word '(:noun))
     ;; a nullable rule under dcg-star must not loop forever
     (is-equal '(((?rest . (:noun))))
               (query-prolog rulebase '(epsilon-run (:noun) ?rest)))))
@@ -72,8 +77,8 @@
                           (def-dcg-rule blocked-noun
                             (terminal :noun)
                             (brace (= 1 2)))))))
-    (is (nth-value 1 (phrase rulebase 'guarded-noun '(:noun))))
-    (is (not (nth-value 1 (phrase rulebase 'blocked-noun '(:noun)))))))
+    (assert-phrase nil t rulebase 'guarded-noun '(:noun))
+    (assert-phrase nil nil rulebase 'blocked-noun '(:noun))))
 
 (deftest dcg-expansion-internals ()
   (is-equal '((:when t) (= ?in ?out))
@@ -86,6 +91,5 @@
                        expansion))
       "Unknown DCG body elements must fail at expansion time")
   (let ((rulebase (make-rulebase :clauses (list (def-dcg-rule empty)))))
-    (is-equal nil (phrase rulebase 'empty '()))
-    (is-equal '(:token) (phrase rulebase 'empty '(:token))
-              "An empty rule consumes nothing and leaves the input intact")))
+    (assert-phrase nil t rulebase 'empty '())
+    (assert-phrase '(:token) t rulebase 'empty '(:token))))

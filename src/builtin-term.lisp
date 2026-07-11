@@ -42,8 +42,19 @@
 (defun %compare-scalars (left right)
   (cond
     ((equal left right) 0)
-    ((and (realp left) (realp right)) (if (< left right) -1 1))
-    (t (if (string< (prin1-to-string left) (prin1-to-string right)) -1 1))))
+    ((and (realp left) (realp right))
+     (cond
+       ((< left right) -1)
+       ((> left right) 1)
+       (t (%compare-scalars (prin1-to-string left)
+                            (prin1-to-string right)))))
+    (t
+     (let ((left-representation (prin1-to-string left))
+           (right-representation (prin1-to-string right)))
+       (cond
+         ((string< left-representation right-representation) -1)
+         ((string> left-representation right-representation) 1)
+         (t 0))))))
 
 (declaim (ftype (function (t t) integer) %compare-terms))
 
@@ -96,6 +107,12 @@
   (when (%term-atom-p (%term-resolve term environment))
     (funcall emit environment)))
 
+(define-builtin (atomic term) (rulebase environment depth emit)
+  (declare (ignore rulebase depth))
+  (let ((resolved-term (%term-resolve term environment)))
+    (when (or (%term-atom-p resolved-term) (numberp resolved-term))
+      (funcall emit environment))))
+
 (define-builtin (number term) (rulebase environment depth emit)
   (declare (ignore rulebase depth))
   (when (numberp (%term-resolve term environment))
@@ -104,6 +121,11 @@
 (define-builtin (integer term) (rulebase environment depth emit)
   (declare (ignore rulebase depth))
   (when (integerp (%term-resolve term environment))
+    (funcall emit environment)))
+
+(define-builtin (float term) (rulebase environment depth emit)
+  (declare (ignore rulebase depth))
+  (when (floatp (%term-resolve term environment))
     (funcall emit environment)))
 
 (define-builtin (== left right) (rulebase environment depth emit)
@@ -156,6 +178,13 @@
   (declare (ignore rulebase depth))
   (when (%term-compound-p (%term-resolve term environment))
     (funcall emit environment)))
+
+(define-builtin (callable term) (rulebase environment depth emit)
+  (declare (ignore rulebase depth))
+  (let ((resolved-term (%term-resolve term environment)))
+    (when (or (%term-atom-p resolved-term)
+              (%term-compound-p resolved-term))
+      (funcall emit environment))))
 
 (define-builtin (ground term) (rulebase environment depth emit)
   (declare (ignore rulebase depth))

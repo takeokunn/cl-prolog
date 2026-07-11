@@ -2,6 +2,7 @@
 
 (defpackage #:cl-prolog.tests
   (:use #:cl #:cl-prolog)
+  (:shadowing-import-from #:cl-prolog #:catch #:throw)
   (:export #:run-tests
            #:deftest
            #:deftest-table

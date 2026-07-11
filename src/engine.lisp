@@ -29,6 +29,30 @@
          :goal goal
          :reason (apply #'format nil reason arguments)))
 
+;;; Prolog exception control flow
+
+(define-condition prolog-exception (error)
+  ((term :initarg :term :reader prolog-exception-term)
+   (environment :initarg :environment :reader %prolog-exception-environment))
+  (:report (lambda (condition stream)
+             (format stream "Uncaught Prolog exception: ~S."
+                     (prolog-exception-term condition))))
+  (:documentation "An exception term raised by the Prolog THROW/1 builtin."))
+
+(define-condition prolog-instantiation-error (prolog-exception) ()
+  (:report (lambda (condition stream)
+             (format stream "Prolog instantiation error: THROW/1 received ~S."
+                     (prolog-exception-term condition))))
+  (:documentation "Signalled when THROW/1 receives an unbound logic variable."))
+
+(defun %raise-prolog-exception (term environment)
+  "Raise TERM together with the binding environment active at THROW/1."
+  (error (if (logic-var-p term)
+             'prolog-instantiation-error
+             'prolog-exception)
+         :term term
+         :environment environment))
+
 ;;; Cut control flow
 
 (define-condition %cut (condition) ()

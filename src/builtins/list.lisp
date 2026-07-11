@@ -1,26 +1,46 @@
 (in-package #:cl-prolog)
 
+(defun %unify-sequence (pairs environment continuation)
+  "Unify PAIRS from left to right, then invoke CONTINUATION."
+  (if (null pairs)
+      (funcall continuation environment)
+      (multiple-value-bind (extended ok)
+          (unify (caar pairs) (cdar pairs) environment)
+        (when ok
+          (%unify-sequence (cdr pairs) extended continuation)))))
+
 (define-builtin (member item list-term) (rulebase environment depth emit)
-  (let ((elements (logic-substitute list-term environment)))
-    (when (%proper-list-p elements)
-      (dolist (element elements)
-        (%unify-emit item element environment emit)))))
+  (labels ((visit (tail current-environment remaining-depth)
+             (when (plusp remaining-depth)
+               (let ((head (fresh-logic-variable "?MEMBER-HEAD"))
+                     (rest (fresh-logic-variable "?MEMBER-TAIL")))
+                 (%unify-sequence
+                  (list (cons tail (cons head rest)))
+                  current-environment
+                  (lambda (extended)
+                    (%unify-emit item head extended emit)
+                    (visit rest extended (1- remaining-depth))))))))
+    (visit list-term environment depth)))
 
 (define-builtin (append left right result) (rulebase environment depth emit)
-  (let ((left-value (logic-substitute left environment))
-        (result-value (logic-substitute result environment)))
-    (cond
-      ((%proper-list-p left-value)
-       (%unify-emit result
-                    (append left-value (logic-substitute right environment))
-                    environment emit))
-      ((%proper-list-p result-value)
-       (loop for split from 0 to (length result-value)
-             do (multiple-value-bind (extended ok)
-                    (unify left (subseq result-value 0 split) environment)
-                  (when ok
-                    (%unify-emit right (nthcdr split result-value)
-                                 extended emit))))))))
+  (labels ((join (left-tail result-tail current-environment remaining-depth)
+             ;; append([], Ys, Ys).
+             (%unify-sequence
+              (list (cons left-tail nil) (cons right result-tail))
+              current-environment emit)
+             ;; append([X|Xs], Ys, [X|Zs]) :- append(Xs, Ys, Zs).
+             (when (plusp remaining-depth)
+               (let ((head (fresh-logic-variable "?APPEND-HEAD"))
+                     (left-rest (fresh-logic-variable "?APPEND-LEFT"))
+                     (result-rest (fresh-logic-variable "?APPEND-RESULT")))
+                 (%unify-sequence
+                  (list (cons left-tail (cons head left-rest))
+                        (cons result-tail (cons head result-rest)))
+                  current-environment
+                  (lambda (extended)
+                    (join left-rest result-rest extended
+                          (1- remaining-depth))))))))
+    (join left result environment depth)))
 
 (define-builtin (reverse forward backward) (rulebase environment depth emit)
   (let ((forward-value (logic-substitute forward environment))

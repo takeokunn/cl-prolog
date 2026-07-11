@@ -1,6 +1,6 @@
 (defpackage #:cl-prolog
   (:use #:cl)
-  (:shadow #:!)
+  (:shadow #:! #:catch #:throw)
   (:documentation
    "A small, dependency-free Prolog engine.
 
@@ -29,6 +29,9 @@ is extensible (see DEFINE-BUILTIN).")
    #:*max-prolog-depth*
    #:invalid-goal-error
    #:invalid-goal-error-goal
+   #:prolog-exception
+   #:prolog-exception-term
+   #:prolog-instantiation-error
    #:arithmetic-evaluation-error
    #:arithmetic-error-expression
    #:arithmetic-error-reason
@@ -50,14 +53,21 @@ is extensible (see DEFINE-BUILTIN).")
    #:!
    #:call
    #:once
+   #:catch
+   #:throw
    #:repeat
    #:findall
    #:bagof
    #:setof
    #:true
+   #:fail
+   #:false
+   #:|\+|
    #:asserta
    #:assertz
    #:retract
+   #:retractall
+   #:current-predicate
    #:abolish
    #:clause
    #:!=
@@ -72,8 +82,20 @@ is extensible (see DEFINE-BUILTIN).")
    #:var
    #:nonvar
    #:atom
+   #:atomic
    #:number
+   #:integer
+   #:float
+   #:==
+   #:|\==|
+   #:@<
+   #:@=<
+   #:@>
+   #:@>=
+   #:compare
+   #:term-variables
    #:compound
+   #:callable
    #:ground
    #:functor
    #:arg
