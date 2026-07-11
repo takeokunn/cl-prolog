@@ -1,5 +1,12 @@
 ;;;; Shared bootstrap helpers for direct-load scripts.
 
+;; On macOS the deferred-GC pending-interrupt trap can hang the process
+;; (broken brk/mach-exception delivery, observed on Darwin 25 / macOS 26).
+;; Keep the implicit GC trigger out of reach and rely on the explicit
+;; SB-EXT:GC calls issued after every file load and before every test.
+#+(and sbcl darwin)
+(setf (sb-ext:bytes-consed-between-gcs) (* 512 1024 1024))
+
 (require :asdf)
 
 (defpackage #:cl-prolog.bootstrap

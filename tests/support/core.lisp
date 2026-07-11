@@ -203,6 +203,8 @@ Supported spec forms:
 (defun %run-test (name thunk timeout)
   (handler-case
       (progn
+        #+sbcl
+        (sb-ext:gc :full t)
         (format t "running ~A~%" name)
         (finish-output)
         #+sbcl
