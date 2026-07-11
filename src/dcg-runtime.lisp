@@ -39,16 +39,15 @@
   "Match zero or more repetitions of RULE between STREAM-IN and STREAM-OUT."
   (%unify-emit stream-out stream-in environment emit)
   (let ((midpoint (fresh-logic-variable "?MID")))
-    (%with-cut-barrier
-      (%prove-bindings/k (list rule stream-in midpoint)
-                         rulebase environment depth
-                   (lambda (extended)
-                     ;; Only recurse when RULE actually advanced the stream.
-                     ;; A nullable rule leaves MIDPOINT unresolved, which
-                     ;; would otherwise keep generating the same proof forever.
-                     (when (%dcg-progress-p stream-in midpoint extended)
-                        (%solve-dcg-star rule midpoint stream-out
-                                         rulebase extended depth emit)))))))
+    (%prove-bindings/k (list rule stream-in midpoint)
+                       rulebase environment depth
+                       (lambda (extended)
+                         ;; Only recurse when RULE actually advanced the stream.
+                         ;; A nullable rule leaves MIDPOINT unresolved, which
+                         ;; would otherwise keep generating the same proof forever.
+                         (when (%dcg-progress-p stream-in midpoint extended)
+                           (%solve-dcg-star rule midpoint stream-out
+                                            rulebase extended depth emit))))))
 
 (define-builtin (dcg-token-match expected input rest) (rulebase environment depth emit)
   (let ((tokens (logic-substitute input environment)))
@@ -76,9 +75,8 @@
                environment emit))
 
 (define-builtin (dcg-opt rule stream-in stream-out) (rulebase environment depth emit)
-  (%with-cut-barrier
-    (%prove-bindings/k (list rule stream-in stream-out)
-                       rulebase environment depth emit))
+  (%prove-bindings/k (list rule stream-in stream-out)
+                     rulebase environment depth emit)
   (%unify-emit stream-out stream-in environment emit))
 
 (define-builtin (dcg-star rule stream-in stream-out) (rulebase environment depth emit)
@@ -86,12 +84,11 @@
 
 (define-builtin (dcg-plus rule stream-in stream-out) (rulebase environment depth emit)
   (let ((midpoint (fresh-logic-variable "?MID")))
-    (%with-cut-barrier
-      (%prove-bindings/k (list rule stream-in midpoint)
-                         rulebase environment depth
-                   (lambda (extended)
-                     (%solve-dcg-star rule midpoint stream-out
-                                      rulebase extended depth emit))))))
+    (%prove-bindings/k (list rule stream-in midpoint)
+                       rulebase environment depth
+                       (lambda (extended)
+                         (%solve-dcg-star rule midpoint stream-out
+                                          rulebase extended depth emit)))))
 
 (define-builtin (dcg-alt &rest arguments) (rulebase environment depth emit)
   (let ((alternatives (butlast arguments 2))
@@ -100,6 +97,5 @@
       (%invalid-goal (cons 'dcg-alt arguments)
                      "DCG-ALT needs at least one alternative and two stream arguments"))
     (dolist (alternative alternatives)
-      (%with-cut-barrier
-        (%prove-bindings/k (list* alternative streams)
-                           rulebase environment depth emit)))))
+      (%prove-bindings/k (list* alternative streams)
+                         rulebase environment depth emit))))

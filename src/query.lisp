@@ -6,11 +6,26 @@
 
 (in-package #:cl-prolog)
 
+(defun %collect-query-variables (query)
+  "Collect public variables, excluding variables scoped by FORALL/2."
+  (let ((variables '()))
+    (labels ((walk (term)
+               (cond
+                 ((logic-var-p term)
+                  (pushnew term variables :test #'eq))
+                 ((and (consp term) (eq (first term) 'forall))
+                  nil)
+                 ((consp term)
+                  (walk (car term))
+                  (walk (cdr term))))))
+      (walk query))
+    (nreverse variables)))
+
 (defun %project-bindings (query environment)
   "Return an alist mapping each variable of QUERY to its solved value."
   (mapcar (lambda (variable)
             (cons variable (logic-substitute variable environment)))
-          (%collect-variables query)))
+          (%collect-query-variables query)))
 
 (defun %query-option (options key default)
   "Return KEY from OPTIONS, or DEFAULT when KEY is absent."
@@ -43,21 +58,25 @@ after that many solutions.  Returns NIL."
     (unless (typep limit '(or null (integer 1)))
       (error "MAP-PROLOG-SOLUTIONS: :LIMIT must be NIL or a positive integer, got ~S."
              limit))
-    (let ((remaining limit))
-      (block search
-        (%prove-goals/k
-         (%normalize-query query)
-         (%make-proof-state rulebase environment max-depth
-                            +default-prolog-module+
-                            (%make-rulebase-table-session rulebase))
-         (lambda (state)
-           (let ((bindings (proof-state-bindings state)))
-             (funcall function (if project
-                                   (%project-bindings query bindings)
-                                   bindings)))
-           (when (and remaining (zerop (decf remaining)))
-             (return-from search)))))
-      nil)))
+    (%with-logic-variable-order
+      (let ((remaining limit)
+            (cut-tag (%make-cut-tag)))
+        (block search
+          (cl:catch cut-tag
+            (%prove-goals/k
+             (%normalize-query query)
+             (%make-proof-state rulebase environment max-depth
+                                +default-prolog-module+
+                                (%make-rulebase-table-session rulebase)
+                                cut-tag)
+             (lambda (state)
+               (let ((bindings (proof-state-bindings state)))
+                 (funcall function (if project
+                                       (%project-bindings query bindings)
+                                       bindings)))
+               (when (and remaining (zerop (decf remaining)))
+                 (return-from search))))))
+        nil))))
 
 (defun query-prolog (rulebase query &rest options)
   "Return the list of solutions for QUERY against RULEBASE.

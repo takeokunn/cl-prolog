@@ -120,9 +120,8 @@ first parse and whether any parse exists."
           (query-prolog rulebase (list rule-name input '?dcg-rest))))
 
 (defun %prove-phrase/k (grammar input rest rulebase environment depth emit)
-  (%with-cut-barrier
-    (%prove-bindings/k (%dcg-call-with-streams grammar input rest)
-                       rulebase environment depth emit)))
+  (%prove-bindings/k (%dcg-call-with-streams grammar input rest)
+                     rulebase environment depth emit))
 
 (define-builtin (phrase grammar input) (rulebase environment depth emit)
   (%prove-phrase/k grammar input '() rulebase environment depth emit))

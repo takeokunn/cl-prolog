@@ -2,6 +2,22 @@
 
 (in-package #:cl-prolog.tests)
 
+(deftest canonical-iso-predicate-names-parse-and-dispatch ()
+  (let ((rulebase (make-rulebase)))
+    (dolist (source
+             '("atom_length(hello, 5)"
+               "atom_concat(hello, world, helloworld)"
+               "sub_atom(abc, 1, 1, 1, b)"
+               "atom_chars(abc, [a, b, c])"
+               "atom_codes(abc, [65, 66, 67])"
+               "char_code(a, 65)"
+               "number_chars(42, ['4', '2'])"
+               "number_codes(42, [52, 50])"
+               "current_predicate(atom_length/2)"
+               "setup_call_cleanup(true, true, true)"
+               "call_cleanup(true, true)"))
+      (is (prolog-succeeds-p rulebase (read-prolog-term source))))))
+
 (deftest-queries family-relations ((make-family-rulebase))
   ((ancestor tom ?who)           => (((?who . bob)) ((?who . alice)) ((?who . eve))))
   ((ancestor ?x eve)             :set (((?x . tom)) ((?x . bob)) ((?x . alice))))
@@ -10,6 +26,11 @@
   ((ancestor tom eve)            :succeeds)
   ((ancestor eve tom)            :fails)
   ((adult ?x)                    :set (((?x . tom)) ((?x . bob)) ((?x . alice)))))
+
+(deftest-queries iso-not-unifiable ((make-rulebase))
+  ((cl-prolog:|\\=| tom alice)   => (nil))
+  ((cl-prolog:|\\=| ?x ?y)      :fails)
+  ((cl-prolog:|\\=| tom alice)   :succeeds))
 
 (deftest-queries control-flow-builtins ((make-family-rulebase))
   ((true)                        => (nil))
@@ -20,19 +41,13 @@
   ((unify_with_occurs_check ?x (node value))
                                    => (((?x node value))))
   ((unify_with_occurs_check ?x (node ?x)) :fails)
-  ((/= tom alice)                => (nil))
-  ((/= ?x ?y)                    :fails)
-  ((/= tom alice)                :succeeds)
-  ((!= tom alice)                => (nil))
-  ((!= ?x ?y)                    :fails)
-  ((!= tom alice)                :succeeds)
   ((not (parent alice tom))      => (nil))
   ((not (parent tom bob))        :fails)
   ((and (= ?goal (parent alice tom)) (not ?goal))
                                    => (((?goal parent alice tom))))
   ((and (= ?goal (parent tom bob)) (not ?goal)) :fails)
-  ((cl-prolog::|\+| (parent alice tom)) => (nil))
-  ((cl-prolog::|\+| (parent tom bob)) :fails)
+  ((cl-prolog::|\\+| (parent alice tom)) => (nil))
+  ((cl-prolog::|\\+| (parent tom bob)) :fails)
   ((and)                         => (nil))
   ((and (parent tom bob) (parent bob alice)) => (nil))
   ((and (parent tom ?x) (parent ?x alice))   => (((?x . bob))))
@@ -66,14 +81,14 @@
   ((forall (choice ?x) (or (= ?x left) (= ?x right))) => (nil))
   ((forall (choice ?x) (= ?x left)) :fails)
   ((forall fail (throw unreachable)) => (nil))
-  ((and (setup-call-cleanup (assertz (cleanup-marker))
+  ((and (setup_call_cleanup (assertz (cleanup-marker))
                             true
                             (retractall (cleanup-marker)))
         (not (cleanup-marker)))  => (nil))
-  ((and (call-cleanup true (assertz (cleanup-marker)))
+  ((and (call_cleanup true (assertz (cleanup-marker)))
         (cleanup-marker))        => (nil))
-  ((setup-call-cleanup true true fail) => (nil))
-  ((setup-call-cleanup true true (throw cleanup-error)) :signals)
+  ((setup_call_cleanup true true fail) => (nil))
+  ((setup_call_cleanup true true (throw cleanup-error)) :signals)
   ((catch (throw ball) ball (= ?x recovered))
                                    => (((?x . recovered))))
   ((catch (and (= ?local discarded)
@@ -96,7 +111,7 @@
 (deftest cleanup-runs-on-exception-and-early-query-exit ()
   (let ((rulebase (make-family-rulebase)))
     (assert-query rulebase
-                  (catch (setup-call-cleanup
+                  (catch (setup_call_cleanup
                           (assertz (cleanup-started))
                           (throw interrupted)
                           (assertz (cleanup-finished)))
@@ -107,10 +122,10 @@
     (assert-query rulebase (cleanup-finished) :succeeds)
     (is-equal 1 (cl:length (query-prolog rulebase '(cleanup-finished))))
     (assert-query rulebase
-                  (setup-call-cleanup fail true (throw unreachable))
+                  (setup_call_cleanup fail true (throw unreachable))
                   :fails)
     (assert-query rulebase
-                  (setup-call-cleanup true ! (assertz (cut-cleanup)))
+                  (setup_call_cleanup true ! (assertz (cut-cleanup)))
                   :succeeds)
     (assert-query rulebase (cut-cleanup) :succeeds)
     (is-equal 1 (cl:length (query-prolog rulebase '(cut-cleanup))))
@@ -120,7 +135,7 @@
          (declare (cl:ignore solution))
          (return-from first-solution))
        rulebase
-       '(setup-call-cleanup true (choice ?value)
+       '(setup_call_cleanup true (choice ?value)
                             (assertz (limited-cleanup)))))
     (assert-query rulebase (limited-cleanup) :succeeds)
     (is-equal 1 (cl:length (query-prolog rulebase '(limited-cleanup))))))
@@ -128,7 +143,7 @@
 (deftest cleanup-observes-goal-bindings-and-runs-once ()
   (let ((rulebase (make-family-rulebase)))
     (assert-query rulebase
-                  (setup-call-cleanup
+                  (setup_call_cleanup
                    true
                    (= ?value bound)
                    (assertz (cleanup-observed ?value)))
@@ -200,10 +215,10 @@
                   :first ((?shade . green)))
     (assert-query rulebase (color apple ?shade)
                   => (((?shade . red)) ((?shade . blue))))
-    (assert-query rulebase (current-predicate (ordered / 1)) :succeeds)
-    (assert-query rulebase (current-predicate (color / 2)) :succeeds)
-    (assert-query rulebase (current-predicate (warm / 1)) :succeeds)
-    (assert-query rulebase (current-predicate (= / 2)) :succeeds)
+    (assert-query rulebase (current_predicate (/ ordered 1)) :succeeds)
+    (assert-query rulebase (current_predicate (/ color 2)) :succeeds)
+    (assert-query rulebase (current_predicate (/ warm 1)) :succeeds)
+    (assert-query rulebase (current_predicate (/ = 2)) :succeeds)
     (assert-query rulebase (retractall (color apple ?shade)) :succeeds)
     (assert-query rulebase (color apple ?shade) :fails)
     (assert-query rulebase (retractall (color apple ?shade)) :succeeds)
@@ -213,11 +228,11 @@
     (assert-query rulebase (color ?fruit ?shade) :fails)
     (assert-query rulebase (assertz (color apple red)) :succeeds)
     (assert-query rulebase (assertz (color pear green)) :succeeds)
-    (assert-query rulebase (abolish (color / 2)) :succeeds)
-    (assert-query rulebase (color apple ?shade) :fails)
+    (assert-query rulebase (abolish (/ color 2)) :succeeds)
+    (assert-query rulebase (color apple ?shade) :signals)
     (assert-query rulebase (assertz (= left left)) :signals)
     (assert-query rulebase (clause (= left left) ?body) :signals)
-    (assert-query rulebase (abolish (= / 2)) :signals)))
+    (assert-query rulebase (abolish (/ = 2)) :signals)))
 
 (deftest dynamic-database-accepts-zero-arity-atoms ()
   (let ((rulebase (make-rulebase)))
@@ -236,25 +251,25 @@
      (lambda (solution)
        (push (solution-binding '?indicator solution) seen)
        (rulebase-insert-clause! rulebase (make-clause '(gamma added))))
-     rulebase '(current-predicate ?indicator))
-    (is-equal '((alpha / 1) (beta / 0))
+     rulebase '(current_predicate ?indicator))
+    (is-equal '((/ alpha 1) (/ beta 0))
               (remove-if-not
                (lambda (indicator)
-                 (member (first indicator) '(alpha beta gamma)))
+                 (member (second indicator) '(alpha beta gamma)))
                (nreverse seen)))
-    (assert-query rulebase (current-predicate (gamma / 1)) :succeeds)))
+    (assert-query rulebase (current_predicate (/ gamma 1)) :succeeds)))
 
 (deftest current-predicate-validates-ground-indicators ()
   (let ((rulebase (make-rulebase)))
-    (assert-query rulebase (current-predicate missing) :signals)
-    (assert-query rulebase (current-predicate (missing / atom)) :signals)
-    (assert-query rulebase (current-predicate (?name / atom)) :signals)
-    (assert-query rulebase (current-predicate (?name / 1 / ?extra)) :signals)
-    (assert-query rulebase (current-predicate (missing / -1)) :signals)
-    (assert-query rulebase (current-predicate (missing / 1)) :fails)
-    (assert-query rulebase (current-predicate (foreign-choice / 1)) :succeeds)
-    (assert-query rulebase (current-predicate (?name / 2)) :succeeds)
-    (assert-query rulebase (current-predicate (= / ?arity)) :succeeds)))
+    (assert-query rulebase (current_predicate missing) :signals)
+    (assert-query rulebase (current_predicate (/ missing atom)) :signals)
+    (assert-query rulebase (current_predicate (/ ?name atom)) :signals)
+    (assert-query rulebase (current_predicate (/ ?name 1 ?extra)) :signals)
+    (assert-query rulebase (current_predicate (/ missing -1)) :signals)
+    (assert-query rulebase (current_predicate (/ missing 1)) :fails)
+    (assert-query rulebase (current_predicate (/ foreign-choice 1)) :succeeds)
+    (assert-query rulebase (current_predicate (/ ?name 2)) :succeeds)
+    (assert-query rulebase (current_predicate (/ = ?arity)) :succeeds)))
 
 (deftest dynamic-database-enforces-static-procedure-permissions ()
   (let ((rulebase (make-rulebase
@@ -262,7 +277,7 @@
     (dolist (goal '((asserta (fixed replacement))
                     (assertz (= left left))
                     (retract (fixed ?value))
-                    (abolish (fixed / 1))))
+                    (abolish (/ fixed 1))))
       (handler-case
           (progn
             (query-prolog rulebase goal)
@@ -270,8 +285,8 @@
         (prolog-permission-error (condition)
           (let ((formal (second (prolog-exception-term condition))))
             (is-equal "PERMISSION_ERROR" (symbol-name (first formal)))
-            (is-equal 'modify (second formal))
-            (is-equal 'static_procedure (third formal))))))))
+            (is-equal "MODIFY" (symbol-name (second formal)))
+            (is-equal "STATIC_PROCEDURE" (symbol-name (third formal)))))))))
 
 (deftest dynamic-database-validates-callable-arguments ()
   (let ((rulebase (make-rulebase)))
@@ -283,8 +298,8 @@
             (query-prolog rulebase goal)
             (error "Expected an instantiation error for ~S" goal))
         (prolog-instantiation-error (condition)
-          (is-equal 'instantiation_error
-                    (second (prolog-exception-term condition))))))
+          (is-equal "INSTANTIATION_ERROR"
+                    (symbol-name (second (prolog-exception-term condition)))))))
     (dolist (goal '((retract 42)
                     (retractall 42)
                     (clause 42 ?body)))
@@ -294,8 +309,8 @@
             (error "Expected a callable type error for ~S" goal))
         (prolog-type-error (condition)
           (let ((formal (second (prolog-exception-term condition))))
-            (is-equal 'type_error (first formal))
-            (is-equal 'callable (second formal))))))))
+            (is-equal "TYPE_ERROR" (symbol-name (first formal)))
+            (is-equal "CALLABLE" (symbol-name (second formal)))))))))
 
 (deftest clause-rejects-static-procedure-access ()
   (let ((rulebase (make-rulebase
@@ -308,15 +323,15 @@
         (let ((formal (second (prolog-exception-term condition))))
           (is-equal '("PERMISSION_ERROR" "ACCESS" "PRIVATE_PROCEDURE")
                     (mapcar #'symbol-name (subseq formal 0 3)))
-          (is-equal '(fixed / 1) (fourth formal)))))))
+          (is-equal '(/ fixed 1) (fourth formal)))))))
 
 (deftest abolish-validates-predicate-indicators ()
   (let ((rulebase (make-rulebase)))
     (assert-query rulebase (abolish ?indicator) :signals)
     (dolist (goal '((abolish fixed)
-                    (abolish (fixed / one))))
+                    (abolish (/ fixed one))))
       (assert-query rulebase goal :signals))
-    (assert-query rulebase (abolish (fixed / -1)) :signals)))
+    (assert-query rulebase (abolish (/ fixed -1)) :signals)))
 
 (deftest proper-list-p-rejects-circular-lists ()
   (let ((circular (list 'value)))
@@ -326,7 +341,7 @@
 (deftest abolish-removes-the-dynamic-declaration ()
   (let ((rulebase (make-rulebase)))
     (assert-query rulebase (assertz (temporary first)) :succeeds)
-    (assert-query rulebase (abolish (temporary / 1)) :succeeds)
+    (assert-query rulebase (abolish (/ temporary 1)) :succeeds)
     (is (null (cl-prolog::%rulebase-predicate-property
                rulebase 'temporary 1)))
     (assert-query rulebase (assertz (temporary second)) :succeeds)
@@ -337,13 +352,13 @@
     (assert-query rulebase (assertz (empty-after-retract value)) :succeeds)
     (assert-query rulebase (retractall (empty-after-retract ?value)) :succeeds)
     (assert-query rulebase
-                  (current-predicate (empty-after-retract / 1)) :succeeds)))
+                  (current_predicate (/ empty-after-retract 1)) :succeeds)))
 
 (deftest predicate-call-keeps-logical-update-snapshot ()
   (let ((rulebase (make-rulebase))
         (seen '()))
-    (rulebase-insert-clause! rulebase (make-clause '(item first)))
-    (rulebase-insert-clause! rulebase (make-clause '(item second)))
+    (assert-query rulebase (assertz (item first)) :succeeds)
+    (assert-query rulebase (assertz (item second)) :succeeds)
     (map-prolog-solutions
      (lambda (solution)
        (push (solution-binding '?value solution) seen)
@@ -355,7 +370,10 @@
 (deftest retract-backtracks-over-its-call-snapshot ()
   (let ((rulebase (make-rulebase)))
     (dolist (value '(first second third))
-      (rulebase-insert-clause! rulebase (make-clause (list 'item value))))
+      (is (not (null
+                (query-prolog rulebase
+                              (list 'assertz (list 'item value))
+                              :limit 1)))))
     (assert-query rulebase (retract (item ?value))
                   => (((?value . first))
                       ((?value . second))
@@ -412,6 +430,28 @@
   ((is ?x (** 2 8))              => (((?x . 256))))
   ((is ?x (^ 3 3))               => (((?x . 27))))
   ((is ?x (+ 3))                 => (((?x . 3))))
+  ((is ?x (|/\\| 6 3))          => (((?x . 2))))
+  ((is ?x (|\\/| 4 3))          => (((?x . 7))))
+  ((is ?x (xor 6 3))             => (((?x . 5))))
+  ((is ?x (|\\| 0))             => (((?x . -1))))
+  ((is ?x (|<<| 3 4))           => (((?x . 48))))
+  ((is ?x (|>>| -16 2))         => (((?x . -4))))
+  ((is ?x (float 3))            => (((?x . 3.0d0))))
+  ((is ?x (float_integer_part -2.75d0)) => (((?x . -2.0d0))))
+  ((is ?x (float_fractional_part -2.75d0)) => (((?x . -0.75d0))))
+  ((is ?x signum)                :signals)
+  ((is ?x (signum 9))           => (((?x . 1))))
+  ((|=:=| pi 3.141592653589793d0) :succeeds)
+  ((|=:=| (sqrt 9) 3)            :succeeds)
+  ((|=:=| (exp 0) 1)             :succeeds)
+  ((|=:=| (log 1) 0)             :succeeds)
+  ((|=:=| (sin 0) 0)             :succeeds)
+  ((|=:=| (cos 0) 1)             :succeeds)
+  ((|=:=| (tan 0) 0)             :succeeds)
+  ((|=:=| (asin 0) 0)            :succeeds)
+  ((|=:=| (acos 1) 0)            :succeeds)
+  ((|=:=| (atan 0) 0)            :succeeds)
+  ((|=:=| (atan 0 -1) pi)        :succeeds)
   ((is 3 (+ 1 2))                :succeeds)
   ((is 4 (+ 1 2))                :fails)
   ((|=:=| (+ 1 2) 3)             :succeeds)
@@ -429,13 +469,58 @@
   ((is ?x (/ 1 0))               :signals)
   ((is ?x (// 1 0))              :signals)
   ((is ?x (rem 1.0 2))           :signals)
-  ((is ?x (mod 1 0))             :signals))
+  ((is ?x (mod 1 0))             :signals)
+  ((is ?x (sqrt -1))             :signals)
+  ((is ?x (log 0))               :signals)
+  ((is ?x (|/\\| 1.0 1))        :signals)
+  ((is ?x (|<<| 1 1.5))         :signals))
+
+(deftest-queries prolog-flag-builtins ((make-rulebase))
+  ((cl-prolog::current_prolog_flag bounded ?value) => (((?value . cl-prolog:false))))
+  ((cl-prolog::current_prolog_flag max-arity ?value) => (((?value . cl-prolog::unbounded))))
+  ((cl-prolog::current_prolog_flag unknown ?value) => (((?value . cl-prolog.user-atoms::error))))
+  ((cl-prolog::current_prolog_flag missing ?value) :fails)
+  ((cl-prolog::current_prolog_flag ?name ?value) :set
+   (((?name . cl-prolog::bounded) (?value . cl-prolog:false))
+    ((?name . cl-prolog::max-arity) (?value . cl-prolog::unbounded))
+    ((?name . cl-prolog::integer-rounding-function) (?value . cl-prolog::down))
+    ((?name . cl-prolog::char-conversion) (?value . cl-prolog::off))
+    ((?name . cl-prolog.user-atoms::debug) (?value . cl-prolog::off))
+    ((?name . cl-prolog::unknown) (?value . cl-prolog.user-atoms::error))
+    ((?name . cl-prolog::double-quotes) (?value . cl-prolog::codes))))
+  ((cl-prolog::set_prolog_flag debug cl-prolog::on) :succeeds)
+  ((cl-prolog::current_prolog_flag debug cl-prolog::on) :succeeds)
+  ((cl-prolog::set_prolog_flag debug cl-prolog::off) :succeeds)
+  ((cl-prolog::current_prolog_flag debug cl-prolog::off) :succeeds)
+  ((cl-prolog::set_prolog_flag ?name on) :signals)
+  ((cl-prolog::set_prolog_flag debug ?value) :signals)
+  ((cl-prolog::set_prolog_flag missing on) :signals)
+  ((cl-prolog::set_prolog_flag debug invalid) :signals)
+  ((cl-prolog::set_prolog_flag bounded false) :signals)
+  ((cl-prolog::current_prolog_flag 7 ?value) :signals))
+
+(deftest prolog-flag-values-are-rulebase-local ()
+  (let ((changed (make-rulebase))
+        (unchanged (make-rulebase)))
+    (assert-query changed (cl-prolog::set_prolog_flag debug cl-prolog::on) :succeeds)
+    (assert-query changed (cl-prolog::current_prolog_flag debug cl-prolog::on) :succeeds)
+    (assert-query unchanged (cl-prolog::current_prolog_flag debug cl-prolog::off) :succeeds)))
+
+(deftest prolog-flag-values-follow-rulebase-transactions ()
+  (let* ((rulebase (make-rulebase))
+         (transaction (cl-prolog::%copy-rulebase rulebase)))
+    (assert-query transaction (cl-prolog::set_prolog_flag unknown cl-prolog:fail) :succeeds)
+    (assert-query rulebase
+                  (cl-prolog::current_prolog_flag unknown cl-prolog.user-atoms::error)
+                  :succeeds)
+    (cl-prolog::%replace-rulebase! rulebase transaction)
+    (assert-query rulebase (cl-prolog::current_prolog_flag unknown cl-prolog:fail) :succeeds)))
 
 (deftest-queries goal-shapes ((prolog ((ready))
                                       ((stuck ?in ?out) (= ?in ?out))))
   (ready                         => (nil))
   ((ready)                       => (nil))
-  (missing                       :fails)
+  (missing                       :signals)
   (()                            => (nil))
   (!                             => (nil))
   (((!) (= left left))           => (nil))

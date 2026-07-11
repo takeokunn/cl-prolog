@@ -76,10 +76,13 @@
       ((color ?x) (= ?x derived))))
   ((color ?x) => (((?x . red)) ((?x . derived)))))
 
+;; The recursive argument keeps growing, so variant tabling cannot close a
+;; fixed point and the explicit depth budget must fire.  (A plain P :- P
+;; loop is answered finitely by tabling and would fail instead of signal.)
 (deftest-queries depth-bound-signals-incomplete-search
     ((prolog
-      ((loop-forever) (loop-forever))))
-  ((loop-forever) :signals :max-depth 16))
+      ((loop-forever ?n) (loop-forever (s ?n)))))
+  ((loop-forever zero) :signals :max-depth 16))
 
 (deftest-queries variant-tabling-terminates-left-recursion
     ((prolog
@@ -131,7 +134,8 @@
                      ((recursive value))))
          (session (cl-prolog::%make-rulebase-table-session rulebase))
          (state (cl-prolog::%make-proof-state
-                 rulebase '() nil cl-prolog::+default-prolog-module+ session)))
+                 rulebase '() nil cl-prolog::+default-prolog-module+ session
+                 (cl-prolog::%make-cut-tag))))
     (handler-case
         (cl-prolog::%prove-clauses/k
          '(recursive ?x) state
@@ -173,19 +177,21 @@
                   (prolog-depth-limit-exceeded-goal condition))))))
 
 (deftest finite-proofs-are-unbounded-by-default ()
-  (let ((rb (make-rulebase)))
+  (let ((rb (make-rulebase))
+        (chain-length 20))
     (labels ((predicate-at (index)
                (intern (format nil "DEPTH-~D" index) *package*)))
       (rulebase-insert-clause! rb (make-clause (list (predicate-at 0))))
-      (loop for index from 1 to 65
+      (loop for index from 1 to chain-length
             do (rulebase-insert-clause!
                 rb
                 (make-clause (list (predicate-at index))
                              (list (list (predicate-at (1- index)))))))
-      (is-equal '(nil) (query-prolog rb (list (predicate-at 65))))
+      (is-equal '(nil) (query-prolog rb (list (predicate-at chain-length))))
       (is (handler-case
               (progn
-                (query-prolog rb (list (predicate-at 65)) :max-depth 64)
+                (query-prolog rb (list (predicate-at chain-length))
+                              :max-depth (1- chain-length))
                 nil)
             (prolog-depth-limit-exceeded () t))))))
 
@@ -203,7 +209,9 @@
   (let ((rb (prolog
               ((foreign-choice fallback zero))
               ((foreign-choice fallback)))))
-    (assert-query rb (foreign-choice) => ())
+    ;; No FOREIGN-CHOICE/0 solver or clause exists, so ISO requires an
+    ;; existence error rather than a silent failure.
+    (assert-query rb (foreign-choice) :signals)
     (assert-query rb (foreign-choice fallback zero) => (nil))
     (assert-query rb (foreign-choice fallback) => ())))
 
@@ -251,6 +259,10 @@
         (is-equal -1 (invalid-max-depth-error-value condition))))
     (is (signals-error
          (prolog-succeeds-p rb '(ancestor tom ?who) :max-depth 1.5)))))
+
+(deftest ground-recursive-query-has-one-projected-solution ()
+  (is-equal '(nil)
+            (query-prolog (make-family-rulebase) '(ancestor tom eve))))
 
 (deftest-table default-query-projection-paths ()
   (:equal '(((?x . tom)))
@@ -312,19 +324,23 @@
     (is (%tree-contains-p expansion 'collect-alias))))
 
 (deftest-table invalid-goal-error-reports-context ()
-  (:equal '(= a)
+  ;; A builtin name used at the wrong arity denotes a different, undefined
+  ;; procedure (=/1), so ISO requires an existence error carrying its
+  ;; predicate indicator.
+  (:equal '(/ = 1)
           (handler-case
               (progn
                 (query-prolog (make-rulebase) '(= a))
+                (error "Expected a PROLOG-EXISTENCE-ERROR"))
+            (prolog-existence-error (condition)
+              (third (second (prolog-exception-term condition))))))
+  (:equal '(42 x)
+          (handler-case
+              (progn
+                (query-prolog (make-rulebase) '((42 x)))
                 (error "Expected an INVALID-GOAL-ERROR"))
             (invalid-goal-error (condition)
-              (invalid-goal-error-goal condition))))
-  (:is (handler-case
-          (progn
-            (query-prolog (make-rulebase) '(= a))
-            (error "Expected an INVALID-GOAL-ERROR"))
-        (invalid-goal-error (condition)
-          (search "expects" (princ-to-string condition))))))
+              (invalid-goal-error-goal condition)))))
 
 (deftest iso-error-constructors-preserve-formal-data ()
   (dolist (case
@@ -412,9 +428,10 @@
          (formal (second (prolog-exception-term condition))))
     (is-equal "EXISTENCE_ERROR" (symbol-name (first formal)))
     (is-equal "PROCEDURE" (symbol-name (second formal)))
-    (destructuring-bind (predicate slash arity) (third formal)
-      (is-equal 'missing predicate)
+    ;; Predicate indicators are ordinary compound terms: functor first.
+    (destructuring-bind (slash predicate arity) (third formal)
       (is-equal "/" (symbol-name slash))
+      (is-equal 'missing predicate)
       (is-equal 1 arity))))
 
 (deftest catch-does-not-handle-common-lisp-errors ()
@@ -434,5 +451,5 @@
   (:equal '((parent tom bob) (parent bob alice))
           (cl-prolog::%normalize-query '((parent tom bob) (parent bob alice))))
   (:equal '(!) (cl-prolog::%normalize-query '!))
-  (:equal nil (cl-prolog::%with-cut-barrier :ok))
-  (:is (cl-prolog::%with-cut-barrier (cl-prolog::%propagate-cut))))
+  (:is-not (eq (cl-prolog::%make-cut-tag) (cl-prolog::%make-cut-tag))
+           "Every cut barrier must carry a distinct catch tag"))

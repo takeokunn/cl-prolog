@@ -5,10 +5,9 @@
 ;;;; environment.  Solutions therefore stream to the caller; nothing in the
 ;;;; engine accumulates result lists.
 ;;;;
-;;;; Cut (!) is implemented with the condition system.  Signalling %CUT
-;;;; unwinds to the nearest %WITH-CUT-BARRIER, which is exactly the
-;;;; dynamically-closest choice point; re-signalling from a barrier owner
-;;;; propagates the cut outward (e.g. from a rule body to the clause list).
+;;;; Cut (!) is implemented with CATCH/THROW: each predicate invocation
+;;;; establishes a fresh catch tag carried through the proof state, and !
+;;;; throws to the tag of the clause it appears in (see prover.lisp).
 
 (in-package #:cl-prolog)
 
@@ -35,6 +34,7 @@
 (define-condition prolog-existence-error (prolog-runtime-error) ())
 (define-condition prolog-evaluation-error (prolog-runtime-error) ())
 (define-condition prolog-resource-error (prolog-runtime-error) ())
+(define-condition prolog-syntax-error (prolog-runtime-error) ())
 
 (define-condition invalid-max-depth-error (error)
   ((value :initarg :value :reader invalid-max-depth-error-value))
@@ -134,27 +134,21 @@
         (error condition-type :term term :environment environment :goal goal)
         (error 'prolog-resource-error :term term :environment environment))))
 
+(defun %raise-syntax-error (condition environment operation)
+  "Raise parser CONDITION as a catchable ISO syntax_error/1 term."
+  (let ((description (prolog-parse-error-description condition)))
+    (%raise-iso-error
+     'prolog-syntax-error
+     (%iso-term "SYNTAX_ERROR"
+                (%prolog-atom-symbol description :preserve-case t))
+     environment operation description)))
+
 (defun %raise-prolog-exception (term environment)
   "Raise TERM together with the binding environment active at THROW/1."
   (if (logic-var-p term)
       (%raise-instantiation-error environment (%iso-atom "THROW")
                                   "throw/1 requires an instantiated term")
       (error 'prolog-exception :term term :environment environment)))
-
-;;; Cut control flow
-
-(define-condition %cut (condition) ()
-  (:documentation "Control-flow condition signalled by the ! goal."))
-
-(defun %propagate-cut ()
-  "Prune the dynamically nearest enclosing choice point."
-  (signal '%cut))
-
-(defmacro %with-cut-barrier (&body body)
-  "Run BODY as a choice point; return true when a cut pruned it."
-  `(handler-case
-       (progn ,@body nil)
-     (%cut () t)))
 
 ;;; Builtin goal dispatch
 
@@ -172,7 +166,7 @@
 
 (defun %register-builtin-predicate! (predicate arity)
   "Register the canonical indicator exposed by CURRENT-PREDICATE/1."
-  (pushnew (list predicate '/ arity) *builtin-predicate-indicators*
+  (pushnew (list '/ predicate arity) *builtin-predicate-indicators*
            :test #'equal)
   predicate)
 
@@ -262,7 +256,7 @@ zero times fails; calling it repeatedly produces multiple solutions."
         (arity (length argument-list)))
     `(progn
        (eval-when (:load-toplevel :execute)
-         (pushnew (list ',name '/ ,arity) *foreign-predicate-indicators*
+         (pushnew (list '/ ',name ,arity) *foreign-predicate-indicators*
                   :test #'equal))
        (defmethod %foreign-goal-solver ((predicate (eql ',name))
                                        (arity (eql ,arity)))

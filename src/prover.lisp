@@ -11,15 +11,27 @@
 (defvar *current-prolog-module* +default-prolog-module+)
 (defvar *current-table-session* nil
   "Table session inherited by proof searches nested through builtins.")
+(defvar *caller-cut-tag* nil
+  "Cut barrier of the goal invocation currently dispatching a builtin solver.
+
+Cut-transparent control constructs (AND, OR, the THEN/ELSE branches of
+IF-THEN-ELSE) read this at solver entry so a cut inside them prunes the
+caller's clause alternatives, as ISO requires.")
+
+(defun %make-cut-tag ()
+  "Return a fresh CATCH tag identifying one cut barrier."
+  (list '%cut-barrier))
 
 (defstruct (proof-state
             (:constructor %make-proof-state
-                (rulebase bindings remaining-depth module table-session)))
+                (rulebase bindings remaining-depth module table-session
+                 cut-tag)))
   "Immutable data carried through the proof-search continuation."
   (rulebase (make-rulebase) :type rulebase :read-only t)
   (bindings '() :type list :read-only t)
   (module +default-prolog-module+ :type symbol :read-only t)
   (table-session nil :type (or null %table-session) :read-only t)
+  (cut-tag nil :type list :read-only t)
   (remaining-depth *max-prolog-depth*
                    :type (or null (integer 0 *))
                    :read-only t))
@@ -30,14 +42,27 @@
                      bindings
                      (proof-state-remaining-depth state)
                      (proof-state-module state)
-                     (proof-state-table-session state)))
+                     (proof-state-table-session state)
+                     (proof-state-cut-tag state)))
 
 (defun %state-in-module (state module)
   (%make-proof-state (proof-state-rulebase state)
                      (proof-state-bindings state)
                      (proof-state-remaining-depth state)
                      module
-                     (proof-state-table-session state)))
+                     (proof-state-table-session state)
+                     (proof-state-cut-tag state)))
+
+(defun %state-with-cut-tag (state cut-tag)
+  "Return STATE rebased onto the cut barrier CUT-TAG."
+  (if (eq (proof-state-cut-tag state) cut-tag)
+      state
+      (%make-proof-state (proof-state-rulebase state)
+                         (proof-state-bindings state)
+                         (proof-state-remaining-depth state)
+                         (proof-state-module state)
+                         (proof-state-table-session state)
+                         cut-tag)))
 
 (defun %state-descending-into-rule (state bindings goal)
   "Return the state for proving a matched rule body."
@@ -53,7 +78,8 @@
                        bindings
                        (and remaining (1- remaining))
                        (proof-state-module state)
-                       (proof-state-table-session state))))
+                       (proof-state-table-session state)
+                       (proof-state-cut-tag state))))
 
 (defun %conjunction-p (query)
   "True when QUERY is already a list of goals rather than a single goal."
@@ -81,7 +107,7 @@
 
 (defun %goal-predicate-indicator (goal)
   "Return the ISO predicate indicator for normalized GOAL."
-  (list (first goal) '/ (length (rest goal))))
+  (list '/ (first goal) (length (rest goal))))
 
 (defun %clause-defines-goal-p (clause goal)
   "True when CLAUSE defines the same predicate and arity as GOAL."
@@ -90,14 +116,27 @@
          (eq (first head) (first goal))
          (= (length (rest head)) (length (rest goal))))))
 
-(defun %rulebase-defines-goal-p (rulebase module goal)
+(defun %proof-module-entries (state &optional (module (proof-state-module state)))
+  "Return one revision-stable module snapshot shared by the current query."
+  (let* ((rulebase (proof-state-rulebase state))
+         (session (proof-state-table-session state))
+         (key (list (rulebase-revision rulebase) module)))
+    (multiple-value-bind (entries present-p)
+        (gethash key (%table-session-module-entries session))
+      (if present-p
+          entries
+          (setf (gethash key (%table-session-module-entries session))
+                (%rulebase-module-entries rulebase module))))))
+
+(defun %rulebase-defines-goal-p (state module goal)
   "True when RULEBASE contains or declares GOAL's predicate."
-  (let ((predicate (first goal))
+  (let ((rulebase (proof-state-rulebase state))
+        (predicate (first goal))
         (arity (length (rest goal))))
     (or (%rulebase-predicate-property rulebase predicate arity module)
         (some (lambda (entry)
                 (%clause-defines-goal-p (%stored-clause-clause entry) goal))
-              (%rulebase-module-entries rulebase module)))))
+              (%proof-module-entries state module)))))
 
 (defun %qualified-goal-p (goal)
   (and (consp goal) (= (length goal) 3)
@@ -112,7 +151,7 @@
          (local-p
            (lambda (module name count)
              (%rulebase-defines-goal-p
-              rulebase module (list* name (make-list count))))))
+              state module (list* name (make-list count))))))
     (values goal
             (if explicit-module
                 (module-registry-resolve-qualified
@@ -137,15 +176,17 @@
 (defun %prove-goals/k (goals state succeed)
   "Prove conjunction GOALS, calling SUCCEED with each solution state.
 
-Return true when a cut fired inside GOALS, so the caller can prune its own
-alternatives as well."
+Each goal's solutions continue into the rest of the conjunction rebased
+onto this conjunction's own cut barrier, so a callee's barrier never leaks
+into the caller's remaining goals."
   (if (endp goals)
-      (progn (funcall succeed state) nil)
-      (%with-cut-barrier
+      (funcall succeed state)
+      (let ((cut-tag (proof-state-cut-tag state)))
         (%prove-goal/k (first goals) state
                        (lambda (next-state)
-                         (when (%prove-goals/k (rest goals) next-state succeed)
-                           (%propagate-cut)))))))
+                         (%prove-goals/k (rest goals)
+                                         (%state-with-cut-tag next-state cut-tag)
+                                         succeed))))))
 
 (defun %prove-goal/k (goal state succeed)
   "Prove GOAL from STATE, dispatching each result to SUCCEED."
@@ -157,6 +198,11 @@ alternatives as well."
     (cond
       ((not (%goal-form-p normalized-goal))
        (%invalid-goal goal "a goal must be a symbol or a list headed by a symbol"))
+      ((and (eq (first normalized-goal) '!) (null (rest normalized-goal)))
+       ;; Deliver the current state, then prune every remaining alternative
+       ;; up to the enclosing predicate invocation once search backtracks.
+       (funcall succeed state)
+       (cl:throw (proof-state-cut-tag state) t))
       (t
        (let* ((predicate (first normalized-goal))
               (arity (length (rest normalized-goal)))
@@ -165,7 +211,8 @@ alternatives as well."
               (solver (or builtin-solver foreign-solver)))
          (cond
            (solver
-             (let ((*current-prolog-module* (proof-state-module state)))
+             (let ((*current-prolog-module* (proof-state-module state))
+                   (*caller-cut-tag* (proof-state-cut-tag state)))
                (funcall solver
                         normalized-goal
                         (proof-state-rulebase state)
@@ -186,15 +233,35 @@ alternatives as well."
                    (proof-state-bindings state) (%iso-atom "CALL")
                    "the invoked predicate is not defined"))))))))))
 
-(defun %prove-bindings/k (query rulebase bindings remaining-depth succeed
-                          &optional (module *current-prolog-module*))
-  "Prove QUERY and call SUCCEED with each resulting binding environment."
+(defun %prove-with-cut-tag/k (query rulebase bindings remaining-depth cut-tag
+                              succeed &optional (module *current-prolog-module*))
+  "Prove QUERY under an existing cut barrier CUT-TAG."
   (%prove-goals/k (%normalize-query query)
                   (%make-proof-state rulebase bindings remaining-depth module
                                      (or *current-table-session*
-                                         (%make-rulebase-table-session rulebase)))
+                                         (%make-rulebase-table-session rulebase))
+                                     cut-tag)
                   (lambda (state)
                     (funcall succeed (proof-state-bindings state)))))
+
+(defun %prove-bindings/k (query rulebase bindings remaining-depth succeed
+                          &optional (module *current-prolog-module*))
+  "Prove QUERY and call SUCCEED with each resulting binding environment.
+
+QUERY runs behind its own cut barrier: a cut inside it never prunes the
+caller's alternatives, matching ISO CALL/1 opacity."
+  (let ((cut-tag (%make-cut-tag)))
+    (cl:catch cut-tag
+      (%prove-with-cut-tag/k query rulebase bindings remaining-depth cut-tag
+                             succeed module))))
+
+(defun %prove-transparent/k (query rulebase bindings remaining-depth succeed)
+  "Prove QUERY sharing the caller's cut barrier.
+
+Cut-transparent control constructs must call this at solver entry, before
+any nested proof rebinds *CALLER-CUT-TAG*."
+  (%prove-with-cut-tag/k query rulebase bindings remaining-depth
+                         *caller-cut-tag* succeed))
 
 (defun %replay-table-answers/k (goal state entry succeed)
   "Unify each stored answer for ENTRY with GOAL and invoke SUCCEED."
@@ -205,15 +272,19 @@ alternatives as well."
         (funcall succeed (%state-with-bindings state extended))))))
 
 (defun %prove-raw-clauses/k (goal state succeed)
-  "Prove GOAL within one predicate invocation and consume its cut."
-  (%with-cut-barrier
-    (dolist (entry (%rulebase-module-entries (proof-state-rulebase state)
-                                             (proof-state-module state)))
-      (let ((clause (%stored-clause-clause entry)))
-        (if (null (clause-body clause))
-            (%continue-matching-fact goal clause state succeed)
-            (when (%matching-rule-p goal clause)
-              (%prove-rule/k goal clause state succeed)))))))
+  "Prove GOAL within one predicate invocation and consume its cut.
+
+The fresh CATCH tag is this invocation's cut barrier: a cut in any clause
+body throws here, abandoning the remaining clause alternatives."
+  (let* ((cut-tag (%make-cut-tag))
+         (state (%state-with-cut-tag state cut-tag)))
+    (cl:catch cut-tag
+      (dolist (entry (%proof-module-entries state))
+        (let ((clause (%stored-clause-clause entry)))
+          (if (null (clause-body clause))
+              (%continue-matching-fact goal clause state succeed)
+              (when (%matching-rule-p goal clause)
+                (%prove-rule/k goal clause state succeed))))))))
 
 (defun %predicate-key (goal)
   (when (%goal-form-p goal)
@@ -231,25 +302,34 @@ alternatives as well."
 (defun %left-recursive-p (goal state)
   "Return true when GOAL reaches itself through first user-goal calls."
   (let* ((target (%predicate-key goal))
-         (entries (%rulebase-module-entries (proof-state-rulebase state)
-                                            (proof-state-module state)))
-         (visited (make-hash-table :test #'equal)))
-    (labels ((successors (key)
-               (loop for entry in entries
-                     for clause = (%stored-clause-clause entry)
-                     for head-key = (%predicate-key (clause-head clause))
-                     for successor = (%first-user-predicate-key clause)
-                     when (and (equal key head-key) successor)
-                       collect successor))
-             (reaches-target-p (key)
-               (some (lambda (successor)
-                       (or (equal successor target)
-                           (unless (gethash successor visited)
-                             (setf (gethash successor visited) t)
-                             (reaches-target-p successor))))
-                     (successors key))))
-      (setf (gethash target visited) t)
-      (reaches-target-p target))))
+         (rulebase (proof-state-rulebase state))
+         (module (proof-state-module state))
+         (cache (%table-session-left-recursion
+                 (proof-state-table-session state)))
+         (cache-key (list (rulebase-revision rulebase) module
+                          (car target) (cdr target))))
+    (multiple-value-bind (cached present-p) (gethash cache-key cache)
+      (if present-p
+          cached
+          (let ((entries (%proof-module-entries state))
+                (visited (make-hash-table :test #'equal)))
+            (labels ((reaches-target-p (key)
+                       (some (lambda (entry)
+                               (let* ((clause (%stored-clause-clause entry))
+                                      (head-key (%predicate-key
+                                                 (clause-head clause)))
+                                      (successor
+                                        (%first-user-predicate-key clause)))
+                                 (and (equal key head-key)
+                                      successor
+                                      (or (equal successor target)
+                                          (unless (gethash successor visited)
+                                            (setf (gethash successor visited) t)
+                                            (reaches-target-p successor))))))
+                             entries)))
+              (setf (gethash target visited) t
+                    (gethash cache-key cache)
+                    (not (null (reaches-target-p target))))))))))
 
 (defun %prove-clauses/k (goal state succeed)
   "Prove GOAL, tabling only predicates that require a left-recursion fixed point."
@@ -296,20 +376,22 @@ alternatives as well."
     (multiple-value-bind (extended ok)
         (unify goal (clause-head fresh-rule) (proof-state-bindings state))
       (when ok
-        (when (%prove-goals/k
-               (clause-body fresh-rule)
-               (%state-descending-into-rule state extended goal)
-               succeed)
-          (%propagate-cut))))))
+        (%prove-goals/k (clause-body fresh-rule)
+                        (%state-descending-into-rule state extended goal)
+                        succeed)))))
 
 (defun %provable-p (query rulebase environment depth)
   "Return true when QUERY has at least one proof."
-  (block provable
-    (%prove-goals/k (%normalize-query query)
+  (%with-logic-variable-order
+    (block provable
+      (let ((cut-tag (%make-cut-tag)))
+        (cl:catch cut-tag
+          (%prove-goals/k (%normalize-query query)
                           (%make-proof-state rulebase environment depth
                                              +default-prolog-module+
-                                             (%make-rulebase-table-session rulebase))
+                                             (%make-rulebase-table-session rulebase)
+                                             cut-tag)
                           (lambda (state)
                             (declare (cl:ignore state))
-                            (return-from provable t)))
-    nil))
+                            (return-from provable t)))))
+      nil)))
