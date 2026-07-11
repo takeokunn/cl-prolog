@@ -2,7 +2,6 @@
 
 (in-package #:cl-prolog)
 
-(defconstant +minimum-operator-priority+ 0)
 (defconstant +maximum-operator-priority+ 1200)
 
 (defparameter +operator-specifiers+ '(:fx :fy :xf :yf :xfx :xfy :yfx))

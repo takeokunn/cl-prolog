@@ -18,11 +18,6 @@
                                   (%iso-atom "ARITHMETIC") message)
            :environment nil)))
 
-(defun %check-arithmetic-arity (expression arguments expected)
-  (unless (= (length arguments) expected)
-    (%arithmetic-error expression "operator ~S expects ~D argument~:P, got ~D"
-                       (first expression) expected (length arguments))))
-
 (defun %check-integer-operands (expression left right)
   (declare (cl:ignore expression))
   (unless (integerp left)
