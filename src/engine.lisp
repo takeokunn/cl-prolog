@@ -15,6 +15,27 @@
 (defparameter *max-prolog-depth* nil
   "Default rule-resolution depth bound; NIL means unbounded search.")
 
+;;; Prolog exception data
+
+(define-condition prolog-exception (error)
+  ((term :initarg :term :reader prolog-exception-term)
+   (environment :initarg :environment :reader %prolog-exception-environment))
+  (:report (lambda (condition stream)
+             (format stream "Uncaught Prolog exception: ~S."
+                     (prolog-exception-term condition))))
+  (:documentation "A thrown term or ISO error term raised during Prolog execution."))
+
+(define-condition prolog-runtime-error (prolog-exception) ()
+  (:documentation "Base condition for engine-generated ISO Prolog errors."))
+
+(define-condition prolog-instantiation-error (prolog-runtime-error) ())
+(define-condition prolog-type-error (prolog-runtime-error) ())
+(define-condition prolog-domain-error (prolog-runtime-error) ())
+(define-condition prolog-permission-error (prolog-runtime-error) ())
+(define-condition prolog-existence-error (prolog-runtime-error) ())
+(define-condition prolog-evaluation-error (prolog-runtime-error) ())
+(define-condition prolog-resource-error (prolog-runtime-error) ())
+
 (define-condition invalid-max-depth-error (error)
   ((value :initarg :value :reader invalid-max-depth-error-value))
   (:report (lambda (condition stream)
@@ -22,7 +43,7 @@
                      (invalid-max-depth-error-value condition))))
   (:documentation "Signalled when a query receives an invalid :MAX-DEPTH option."))
 
-(define-condition prolog-depth-limit-exceeded (error)
+(define-condition prolog-depth-limit-exceeded (prolog-resource-error)
   ((goal :initarg :goal :reader prolog-depth-limit-exceeded-goal))
   (:report (lambda (condition stream)
              (format stream "Prolog rule-resolution depth limit reached while proving ~S."
@@ -35,7 +56,7 @@
     (error 'invalid-max-depth-error :value value))
   value)
 
-(define-condition invalid-goal-error (error)
+(define-condition invalid-goal-error (prolog-type-error)
   ((goal :initarg :goal :reader invalid-goal-error-goal)
    (reason :initarg :reason :reader invalid-goal-error-reason))
   (:report (lambda (condition stream)
@@ -44,34 +65,81 @@
                      (invalid-goal-error-reason condition))))
   (:documentation "Signalled when a goal is structurally unusable."))
 
+(declaim (ftype function %iso-atom %iso-term %iso-error-term))
+
 (defun %invalid-goal (goal reason &rest arguments)
-  (error 'invalid-goal-error
-         :goal goal
-         :reason (apply #'format nil reason arguments)))
+  (let ((message (apply #'format nil reason arguments)))
+    (error 'invalid-goal-error
+           :goal goal
+           :reason message
+           :term (%iso-error-term (%iso-term "TYPE_ERROR" (%iso-atom "CALLABLE") goal)
+                                  (%iso-atom "CALL") message)
+           :environment nil)))
 
-;;; Prolog exception control flow
+;;; Prolog exception construction and control flow
 
-(define-condition prolog-exception (error)
-  ((term :initarg :term :reader prolog-exception-term)
-   (environment :initarg :environment :reader %prolog-exception-environment))
-  (:report (lambda (condition stream)
-             (format stream "Uncaught Prolog exception: ~S."
-                     (prolog-exception-term condition))))
-  (:documentation "An exception term raised by the Prolog THROW/1 builtin."))
+(defun %iso-atom (name)
+  "Return the stable Prolog atom for ISO error vocabulary NAME."
+  (%prolog-atom-symbol (string-downcase name)))
 
-(define-condition prolog-instantiation-error (prolog-exception) ()
-  (:report (lambda (condition stream)
-             (format stream "Prolog instantiation error: THROW/1 received ~S."
-                     (prolog-exception-term condition))))
-  (:documentation "Signalled when THROW/1 receives an unbound logic variable."))
+(defun %iso-term (functor &rest arguments)
+  "Construct an ISO exception term without inheriting Common Lisp symbols."
+  (cons (%iso-atom functor) arguments))
+
+(defun %iso-error-term (formal operation message)
+  "Wrap FORMAL in the ISO error/2 context used by public engine failures."
+  (%iso-term "ERROR" formal (%iso-term "CONTEXT" operation message)))
+
+(defun %raise-iso-error (condition-type formal environment operation message)
+  "Raise CONDITION-TYPE carrying a catchable ISO error term."
+  (error condition-type
+         :term (%iso-error-term formal operation message)
+         :environment environment))
+
+(defun %raise-instantiation-error (environment operation message)
+  (%raise-iso-error 'prolog-instantiation-error
+                    (%iso-atom "INSTANTIATION_ERROR")
+                    environment operation message))
+
+(defun %raise-type-error (expected culprit environment operation message)
+  (%raise-iso-error 'prolog-type-error
+                    (%iso-term "TYPE_ERROR" (%iso-atom expected) culprit)
+                    environment operation message))
+
+(defun %raise-domain-error (domain culprit environment operation message)
+  (%raise-iso-error 'prolog-domain-error
+                    (%iso-term "DOMAIN_ERROR" (%iso-atom domain) culprit)
+                    environment operation message))
+
+(defun %raise-permission-error (operation permission-type culprit environment context message)
+  (%raise-iso-error 'prolog-permission-error
+                    (%iso-term "PERMISSION_ERROR" (%iso-atom operation)
+                               (%iso-atom permission-type) culprit)
+                    environment context message))
+
+(defun %raise-existence-error (object-type culprit environment operation message)
+  (%raise-iso-error 'prolog-existence-error
+                    (%iso-term "EXISTENCE_ERROR" (%iso-atom object-type) culprit)
+                    environment operation message))
+
+(defun %raise-evaluation-error (reason environment operation message)
+  (%raise-iso-error 'prolog-evaluation-error
+                    (%iso-term "EVALUATION_ERROR" (%iso-atom reason))
+                    environment operation message))
+
+(defun %raise-resource-error (resource environment operation message &key condition-type goal)
+  (let ((term (%iso-error-term (%iso-term "RESOURCE_ERROR" (%iso-atom resource))
+                               operation message)))
+    (if condition-type
+        (error condition-type :term term :environment environment :goal goal)
+        (error 'prolog-resource-error :term term :environment environment))))
 
 (defun %raise-prolog-exception (term environment)
   "Raise TERM together with the binding environment active at THROW/1."
-  (error (if (logic-var-p term)
-             'prolog-instantiation-error
-             'prolog-exception)
-         :term term
-         :environment environment))
+  (if (logic-var-p term)
+      (%raise-instantiation-error environment (%iso-atom "THROW")
+                                  "throw/1 requires an instantiated term")
+      (error 'prolog-exception :term term :environment environment)))
 
 ;;; Cut control flow
 

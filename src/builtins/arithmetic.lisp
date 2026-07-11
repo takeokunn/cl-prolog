@@ -1,6 +1,6 @@
 (in-package #:cl-prolog)
 
-(define-condition arithmetic-evaluation-error (error)
+(define-condition arithmetic-evaluation-error (prolog-evaluation-error)
   ((expression :initarg :expression :reader arithmetic-error-expression)
    (reason :initarg :reason :reader arithmetic-error-reason))
   (:report (lambda (condition stream)
@@ -10,9 +10,13 @@
   (:documentation "Signalled when a Prolog arithmetic expression cannot be evaluated."))
 
 (defun %arithmetic-error (expression reason &rest arguments)
-  (error 'arithmetic-evaluation-error
-         :expression expression
-         :reason (apply #'format nil reason arguments)))
+  (let ((message (apply #'format nil reason arguments)))
+    (error 'arithmetic-evaluation-error
+           :expression expression
+           :reason message
+           :term (%iso-error-term (%iso-term "EVALUATION_ERROR" (%iso-atom "UNDEFINED"))
+                                  (%iso-atom "ARITHMETIC") message)
+           :environment nil)))
 
 (defun %check-arithmetic-arity (expression arguments expected)
   (unless (= (length arguments) expected)
@@ -20,13 +24,18 @@
                        (first expression) expected (length arguments))))
 
 (defun %check-integer-operands (expression left right)
-  (unless (and (integerp left) (integerp right))
-    (%arithmetic-error expression "operator ~S requires integer operands"
-                       (first expression))))
+  (declare (ignore expression))
+  (unless (integerp left)
+    (%raise-type-error "INTEGER" left nil (%iso-atom "ARITHMETIC")
+                       "integer operand required"))
+  (unless (integerp right)
+    (%raise-type-error "INTEGER" right nil (%iso-atom "ARITHMETIC")
+                       "integer operand required")))
 
 (defun %check-nonzero-divisor (expression divisor)
   (when (zerop divisor)
-    (%arithmetic-error expression "division by zero in ~S" expression)))
+    (%raise-evaluation-error "ZERO_DIVISOR" nil (%iso-atom "ARITHMETIC")
+                             (format nil "division by zero in ~S" expression))))
 
 (defun %arithmetic-operator-key (operator)
   (and (symbolp operator)
@@ -74,12 +83,17 @@
     (labels ((evaluate (term)
                (cond
                  ((numberp term) term)
-                 ((logic-var-p term)
-                  (%arithmetic-error expression "variable ~S is unbound" term))
-                 ((not (consp term))
-                  (%arithmetic-error expression "~S is not a number or arithmetic expression" term))
-                 ((not (%proper-list-p term))
-                  (%arithmetic-error expression "~S is not a proper arithmetic expression" term))
+                  ((logic-var-p term)
+                   (%raise-instantiation-error environment (%iso-atom "ARITHMETIC")
+                                               "arithmetic expression is not ground"))
+                  ((not (consp term))
+                   (%raise-type-error "EVALUABLE" term environment
+                                      (%iso-atom "ARITHMETIC")
+                                      "number or arithmetic expression required"))
+                  ((not (%proper-list-p term))
+                   (%raise-type-error "EVALUABLE" term environment
+                                      (%iso-atom "ARITHMETIC")
+                                      "proper arithmetic expression required"))
                  (t
                   (let ((operator (first term))
                         (arguments (rest term)))

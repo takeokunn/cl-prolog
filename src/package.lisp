@@ -40,7 +40,14 @@ is extensible (see DEFINE-BUILTIN).")
    #:invalid-goal-error-goal
    #:prolog-exception
    #:prolog-exception-term
+   #:prolog-runtime-error
    #:prolog-instantiation-error
+   #:prolog-type-error
+   #:prolog-domain-error
+   #:prolog-permission-error
+   #:prolog-existence-error
+   #:prolog-evaluation-error
+   #:prolog-resource-error
    #:arithmetic-evaluation-error
    #:arithmetic-error-expression
    #:arithmetic-error-reason

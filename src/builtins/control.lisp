@@ -107,7 +107,8 @@
        (logic-substitute goal environment)
        rulebase environment depth emit)
     (prolog-exception (condition)
-      (let ((thrown-environment (%prolog-exception-environment condition)))
+      (let ((thrown-environment
+              (or (%prolog-exception-environment condition) environment)))
         (multiple-value-bind (recovery-environment matched-p)
             (unify (prolog-exception-term condition)
                    (logic-substitute catcher thrown-environment)

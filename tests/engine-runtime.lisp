@@ -14,6 +14,19 @@
   (declare (ignore rulebase depth))
   (cl-prolog::%unify-emit output (copy-list arguments) environment emit))
 
+(cl-prolog::define-builtin (test-programmer-error)
+    (rulebase environment depth emit)
+  (declare (ignore rulebase environment depth emit))
+  (error "test-only Common Lisp programmer error"))
+
+(defun capture-prolog-condition (thunk)
+  (handler-case
+      (progn
+        (funcall thunk)
+        (error "Expected a PROLOG-EXCEPTION"))
+    (prolog-exception (condition)
+      condition)))
+
 (deftest-queries cut-prunes-clause-alternatives
     ((prolog
       ((choice left))
@@ -180,6 +193,81 @@
             (error "Expected an INVALID-GOAL-ERROR"))
         (invalid-goal-error (condition)
           (search "expects" (princ-to-string condition))))))
+
+(deftest iso-error-constructors-preserve-formal-data ()
+  (dolist (case
+           (list
+            (list 'prolog-instantiation-error
+                  (lambda ()
+                    (cl-prolog::%raise-instantiation-error
+                     nil (cl-prolog::%iso-atom "TEST") "test"))
+                  "INSTANTIATION_ERROR")
+            (list 'prolog-type-error
+                  (lambda ()
+                    (cl-prolog::%raise-type-error
+                     "INTEGER" 'bad nil (cl-prolog::%iso-atom "TEST") "test"))
+                  "TYPE_ERROR")
+            (list 'prolog-domain-error
+                  (lambda ()
+                    (cl-prolog::%raise-domain-error
+                     "NOT_LESS_THAN_ZERO" -1 nil
+                     (cl-prolog::%iso-atom "TEST") "test"))
+                  "DOMAIN_ERROR")
+            (list 'prolog-permission-error
+                  (lambda ()
+                    (cl-prolog::%raise-permission-error
+                     "MODIFY" "STATIC_PROCEDURE" 'test nil
+                     (cl-prolog::%iso-atom "TEST") "test"))
+                  "PERMISSION_ERROR")
+            (list 'prolog-existence-error
+                  (lambda ()
+                    (cl-prolog::%raise-existence-error
+                     "PROCEDURE" 'missing nil
+                     (cl-prolog::%iso-atom "TEST") "test"))
+                  "EXISTENCE_ERROR")
+            (list 'prolog-evaluation-error
+                  (lambda ()
+                    (cl-prolog::%raise-evaluation-error
+                     "ZERO_DIVISOR" nil (cl-prolog::%iso-atom "TEST") "test"))
+                  "EVALUATION_ERROR")
+            (list 'prolog-resource-error
+                  (lambda ()
+                    (cl-prolog::%raise-resource-error
+                     "DEPTH_LIMIT" nil (cl-prolog::%iso-atom "TEST") "test"))
+                  "RESOURCE_ERROR")))
+    (destructuring-bind (condition-type thunk formal-name) case
+      (let* ((condition (capture-prolog-condition thunk))
+             (formal (second (prolog-exception-term condition))))
+        (is (typep condition condition-type))
+        (is-equal formal-name
+                  (symbol-name (if (consp formal) (first formal) formal)))))))
+
+(deftest catch-handles-public-prolog-runtime-errors ()
+  (let ((rb (make-rulebase)))
+    (dolist (query
+             '("catch(X is 1 / 0, error(evaluation_error(zero_divisor), C), true)"
+               "catch(X is Y, error(instantiation_error, C), true)"
+               "catch(call(42), error(type_error(callable, 42), C), true)"))
+      (is (prolog-succeeds-p rb (read-prolog-term query))))
+    (let* ((loop-goal (list (read-prolog-term "loop")))
+           (recursive-rb
+             (make-rulebase
+              :clauses (list (make-clause loop-goal (list loop-goal))))))
+      (is (prolog-succeeds-p
+           recursive-rb
+           (read-prolog-term
+            "catch(loop, error(resource_error(depth_limit), C), true)")
+           :max-depth 0)))))
+
+(deftest catch-does-not-handle-common-lisp-errors ()
+  (is (handler-case
+          (progn
+            (query-prolog
+             (make-rulebase)
+             '(catch (test-programmer-error) ?error true))
+            nil)
+        (prolog-exception () nil)
+        (simple-error () t))))
 
 (deftest-table query-normalization-internals ()
   (:equal '() (cl-prolog::%normalize-query nil))

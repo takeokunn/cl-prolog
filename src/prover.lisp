@@ -27,7 +27,12 @@
   "Return the state for proving a matched rule body."
   (let ((remaining (proof-state-remaining-depth state)))
     (when (eql remaining 0)
-      (error 'prolog-depth-limit-exceeded :goal goal))
+      (%raise-resource-error "DEPTH_LIMIT"
+                             (proof-state-bindings state)
+                             (%iso-atom "CALL")
+                             "explicit rule-resolution depth limit exceeded"
+                             :condition-type 'prolog-depth-limit-exceeded
+                             :goal goal))
     (%make-proof-state (proof-state-rulebase state)
                        bindings
                        (and remaining (1- remaining)))))
