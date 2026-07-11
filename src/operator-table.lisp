@@ -81,12 +81,13 @@ Priority zero removes the matching NAME and SPECIFIER definition."
       (t
        (let ((left-package (symbol-package (operator-definition-name left)))
              (right-package (symbol-package (operator-definition-name right))))
-         (string< (format nil "~A::~A"
-                          (and left-package (package-name left-package))
-                          (symbol-name (operator-definition-name left)))
-                  (format nil "~A::~A"
-                          (and right-package (package-name right-package))
-                          (symbol-name (operator-definition-name right)))))))))
+         (let ((left-package-name (and left-package (package-name left-package)))
+               (right-package-name (and right-package (package-name right-package))))
+           (if (equal left-package-name right-package-name)
+               (string< (symbol-name (operator-definition-name left))
+                        (symbol-name (operator-definition-name right)))
+               (string< (or left-package-name "")
+                        (or right-package-name "")))))))))
 
 (defun %operator-table-current (table)
   "Return a fresh, deterministically ordered list of TABLE's definitions."
@@ -101,12 +102,14 @@ Priority zero removes the matching NAME and SPECIFIER definition."
     (unless (%valid-operator-specifier-p specifier)
       (error "Operator specifier must be one of ~S, got ~S."
              +operator-specifiers+ specifier)))
-  (remove-if-not
-   (lambda (definition)
-     (and (eq name (operator-definition-name definition))
-          (or (null specifier)
-              (eq specifier (operator-definition-specifier definition)))))
-   (%operator-table-current table)))
+  (stable-sort
+   (remove-if-not
+    (lambda (definition)
+      (and (eq name (operator-definition-name definition))
+           (or (null specifier)
+               (eq specifier (operator-definition-specifier definition)))))
+    (operator-table-definitions table))
+   #'%operator-definition-less-p))
 
 (defparameter +standard-operator-declarations+
   '((1200 :xfx |:-|) (1200 :xfx |-->|) (1200 :fx |:-|) (1200 :fx |?-|)
