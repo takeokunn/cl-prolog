@@ -8,6 +8,41 @@
                   :type "pl")
    (truename ".")))
 
+(defun %call-with-temporary-prolog-files (sources function)
+  (let ((pathnames (loop repeat (length sources)
+                         collect (%temporary-prolog-pathname))))
+    (unwind-protect
+         (progn
+           (loop for pathname in pathnames
+                 for source in sources
+                 do (with-open-file (output pathname
+                                            :direction :output
+                                            :if-exists :supersede)
+                      (write-string source output)))
+           (funcall function pathnames))
+      (dolist (pathname pathnames)
+        (when (probe-file pathname)
+          (delete-file pathname))))))
+
+(defmacro with-temporary-prolog-files ((&rest bindings) &body body)
+  `(%call-with-temporary-prolog-files
+    (list ,@(mapcar #'second bindings))
+    (lambda (pathnames)
+      (destructuring-bind ,(mapcar #'first bindings) pathnames
+        ,@body))))
+
+(defun %prolog-path-atom (pathname)
+  (with-output-to-string (output)
+    (write-char #\' output)
+    (loop for character across (namestring pathname)
+          do (write-char character output)
+             (when (char= character #\')
+               (write-char character output)))
+    (write-char #\' output)))
+
+(defun %prolog-path-list (pathnames)
+  (format nil "[~{~A~^, ~}]" (mapcar #'%prolog-path-atom pathnames)))
+
 (defun %call-with-source-medium (medium source function)
   (ecase medium
     (:string (funcall function source))
@@ -160,3 +195,75 @@
                'cl-prolog::transient)))
     (is (null (cl-prolog::%rulebase-predicate-property
                rulebase 'cl-prolog::transient 1)))))
+
+(deftest consult-publishes-clauses-before-the-next-conjunct ()
+  (with-temporary-prolog-files
+      ((source "consulted(immediately)."))
+    (let ((rulebase (make-rulebase)))
+      (is (%source-query-succeeds-p
+           rulebase
+           (format nil "consult(~A), consulted(immediately)"
+                   (%prolog-path-atom source)))))))
+
+(deftest consult-loads-a-source-list-in-order ()
+  (with-temporary-prolog-files
+      ((declaration ":- op(500, xfx, precedes).")
+       (usage "ordered(first precedes second)."))
+    (let ((rulebase (make-rulebase)))
+      (is (%source-query-succeeds-p
+           rulebase
+           (format nil "consult(~A), ordered(precedes(first, second))"
+                   (%prolog-path-list (list declaration usage))))))))
+
+(deftest load-files-loads-each-source-in-its-list ()
+  (with-temporary-prolog-files
+      ((first "loaded_from(first).")
+       (second "loaded_from(second)."))
+    (let ((rulebase (make-rulebase)))
+      (is (%source-query-succeeds-p
+           rulebase
+           (format nil
+                   "load_files(~A), loaded_from(first), loaded_from(second)"
+                   (%prolog-path-list (list first second))))))))
+
+(deftest load-files-rolls-back-the-whole-list-on-late-failure ()
+  (with-temporary-prolog-files
+      ((valid "transient_clause.")
+       (invalid ":- unsupported_directive(value)."))
+    (let ((rulebase (consult-prolog "preserved_clause.")))
+      (signals-error
+       (query-prolog
+        rulebase
+        (read-prolog-term
+         (format nil "load_files(~A)"
+                 (%prolog-path-list (list valid invalid))))))
+      (is (%source-query-succeeds-p rulebase "preserved_clause"))
+      (is (%source-query-succeeds-p
+           rulebase
+           "catch((transient_clause, fail), error(existence_error(procedure, _), _), true)")))))
+
+(defmacro deftest-source-loading-error (name &body query-form)
+  `(deftest ,name ()
+     (let ((rulebase (make-rulebase))
+           (missing (%temporary-prolog-pathname)))
+       (is (%source-query-succeeds-p rulebase (progn ,@query-form))))))
+
+(deftest-source-loading-error source-loading-instantiation-error
+  "catch(consult(Source), error(instantiation_error, _), true)")
+
+(deftest-source-loading-error source-loading-scalar-type-error
+  "catch(consult(42), error(type_error(atom, 42), _), true)")
+
+(deftest-source-loading-error source-loading-improper-list-type-error
+  (format nil
+          "catch(load_files([~A | tail]), ~
+           error(type_error(list, [~A | tail]), _), true)"
+          (%prolog-path-atom missing)
+          (%prolog-path-atom missing)))
+
+(deftest-source-loading-error source-loading-missing-source-error
+  (format nil
+          "catch(consult(~A), ~
+           error(existence_error(source_sink, ~A), _), true)"
+          (%prolog-path-atom missing)
+          (%prolog-path-atom missing)))

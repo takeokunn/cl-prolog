@@ -2,6 +2,13 @@
 
 (in-package #:cl-prolog)
 
+(defvar *current-prolog-source-directory* nil)
+
+(defun %resolve-prolog-source-pathname (pathname)
+  (merge-pathnames pathname
+                   (or *current-prolog-source-directory*
+                       *default-pathname-defaults*)))
+
 (defun %call-with-prolog-source-stream (source function)
   (etypecase source
     (string
@@ -9,8 +16,34 @@
        (funcall function stream)))
     (stream (funcall function source))
     (pathname
-     (with-open-file (stream source :direction :input)
-       (funcall function stream)))))
+     (let* ((resolved (%resolve-prolog-source-pathname source))
+            (directory (make-pathname :name nil :type nil :version nil
+                                      :defaults resolved)))
+       (with-open-file (stream resolved :direction :input)
+         (let ((*current-prolog-source-directory* directory))
+           (funcall function stream)))))))
+
+(defun %source-file-pathnames (term environment operation)
+  "Resolve TERM, an atom or proper list of atoms, to source pathnames."
+  (let ((value (logic-substitute term environment)))
+    (cond
+      ((logic-var-p value)
+       (%raise-instantiation-error environment operation
+                                   "Source must be instantiated"))
+      ((null value)
+       '())
+      ((symbolp value)
+       (list (pathname (%io-pathname value environment operation))))
+      ((atom value)
+       (%raise-type-error "ATOM" value environment operation
+                          "Source must be an atom or proper list of atoms"))
+      ((not (%proper-list-p value))
+       (%raise-type-error "LIST" value environment operation
+                          "Source must be an atom or proper list of atoms"))
+      (t
+       (mapcar (lambda (item)
+                 (pathname (%io-pathname item environment operation)))
+               value)))))
 
 (defun %read-source-term (stream operator-table)
   (let* ((source (%read-prolog-term-source stream))
@@ -62,6 +95,12 @@
      (unless (= (length goal) 2)
        (error "INITIALIZATION directive requires one callable goal."))
      (push (cons module (second goal)) (car initializations)))
+    ((consult load_files)
+     (unless (= (length goal) 2)
+       (error "~A directive requires one source argument." (first goal)))
+     (%load-prolog-pathnames-into-rulebase
+      (%source-file-pathnames (second goal) nil (first goal))
+      rulebase))
     (otherwise
      (error "Unknown Prolog directive ~S." goal))))
 
@@ -139,11 +178,40 @@
         (error "Prolog initialization failed: ~S." (cdr initialization))))
     rulebase))
 
+(defun %load-prolog-pathnames-into-rulebase (pathnames rulebase)
+  (dolist (pathname pathnames rulebase)
+    (%call-with-prolog-source-stream
+     pathname
+     (lambda (stream)
+       (%load-prolog-source-transaction stream rulebase)))))
+
 (defun consult-prolog (source &optional (rulebase (make-rulebase)))
   "Consult SOURCE and atomically replace RULEBASE after successful validation."
   (let ((transaction (%copy-rulebase rulebase)))
-    (%call-with-prolog-source-stream
-     source
-     (lambda (stream)
-       (%load-prolog-source-transaction stream transaction)))
+    (if (and (listp source) (not (stringp source)))
+        (%load-prolog-pathnames-into-rulebase source transaction)
+        (%call-with-prolog-source-stream
+         source
+         (lambda (stream)
+           (%load-prolog-source-transaction stream transaction))))
     (%replace-rulebase! rulebase transaction)))
+
+(defun %consult-source-files (term environment rulebase emit operation)
+  (let ((pathnames (%source-file-pathnames term environment operation)))
+    (handler-case
+        (progn
+          (consult-prolog pathnames rulebase)
+          (funcall emit environment))
+      (file-error ()
+        (%raise-existence-error "SOURCE_SINK"
+                                (logic-substitute term environment)
+                                environment operation
+                                "Source file does not exist")))))
+
+(define-builtin (consult source) (rulebase environment depth emit)
+  (declare (ignore depth))
+  (%consult-source-files source environment rulebase emit 'consult))
+
+(define-builtin (load_files sources) (rulebase environment depth emit)
+  (declare (ignore depth))
+  (%consult-source-files sources environment rulebase emit 'load_files))
