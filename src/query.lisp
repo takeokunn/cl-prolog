@@ -75,7 +75,7 @@ when PROJECT is NIL).  LIMIT bounds the number of solutions returned."
 (defun query-prolog-first (rulebase query &rest options)
   "Return the first solution for QUERY, or NIL when it has no proof."
   (%with-query-options (options max-depth environment project limit)
-    (declare (ignore limit))
+    (declare (cl:ignore limit))
     (block first-solution
       (map-prolog-solutions
        (lambda (solution)

@@ -162,7 +162,7 @@
   (:documentation "Return the immutable builtin solver associated with PREDICATE."))
 
 (defmethod %goal-solver (predicate)
-  (declare (ignore predicate))
+  (declare (cl:ignore predicate))
   nil)
 
 (defun %check-goal-arity (goal minimum maximum)
@@ -196,7 +196,7 @@ BODY must call EMIT with one extended environment per solution."
          ,@(mapcar
             (lambda (builtin-name)
               `(defmethod %goal-solver ((predicate (eql ',builtin-name)))
-                 (declare (ignore predicate))
+                 (declare (cl:ignore predicate))
                  (lambda (,goal ,rulebase ,environment ,depth ,emit)
                    (declare (ignorable ,rulebase ,environment ,depth ,emit))
                    (%check-goal-arity ,goal ,minimum ,maximum)
@@ -214,5 +214,5 @@ BODY must call EMIT with one extended environment per solution."
 Specialize with (EQL 'NAME) to make NAME provable from Lisp; the default
 method fails so ordinary fact/rule search proceeds.")
   (:method ((predicate symbol) args bindings)
-    (declare (ignore args bindings))
+    (declare (cl:ignore args bindings))
     nil))

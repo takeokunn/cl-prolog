@@ -58,6 +58,19 @@
                                        ((?goal choice right) (?x . right))))
   ((once (choice ?x))            => (((?x . left))))
   ((once (parent nobody ?x))     :fails)
+  ((cl-prolog.user-atoms::ignore (choice ?x)) => (((?x . left))))
+  ((cl-prolog.user-atoms::ignore fail) => (nil))
+  ((forall (choice ?x) (or (= ?x left) (= ?x right))) => (nil))
+  ((forall (choice ?x) (= ?x left)) :fails)
+  ((forall fail (throw unreachable)) => (nil))
+  ((and (setup-call-cleanup (assertz (cleanup-marker))
+                            true
+                            (retractall (cleanup-marker)))
+        (not (cleanup-marker)))  => (nil))
+  ((and (call-cleanup true (assertz (cleanup-marker)))
+        (cleanup-marker))        => (nil))
+  ((setup-call-cleanup true true fail) => (nil))
+  ((setup-call-cleanup true true (throw cleanup-error)) :signals)
   ((catch (throw ball) ball (= ?x recovered))
                                    => (((?x . recovered))))
   ((catch (and (= ?x bound) (throw (problem ?x)))
@@ -72,6 +85,54 @@
   ((catch (throw mismatch) expected true) :signals)
   ((throw ?unbound)              :signals)
   ((repeat)                      => (nil nil nil) :limit 3))
+
+(deftest cleanup-runs-on-exception-and-early-query-exit ()
+  (let ((rulebase (make-family-rulebase)))
+    (assert-query rulebase
+                  (catch (setup-call-cleanup
+                          (assertz (cleanup-started))
+                          (throw interrupted)
+                          (assertz (cleanup-finished)))
+                         interrupted
+                         true)
+                  :succeeds)
+    (assert-query rulebase (cleanup-started) :succeeds)
+    (assert-query rulebase (cleanup-finished) :succeeds)
+    (is-equal 1 (cl:length (query-prolog rulebase '(cleanup-finished))))
+    (assert-query rulebase
+                  (setup-call-cleanup fail true (throw unreachable))
+                  :fails)
+    (assert-query rulebase
+                  (setup-call-cleanup true ! (assertz (cut-cleanup)))
+                  :succeeds)
+    (assert-query rulebase (cut-cleanup) :succeeds)
+    (is-equal 1 (cl:length (query-prolog rulebase '(cut-cleanup))))
+    (block first-solution
+      (map-prolog-solutions
+       (lambda (solution)
+         (declare (cl:ignore solution))
+         (return-from first-solution))
+       rulebase
+       '(setup-call-cleanup true (choice ?value)
+                            (assertz (limited-cleanup)))))
+    (assert-query rulebase (limited-cleanup) :succeeds)
+    (is-equal 1 (cl:length (query-prolog rulebase '(limited-cleanup))))))
+
+(deftest cleanup-observes-goal-bindings-and-runs-once ()
+  (let ((rulebase (make-family-rulebase)))
+    (assert-query rulebase
+                  (setup-call-cleanup
+                   true
+                   (= ?value bound)
+                   (assertz (cleanup-observed ?value)))
+                  :succeeds)
+    (is-equal 'bound
+              (solution-binding '?value
+                                (query-prolog-first
+                                 rulebase '(cleanup-observed ?value))))
+    (is-equal 1
+              (cl:length
+               (query-prolog rulebase '(cleanup-observed ?value))))))
 
 (deftest-queries solution-collection-builtins
     ((make-rulebase

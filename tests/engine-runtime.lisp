@@ -4,19 +4,19 @@
 
 (cl-prolog::define-builtin (test-twice input output)
     (rulebase environment depth emit)
-  (declare (ignore rulebase depth))
+  (declare (cl:ignore rulebase depth))
   (let ((value (logic-substitute input environment)))
     (when (numberp value)
       (cl-prolog::%unify-emit output (* 2 value) environment emit))))
 
 (cl-prolog::define-builtin ((test-collect test-collect-alias) output &rest arguments)
     (rulebase environment depth emit)
-  (declare (ignore rulebase depth))
+  (declare (cl:ignore rulebase depth))
   (cl-prolog::%unify-emit output (copy-list arguments) environment emit))
 
 (cl-prolog::define-builtin (test-programmer-error)
     (rulebase environment depth emit)
-  (declare (ignore rulebase environment depth emit))
+  (declare (cl:ignore rulebase environment depth emit))
   (error "test-only Common Lisp programmer error"))
 
 (defun capture-prolog-condition (thunk)
@@ -155,7 +155,7 @@
   (with-macroexpansion (expansion
                         '(cl-prolog::define-builtin (twice input output)
                            (rulebase environment depth emit)
-                           (declare (ignore rulebase depth))
+                           (declare (cl:ignore rulebase depth))
                            (cl-prolog::%unify-emit output
                                                    (* 2 (logic-substitute input environment))
                                                    environment
@@ -169,7 +169,7 @@
   (with-macroexpansion (expansion
                         '(cl-prolog::define-builtin ((collect collect-alias) output &rest arguments)
                            (rulebase environment depth emit)
-                           (declare (ignore rulebase depth))
+                           (declare (cl:ignore rulebase depth))
                            (cl-prolog::%unify-emit output
                                                    (copy-list arguments)
                                                    environment

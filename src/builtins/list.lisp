@@ -10,7 +10,7 @@
           (%unify-sequence (cdr pairs) extended continuation)))))
 
 (define-builtin (member item list-term) (rulebase environment depth emit)
-  (declare (ignore rulebase depth))
+  (declare (cl:ignore rulebase depth))
   (labels ((visit (tail current-environment)
              (let ((head (fresh-logic-variable "?MEMBER-HEAD"))
                    (rest (fresh-logic-variable "?MEMBER-TAIL")))
@@ -23,7 +23,7 @@
     (visit list-term environment)))
 
 (define-builtin (append left right result) (rulebase environment depth emit)
-  (declare (ignore rulebase depth))
+  (declare (cl:ignore rulebase depth))
   (labels ((join (left-tail result-tail current-environment)
              ;; append([], Ys, Ys).
              (%unify-sequence

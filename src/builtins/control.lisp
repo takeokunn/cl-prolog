@@ -6,7 +6,7 @@
   (funcall emit environment))
 
 (define-builtin ((fail false)) (rulebase environment depth emit)
-  (declare (ignore rulebase environment depth emit)))
+  (declare (cl:ignore rulebase environment depth emit)))
 
 (define-builtin (!) (rulebase environment depth emit)
   (funcall emit environment)
@@ -69,6 +69,54 @@
          (return-from first-proof))))
     (values result matched-p)))
 
+(defun %call-cleanup/k (setup goal cleanup rulebase environment depth emit)
+  "Commit to SETUP's first proof, then run CLEANUP exactly once after GOAL."
+  (multiple-value-bind (setup-environment setup-succeeded-p)
+      (%first-proof-environment setup rulebase environment depth)
+    (when setup-succeeded-p
+      (let ((cleanup-environment setup-environment))
+        (unwind-protect
+             (%prove-bindings/k
+              (logic-substitute goal setup-environment)
+              rulebase setup-environment depth
+              (lambda (goal-environment)
+                (setf cleanup-environment goal-environment)
+                (funcall emit goal-environment)))
+          (%first-proof-environment cleanup
+                                    rulebase cleanup-environment depth))))))
+
+(define-builtin (setup-call-cleanup setup goal cleanup)
+    (rulebase environment depth emit)
+  (%call-cleanup/k setup goal cleanup
+                   rulebase environment depth emit))
+
+(define-builtin (call-cleanup goal cleanup)
+    (rulebase environment depth emit)
+  (%call-cleanup/k 'true goal cleanup
+                   rulebase environment depth emit))
+
+(define-builtin (forall condition action) (rulebase environment depth emit)
+  (let ((succeeded-p t))
+    (block failed-action
+      (%prove-bindings/k
+       (logic-substitute condition environment)
+       rulebase environment depth
+       (lambda (condition-environment)
+         (unless (nth-value 1
+                            (%first-proof-environment action rulebase
+                                                      condition-environment
+                                                      depth))
+           (setf succeeded-p nil)
+           (return-from failed-action)))))
+    (when succeeded-p
+      (funcall emit environment))))
+
+(define-builtin (cl-prolog.user-atoms::ignore goal)
+    (rulebase environment depth emit)
+  (multiple-value-bind (goal-environment succeeded-p)
+      (%first-proof-environment goal rulebase environment depth)
+    (funcall emit (if succeeded-p goal-environment environment))))
+
 (define-builtin (if-then-else condition then else)
     (rulebase environment depth emit)
   (multiple-value-bind (condition-environment matched-p)
@@ -98,7 +146,7 @@
        rulebase environment depth emit))))
 
 (define-builtin (throw ball) (rulebase environment depth emit)
-  (declare (ignore rulebase depth emit))
+  (declare (cl:ignore rulebase depth emit))
   (%raise-prolog-exception (logic-substitute ball environment) environment))
 
 (define-builtin (catch goal catcher recover) (rulebase environment depth emit)
@@ -120,7 +168,7 @@
               (error condition)))))))
 
 (define-builtin (repeat) (rulebase environment depth emit)
-  (declare (ignore rulebase depth))
+  (declare (cl:ignore rulebase depth))
   (loop (funcall emit environment)))
 
 (define-builtin (and &rest goals) (rulebase environment depth emit)

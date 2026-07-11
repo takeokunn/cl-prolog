@@ -73,6 +73,9 @@ is extensible (see DEFINE-BUILTIN).")
    #:!
    #:call
    #:once
+   #:setup-call-cleanup
+   #:call-cleanup
+   #:forall
    #:if-then-else
    #:soft-if-then-else
    #:catch

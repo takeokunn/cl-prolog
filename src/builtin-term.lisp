@@ -93,73 +93,73 @@
     (funcall emit environment)))
 
 (define-builtin (var term) (rulebase environment depth emit)
-  (declare (ignore rulebase depth))
+  (declare (cl:ignore rulebase depth))
   (when (logic-var-p (%term-resolve term environment))
     (funcall emit environment)))
 
 (define-builtin (nonvar term) (rulebase environment depth emit)
-  (declare (ignore rulebase depth))
+  (declare (cl:ignore rulebase depth))
   (unless (logic-var-p (%term-resolve term environment))
     (funcall emit environment)))
 
 (define-builtin (atom term) (rulebase environment depth emit)
-  (declare (ignore rulebase depth))
+  (declare (cl:ignore rulebase depth))
   (when (%term-atom-p (%term-resolve term environment))
     (funcall emit environment)))
 
 (define-builtin (atomic term) (rulebase environment depth emit)
-  (declare (ignore rulebase depth))
+  (declare (cl:ignore rulebase depth))
   (let ((resolved-term (%term-resolve term environment)))
     (when (or (%term-atom-p resolved-term) (numberp resolved-term))
       (funcall emit environment))))
 
 (define-builtin (number term) (rulebase environment depth emit)
-  (declare (ignore rulebase depth))
+  (declare (cl:ignore rulebase depth))
   (when (numberp (%term-resolve term environment))
     (funcall emit environment)))
 
 (define-builtin (integer term) (rulebase environment depth emit)
-  (declare (ignore rulebase depth))
+  (declare (cl:ignore rulebase depth))
   (when (integerp (%term-resolve term environment))
     (funcall emit environment)))
 
 (define-builtin (float term) (rulebase environment depth emit)
-  (declare (ignore rulebase depth))
+  (declare (cl:ignore rulebase depth))
   (when (floatp (%term-resolve term environment))
     (funcall emit environment)))
 
 (define-builtin (== left right) (rulebase environment depth emit)
-  (declare (ignore rulebase depth))
+  (declare (cl:ignore rulebase depth))
   (when (%term-identical-p (%term-resolve left environment)
                            (%term-resolve right environment))
     (funcall emit environment)))
 
 (define-builtin (|\\==| left right) (rulebase environment depth emit)
-  (declare (ignore rulebase depth))
+  (declare (cl:ignore rulebase depth))
   (unless (%term-identical-p (%term-resolve left environment)
                              (%term-resolve right environment))
     (funcall emit environment)))
 
 (define-builtin (@< left right) (rulebase environment depth emit)
-  (declare (ignore rulebase depth))
+  (declare (cl:ignore rulebase depth))
   (%emit-term-comparison #'minusp left right environment emit))
 
 (define-builtin (@=< left right) (rulebase environment depth emit)
-  (declare (ignore rulebase depth))
+  (declare (cl:ignore rulebase depth))
   (%emit-term-comparison (lambda (comparison) (not (plusp comparison)))
                          left right environment emit))
 
 (define-builtin (@> left right) (rulebase environment depth emit)
-  (declare (ignore rulebase depth))
+  (declare (cl:ignore rulebase depth))
   (%emit-term-comparison #'plusp left right environment emit))
 
 (define-builtin (@>= left right) (rulebase environment depth emit)
-  (declare (ignore rulebase depth))
+  (declare (cl:ignore rulebase depth))
   (%emit-term-comparison (lambda (comparison) (not (minusp comparison)))
                          left right environment emit))
 
 (define-builtin (compare order left right) (rulebase environment depth emit)
-  (declare (ignore rulebase depth))
+  (declare (cl:ignore rulebase depth))
   (%unify-emit order
                (ecase (%compare-terms (%term-resolve left environment)
                                       (%term-resolve right environment))
@@ -169,30 +169,30 @@
                environment emit))
 
 (define-builtin (term-variables term variables) (rulebase environment depth emit)
-  (declare (ignore rulebase depth))
+  (declare (cl:ignore rulebase depth))
   (%unify-emit variables
                (%collect-variables (%term-resolve term environment))
                environment emit))
 
 (define-builtin (compound term) (rulebase environment depth emit)
-  (declare (ignore rulebase depth))
+  (declare (cl:ignore rulebase depth))
   (when (%term-compound-p (%term-resolve term environment))
     (funcall emit environment)))
 
 (define-builtin (callable term) (rulebase environment depth emit)
-  (declare (ignore rulebase depth))
+  (declare (cl:ignore rulebase depth))
   (let ((resolved-term (%term-resolve term environment)))
     (when (or (%term-atom-p resolved-term)
               (%term-compound-p resolved-term))
       (funcall emit environment))))
 
 (define-builtin (ground term) (rulebase environment depth emit)
-  (declare (ignore rulebase depth))
+  (declare (cl:ignore rulebase depth))
   (unless (%term-has-variables-p (%term-resolve term environment))
     (funcall emit environment)))
 
 (define-builtin (functor term name arity) (rulebase environment depth emit)
-  (declare (ignore rulebase depth))
+  (declare (cl:ignore rulebase depth))
   (let ((resolved-term (%term-resolve term environment)))
     (cond
       ((logic-var-p resolved-term)
@@ -223,7 +223,7 @@
         environment emit)))))
 
 (define-builtin (arg index term argument) (rulebase environment depth emit)
-  (declare (ignore rulebase depth))
+  (declare (cl:ignore rulebase depth))
   (let ((resolved-index (%term-resolve index environment))
         (resolved-term (%term-resolve term environment)))
     (when (and (integerp resolved-index)
@@ -233,14 +233,14 @@
       (%unify-emit argument (nth resolved-index resolved-term) environment emit))))
 
 (define-builtin (copy-term source copy) (rulebase environment depth emit)
-  (declare (ignore rulebase depth))
+  (declare (cl:ignore rulebase depth))
   (%unify-emit copy
                (%freshen-term (%term-resolve source environment)
                               (make-hash-table :test #'eq))
                environment emit))
 
 (define-builtin (numbervars term start end) (rulebase environment depth emit)
-  (declare (ignore rulebase depth))
+  (declare (cl:ignore rulebase depth))
   (let* ((resolved-term (%term-resolve term environment))
          (resolved-start (%term-resolve start environment)))
     (when (and (integerp resolved-start) (not (minusp resolved-start)))
@@ -254,7 +254,7 @@
          environment emit)))))
 
 (define-builtin (|=..| term list) (rulebase environment depth emit)
-  (declare (ignore rulebase depth))
+  (declare (cl:ignore rulebase depth))
   (let ((resolved-term (%term-resolve term environment))
         (resolved-list (%term-resolve list environment)))
     (cond

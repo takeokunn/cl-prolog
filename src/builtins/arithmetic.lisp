@@ -24,7 +24,7 @@
                        (first expression) expected (length arguments))))
 
 (defun %check-integer-operands (expression left right)
-  (declare (ignore expression))
+  (declare (cl:ignore expression))
   (unless (integerp left)
     (%raise-type-error "INTEGER" left nil (%iso-atom "ARITHMETIC")
                        "integer operand required"))

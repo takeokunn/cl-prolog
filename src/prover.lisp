@@ -146,6 +146,6 @@ alternatives as well."
     (%prove-goals/k (%normalize-query query)
                           (%make-proof-state rulebase environment depth)
                           (lambda (state)
-                            (declare (ignore state))
+                            (declare (cl:ignore state))
                             (return-from provable t)))
     nil))

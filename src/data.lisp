@@ -47,7 +47,7 @@
 (defun rulebase-visible-clauses (rulebase)
   "Return clauses visible at one current logical-update snapshot."
   (multiple-value-bind (revision entries) (%rulebase-snapshot rulebase)
-    (declare (ignore revision))
+    (declare (cl:ignore revision))
     (mapcar #'%stored-clause-clause entries)))
 
 (defun rulebase-insert-clause! (rulebase clause &key (position :last))

@@ -22,7 +22,7 @@
                (consp (rest pattern)) (consp (second pattern)))
       (%ensure-dynamic-predicate (first (second pattern)) goal))
     (multiple-value-bind (snapshot entries) (%rulebase-snapshot rulebase)
-      (declare (ignore snapshot))
+      (declare (cl:ignore snapshot))
       (dolist (entry entries)
         (let* ((clause-entry (%stored-clause-clause entry))
                (fresh (%freshen-dynamic-clause clause-entry))
@@ -45,7 +45,7 @@
       ((consp pattern)
        (%ensure-dynamic-predicate (first pattern) goal)))
     (multiple-value-bind (snapshot entries) (%rulebase-snapshot rulebase)
-      (declare (ignore snapshot))
+      (declare (cl:ignore snapshot))
       (let ((matches '()))
         (dolist (entry entries)
           (let* ((fresh (%freshen-dynamic-clause (%stored-clause-clause entry)))
@@ -55,7 +55,7 @@
                                  (clause-body fresh)))))
             (multiple-value-bind (extended ok)
                 (unify pattern stored environment)
-              (declare (ignore extended))
+              (declare (cl:ignore extended))
               (when ok (push entry matches)))))
         (%rulebase-retract-entries! rulebase matches)))
     (funcall emit environment)))
@@ -83,10 +83,10 @@
                  (typep (third resolved) '(integer 0)))
       (%invalid-goal goal "predicate indicator must have shape (NAME / ARITY)"))
     (destructuring-bind (predicate slash arity) resolved
-      (declare (ignore slash))
+      (declare (cl:ignore slash))
       (%ensure-dynamic-predicate predicate goal)
       (multiple-value-bind (snapshot entries) (%rulebase-snapshot rulebase)
-        (declare (ignore snapshot))
+        (declare (cl:ignore snapshot))
         (%rulebase-retract-entries!
          rulebase
          (remove-if-not
