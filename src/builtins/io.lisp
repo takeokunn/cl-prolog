@@ -268,50 +268,24 @@
                         (%io-stream-entry rulebase stream :input environment operation)
                         term options environment emit)))
 
-(defun %io-write-canonical-term (term stream)
-  (cond
-    ((null term) (write-string "[]" stream))
-    ((logic-var-p term) (%write-prolog-variable term stream))
-    ((numberp term) (%write-prolog-number term stream))
-    ((symbolp term) (%write-prolog-atom term stream))
-    ((and (consp term) (symbolp (first term)) (listp term))
-     (%write-prolog-atom (first term) stream)
-     (write-char #\( stream)
-     (loop for argument in (rest term)
-           for firstp = t then nil
-           do (unless firstp (write-char #\, stream))
-              (%io-write-canonical-term argument stream))
-     (write-char #\) stream))
-    ((consp term)
-     (write-char #\[ stream)
-     (loop with tail = term
-           with firstp = t
-           while (consp tail)
-           do (unless firstp (write-char #\, stream))
-              (%io-write-canonical-term (car tail) stream)
-              (setf firstp nil tail (cdr tail))
-           finally (unless (null tail)
-                     (write-char #\| stream)
-                     (%io-write-canonical-term tail stream)))
-     (write-char #\] stream))
-    (t (error "Cannot write non-Prolog atomic value ~S." term))))
-
 (defun %io-write-term-goal (entry term options environment emit)
   (let* ((operation (%io-operation "WRITE_TERM"))
          (parsed (%io-options options environment operation
                               '("quoted" "ignore_ops" "numbervars")))
          (ignore-ops (%io-boolean
                       (%io-option "ignore_ops" parsed (%iso-atom "false"))
-                      environment operation)))
-    (%io-boolean (%io-option "quoted" parsed (%iso-atom "false"))
-                 environment operation)
-    (%io-boolean (%io-option "numbervars" parsed (%iso-atom "false"))
-                 environment operation)
+                      environment operation))
+         (quoted (%io-boolean (%io-option "quoted" parsed (%iso-atom "false"))
+                              environment operation))
+         (numbervars
+           (%io-boolean (%io-option "numbervars" parsed (%iso-atom "false"))
+                        environment operation)))
     (let ((value (logic-substitute term environment))
           (stream (prolog-stream-stream entry)))
-      (if ignore-ops
-          (%io-write-canonical-term value stream)
-          (write-prolog-term value stream)))
+      (%write-prolog-term-with-options value stream
+                                       :quoted quoted
+                                       :numbervars numbervars
+                                       :ignore-ops ignore-ops))
     (funcall emit environment)))
 
 (define-builtin (write_term term options) (rulebase environment depth emit)

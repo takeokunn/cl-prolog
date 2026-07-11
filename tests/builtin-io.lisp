@@ -80,6 +80,62 @@
                   :succeeds)
     (is-equal "'+'(1,2)" (get-output-stream-string output))))
 
+(deftest io-write-term-current-stream-honors-quoted ()
+  (with-io-rulebase (rulebase input output) ""
+    (assert-query rulebase
+                  (cl-prolog::write_term
+                   cl-prolog::|Mary Jane|
+                   ((cl-prolog::quoted cl-prolog::true)))
+                  :succeeds)
+    (assert-query rulebase
+                  (cl-prolog::write_term
+                   cl-prolog::|Mary Jane|
+                   ((cl-prolog::quoted cl-prolog::false)))
+                  :succeeds)
+    (is-equal "'Mary Jane'Mary Jane" (get-output-stream-string output))))
+
+(deftest io-write-term-explicit-stream-honors-numbervars ()
+  (with-io-rulebase (rulebase input output) ""
+    (assert-query rulebase
+                  (cl-prolog::write_term
+                   cl-prolog::user_output
+                   (cl-prolog::$var 25)
+                   ((cl-prolog::numbervars cl-prolog::true)))
+                  :succeeds)
+    (assert-query rulebase
+                  (cl-prolog::write_term
+                   cl-prolog::user_output
+                   (cl-prolog::$var 26)
+                   ((cl-prolog::numbervars cl-prolog::true)))
+                  :succeeds)
+    (assert-query rulebase
+                  (cl-prolog::write_term
+                   cl-prolog::user_output
+                   (cl-prolog::$var 0)
+                   ((cl-prolog::numbervars cl-prolog::false)
+                    (cl-prolog::quoted cl-prolog::true)))
+                  :succeeds)
+    (is-equal "ZA1'$VAR'(0)" (get-output-stream-string output))))
+
+(deftest io-write-term-combines-ignore-ops-and-quoting ()
+  (with-io-rulebase (rulebase input output) ""
+    (assert-query rulebase
+                  (cl-prolog::write_term
+                   (cl-prolog::+ (cl-prolog::$var 0) cl-prolog::|Mary Jane|)
+                   ((cl-prolog::quoted cl-prolog::false)
+                    (cl-prolog::ignore_ops cl-prolog::true)
+                    (cl-prolog::numbervars cl-prolog::true)))
+                  :succeeds)
+    (is-equal "+(A,Mary Jane)" (get-output-stream-string output))))
+
+(deftest io-write-term-rejects-invalid-boolean-options ()
+  (dolist (option '(cl-prolog::quoted cl-prolog::ignore_ops
+                    cl-prolog::numbervars))
+    (with-io-rulebase (rulebase input output) ""
+      (signals-error
+       (query-prolog rulebase
+                     `(cl-prolog::write_term hello ((,option maybe))))))))
+
 (deftest rulebase-copies-isolate-io-context ()
   (with-io-rulebase (rulebase input output) ""
     (let ((copy (cl-prolog::%copy-rulebase rulebase)))
