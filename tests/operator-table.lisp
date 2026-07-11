@@ -64,9 +64,18 @@
     (signals-error (cl-prolog::%operator-table-find table 'alpha :unknown))))
 
 (deftest standard-operator-table-is-self-contained ()
-  (is-equal (length cl-prolog::+standard-operator-declarations+)
-            (length (cl-prolog::%operator-table-current
-                     cl-prolog::*standard-operator-table*)))
+  (let ((before (cl-prolog::%operator-table-current
+                 cl-prolog::*standard-operator-table*)))
+    (is-equal (length cl-prolog::+standard-operator-declarations+)
+              (length before))
+    (dolist (definition before)
+      (cl-prolog::%operator-table-find
+       cl-prolog::*standard-operator-table*
+       (cl-prolog::operator-definition-name definition)
+       (cl-prolog::operator-definition-specifier definition)))
+    (is-equal before
+              (cl-prolog::%operator-table-current
+               cl-prolog::*standard-operator-table*)))
   (dolist (expected '((1200 :xfx cl-prolog::|:-|)
                        (1200 :fx cl-prolog::|:-|)
                        (1100 :xfy cl-prolog::|;|)

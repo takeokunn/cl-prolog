@@ -94,6 +94,16 @@
           (is (member lexeme (cl-prolog::%symbolic-token-lexemes)
                       :test #'string=))))))
 
+(deftest operator-lexeme-generation-does-not-mutate-delimiters ()
+  (dotimes (index 20)
+    (declare (ignore index))
+    (is-equal 8
+              (length (cl-prolog::%compute-symbolic-token-lexemes
+                       (cl-prolog::%make-operator-table '())))))
+  (is-equal 3
+            (length (parse-prolog
+                     "fact(a). rule(X) :- fact(X). ?- rule(X)."))))
+
 (deftest prolog-source-parser-and-consult ()
   (let* ((source (format nil "% family~% parent(tom,bob). /* rule */~% child(X) :- parent(tom,X).~% ?- child(X)."))
          (forms (parse-prolog source)))

@@ -3,7 +3,12 @@
 (in-package #:cl-prolog)
 
 (defstruct (%token (:constructor %token (kind &optional value))) kind value)
-(defstruct (%parser (:constructor %parser (tokens))) tokens (position 0))
+(defstruct (%parser (:constructor %parser (tokens operator-table)))
+  tokens
+  operator-table
+  (position 0))
+
+(defvar *parsing-dcg-body-p* nil)
 
 (defun %read-prolog-term-source (stream)
   "Read through one top-level term terminator without consuming the next term."
@@ -71,27 +76,51 @@
        (lower-case-p (char lexeme 0))
        (every #'%identifier-character-p lexeme)))
 
-(defun %standard-operator-lexemes (&optional word-p)
+(defun %operator-lexemes (table &optional word-p)
   (remove-duplicates
-   (loop for definition in (%operator-table-current *standard-operator-table*)
+   (loop for definition in (%operator-table-current table)
          for lexeme = (%operator-lexeme definition)
          when (eq word-p (%word-operator-lexeme-p lexeme))
            collect lexeme)
    :test #'string=))
 
-(defun %symbolic-token-lexemes ()
-  (stable-sort (remove-duplicates
-                (append (%standard-operator-lexemes nil)
-                        '("(" ")" "[" "]" "." "|"))
-                :test #'string=)
-               #'> :key #'length))
+(defun %compute-symbolic-token-lexemes (table)
+  (coerce
+   (sort
+    (coerce (remove-duplicates
+             (append (%operator-lexemes table nil)
+                     (list "(" ")" "[" "]" "{" "}" "." "|"))
+             :test #'string=)
+            'vector)
+    #'> :key #'length)
+   'list))
 
-(defun %tokenize-prolog (source)
+(defvar *operator-lexeme-cache* (make-hash-table :test #'eq))
+
+(defun %operator-table-lexemes (table)
+  "Return cached word and symbolic lexemes for immutable TABLE."
+  (or (gethash table *operator-lexeme-cache*)
+      (setf (gethash table *operator-lexeme-cache*)
+            (cons (%operator-lexemes table t)
+                  (%compute-symbolic-token-lexemes table)))))
+
+(defun %standard-operator-lexemes (&optional word-p)
+  (if word-p
+      (car (%operator-table-lexemes *standard-operator-table*))
+      (%operator-lexemes *standard-operator-table*)))
+
+(defun %symbolic-token-lexemes (&optional (table *standard-operator-table*))
+  (if (eq table *standard-operator-table*)
+      (cdr (%operator-table-lexemes table))
+      (%compute-symbolic-token-lexemes table)))
+
+(defun %tokenize-prolog (source &optional (operator-table *standard-operator-table*))
   (let* ((text (%prolog-source-string source))
          (length (length text))
          (position 0)
-         (word-operators (%standard-operator-lexemes t))
-         (symbolic-tokens (%symbolic-token-lexemes))
+         (operator-lexemes (%operator-table-lexemes operator-table))
+         (word-operators (car operator-lexemes))
+         (symbolic-tokens (cdr operator-lexemes))
          (tokens '()))
     (labels ((peek (&optional (offset 0))
                (let ((index (+ position offset)))
@@ -210,23 +239,23 @@
                 (intern (concatenate 'string "?" (string-upcase name))
                         (find-package '#:cl-prolog))))))
 
-(defun %operator-definition-for-token (token specifiers)
+(defun %operator-definition-for-token (parser token specifiers)
   (when (eq :operator (%token-kind token))
     (let ((name (%prolog-symbol (%token-value token))))
       (find-if (lambda (definition)
                  (member (operator-definition-specifier definition)
                          specifiers :test #'eq))
-               (%operator-table-find *standard-operator-table* name)))))
+               (%operator-table-find (%parser-operator-table parser) name)))))
 
 (defun %operator-binding-power (definition)
   (- +maximum-operator-priority+
      (operator-definition-priority definition)))
 
-(defun %binary-operator-definition (token)
-  (%operator-definition-for-token token '(:xfx :xfy :yfx)))
+(defun %binary-operator-definition (parser token)
+  (%operator-definition-for-token parser token '(:xfx :xfy :yfx)))
 
-(defun %prefix-operator-definition (token)
-  (%operator-definition-for-token token '(:fx :fy)))
+(defun %prefix-operator-definition (parser token)
+  (%operator-definition-for-token parser token '(:fx :fy)))
 
 (defun %operator-symbol (operator)
   (cond ((string= operator ",") 'and)
@@ -250,9 +279,15 @@
       ((%accept-token parser :operator "(")
        (prog1 (%parse-expression parser variables 0)
          (%expect-token parser :operator ")")))
-      ((%accept-token parser :operator "[") (%parse-list parser variables))
-      ((%prefix-operator-definition token)
-       (let* ((definition (%prefix-operator-definition token))
+      ((%accept-token parser :operator "[")
+       (let ((list (%parse-list parser variables)))
+         (if *parsing-dcg-body-p* (list 'dcg-terminals list) list)))
+      ((%accept-token parser :operator "{")
+       (prog1 (list 'brace (let ((*parsing-dcg-body-p* nil))
+                            (%parse-expression parser variables 0)))
+         (%expect-token parser :operator "}")))
+      ((%prefix-operator-definition parser token)
+       (let* ((definition (%prefix-operator-definition parser token))
               (binding-power (%operator-binding-power definition)))
          (when (< binding-power minimum-precedence)
            (error "Prefix Prolog operator ~A is not valid in this context."
@@ -277,7 +312,9 @@
          (if (%accept-token parser :operator "(")
              (let ((arguments '()))
                (unless (%accept-token parser :operator ")")
-                 (loop (push (%parse-expression parser variables 201) arguments)
+                 (loop (push (let ((*parsing-dcg-body-p* nil))
+                               (%parse-expression parser variables 201))
+                             arguments)
                        (cond ((%accept-token parser :operator ","))
                              (t (%expect-token parser :operator ")") (return)))))
                (cons atom (nreverse arguments)))
@@ -299,7 +336,7 @@
 (defun %parse-expression (parser variables minimum-precedence)
   (let ((left (%parse-primary parser variables minimum-precedence)))
     (loop for token = (%current-token parser)
-          for definition = (%binary-operator-definition token)
+          for definition = (%binary-operator-definition parser token)
           for precedence = (and definition (%operator-binding-power definition))
           while (and precedence (>= precedence minimum-precedence))
           for operator = (%token-value token)
@@ -307,12 +344,16 @@
           do (incf (%parser-position parser))
              (setf left (%normalize-control-expression
                          operator left
-                         (%parse-expression parser variables
-                                            (if (eq specifier :xfy)
-                                                 precedence
-                                                 (1+ precedence)))))
+                         (let ((*parsing-dcg-body-p*
+                                 (or *parsing-dcg-body-p*
+                                     (string= operator "-->"))))
+                           (%parse-expression parser variables
+                                              (if (eq specifier :xfy)
+                                                   precedence
+                                                   (1+ precedence))))))
              (when (and (eq specifier :xfx)
                         (let ((next (%binary-operator-definition
+                                     parser
                                      (%current-token parser))))
                           (and next
                                (= (operator-definition-priority definition)
@@ -343,34 +384,26 @@
                 (%expect-token parser :operator ".")
                 (values (make-clause (if (symbolp head) (list head) head)) :clause)))))))
 
-(defun read-prolog-term (source)
+(defun read-prolog-term (source &optional (operator-table *standard-operator-table*))
   "Read one Prolog term from SOURCE, which may be a string or stream."
-  (let* ((parser (%parser (%tokenize-prolog source)))
+  (let* ((parser (%parser (%tokenize-prolog source operator-table) operator-table))
          (term (%parse-expression parser (make-hash-table :test #'equal) 0)))
     (%accept-token parser :operator ".")
     (%expect-token parser :eof)
     term))
 
-(defun read-prolog-clause (source)
+(defun read-prolog-clause (source &optional (operator-table *standard-operator-table*))
   "Read one fact or rule from SOURCE and return a CLAUSE."
-  (let ((parser (%parser (%tokenize-prolog source))))
+  (let ((parser (%parser (%tokenize-prolog source operator-table) operator-table)))
     (multiple-value-bind (form kind) (%parse-next-prolog-form parser)
       (unless (eq kind :clause) (error "Expected a Prolog clause."))
       (%expect-token parser :eof)
       form)))
 
-(defun parse-prolog (source)
+(defun parse-prolog (source &optional (operator-table *standard-operator-table*))
   "Parse SOURCE into CLAUSE objects and untagged query goal forms in source order."
-  (let ((parser (%parser (%tokenize-prolog source))) (forms '()))
+  (let ((parser (%parser (%tokenize-prolog source operator-table) operator-table))
+        (forms '()))
     (loop (multiple-value-bind (form kind) (%parse-next-prolog-form parser)
             (when (eq kind :eof) (return (nreverse forms)))
             (push form forms)))))
-
-(defun consult-prolog (source &optional (rulebase (make-rulebase)))
-  "Parse SOURCE and append its clauses to RULEBASE. Queries are rejected."
-  (let ((forms (parse-prolog source)))
-    (dolist (form forms)
-      (unless (clause-p form)
-        (error "CONSULT-PROLOG cannot consult query ~S." form)))
-    (dolist (form forms rulebase)
-      (rulebase-insert-clause! rulebase form))))
