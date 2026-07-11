@@ -60,7 +60,7 @@
                  (%rulebase-defines-predicate-p
                   rulebase predicate arity *current-prolog-module*)))
     (%raise-permission-error
-     operation permission-type (list predicate '/ arity) environment
+     operation permission-type (list '/ predicate arity) environment
      (first goal) "static procedures cannot be inspected or modified")))
 
 (defun %ensure-callable (term environment operation)
@@ -89,6 +89,106 @@
                              "rule must contain a callable head"))
         (%ensure-callable (second term) environment operation))
       (%ensure-callable term environment operation)))
+
+;;;; ISO Prolog flags
+
+(defstruct (prolog-flag (:constructor %make-prolog-flag (name default-value
+                                                         allowed-values)))
+  name
+  default-value
+  allowed-values)
+
+(defmacro define-prolog-flags (&body specifications)
+  "Define the implementation's flag data independently from builtin logic."
+  `(defparameter *prolog-flag-specifications*
+     (list ,@(loop for (name value allowed-values) in specifications
+                   collect `(%make-prolog-flag
+                              ,(string-upcase (symbol-name name))
+                              ,value ',allowed-values)))))
+
+(define-prolog-flags
+  (bounded "FALSE" ())
+  (max-arity "UNBOUNDED" ())
+  (integer-rounding-function "DOWN" ())
+  (char-conversion "OFF" ("ON" "OFF"))
+  (debug "OFF" ("ON" "OFF"))
+  (unknown "ERROR" ("ERROR" "FAIL" "WARNING"))
+  (double-quotes "CODES" ("CODES" "CHARS" "ATOM")))
+
+(defun %prolog-flag-name (term environment operation)
+  (let ((resolved (logic-substitute term environment)))
+    (when (logic-var-p resolved)
+      (%raise-instantiation-error environment operation
+                                  "flag name must be instantiated"))
+    (unless (symbolp resolved)
+      (%raise-type-error "ATOM" resolved environment operation
+                         "flag name must be an atom"))
+    (string-upcase (symbol-name resolved))))
+
+(defun %find-prolog-flag (name)
+  (find name *prolog-flag-specifications*
+        :key #'prolog-flag-name :test #'string=))
+
+(defun %prolog-flag-value (rulebase flag)
+  "Return FLAG's rulebase-local value, installing its immutable default lazily."
+  (let* ((name (prolog-flag-name flag))
+         (values (rulebase-prolog-flag-values rulebase)))
+    (multiple-value-bind (value present-p) (gethash name values)
+      (if present-p
+          value
+          (setf (gethash name values) (prolog-flag-default-value flag))))))
+
+(defun %external-prolog-flag-value (value)
+  (if (stringp value) (%iso-atom value) value))
+
+(defun %resolve-prolog-flag-value (term environment operation)
+  (let ((resolved (logic-substitute term environment)))
+    (when (logic-var-p resolved)
+      (%raise-instantiation-error environment operation
+                                  "flag value must be instantiated"))
+    (if (symbolp resolved)
+        (string-upcase (symbol-name resolved))
+        resolved)))
+
+(define-builtin (current_prolog_flag name value)
+    (rulebase environment depth emit)
+  (let ((resolved-name (logic-substitute name environment)))
+    (if (logic-var-p resolved-name)
+        (dolist (flag *prolog-flag-specifications*)
+          (%unify-emit
+           name (%iso-atom (prolog-flag-name flag)) environment
+           (lambda (named-environment)
+             (%unify-emit value
+                          (%external-prolog-flag-value
+                          (%prolog-flag-value rulebase flag))
+                          named-environment emit))))
+        (let ((flag (%find-prolog-flag
+                     (%prolog-flag-name name environment
+                                        (%iso-atom "CURRENT_PROLOG_FLAG")))))
+          (when flag
+            (%unify-emit value
+                         (%external-prolog-flag-value
+                          (%prolog-flag-value rulebase flag))
+                         environment emit))))))
+
+(define-builtin (set_prolog_flag name value)
+    (rulebase environment depth emit)
+  (let* ((operation (%iso-atom "SET_PROLOG_FLAG"))
+         (flag-name (%prolog-flag-name name environment operation))
+         (flag (%find-prolog-flag flag-name)))
+    (unless flag
+      (%raise-domain-error "PROLOG_FLAG" (logic-substitute name environment)
+                           environment operation "unknown Prolog flag"))
+    (unless (prolog-flag-allowed-values flag)
+      (%raise-permission-error "MODIFY" "FLAG" (%iso-atom flag-name)
+                               environment operation
+                               "implementation-defined flag is read-only"))
+    (let ((new-value (%resolve-prolog-flag-value value environment operation)))
+      (unless (member new-value (prolog-flag-allowed-values flag) :test #'equal)
+        (%raise-domain-error "FLAG_VALUE" (logic-substitute value environment)
+                             environment operation "invalid Prolog flag value"))
+      (setf (gethash flag-name (rulebase-prolog-flag-values rulebase)) new-value)
+      (funcall emit environment))))
 
 (defun %clause-term-entry (term rulebase goal environment)
   "Convert a substituted dynamic clause TERM to a freshly renamed entry."

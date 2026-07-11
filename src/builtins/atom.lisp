@@ -184,7 +184,7 @@
                      (continue-with (cdr remaining) next-environment))))))
     (continue-with pairs environment)))
 
-(define-builtin (atom-length atom length) (rulebase environment depth emit)
+(define-builtin (atom_length atom length) (rulebase environment depth emit)
   (declare (cl:ignore rulebase depth))
   (let* ((operation (%iso-atom "ATOM_LENGTH"))
          (resolved-atom (%term-resolve atom environment))
@@ -194,7 +194,7 @@
      resolved-length environment operation "atom_length/2 length")
     (%unify-emit length (length (%atom-text resolved-atom)) environment emit)))
 
-(define-builtin (atom-concat left right whole) (rulebase environment depth emit)
+(define-builtin (atom_concat left right whole) (rulebase environment depth emit)
   (declare (cl:ignore rulebase depth))
   (let* ((operation (%iso-atom "ATOM_CONCAT"))
          (resolved-left (%term-resolve left environment))
@@ -222,7 +222,7 @@
        (%raise-instantiation-error environment operation
                                    "atom_concat/3 requires the whole atom or both parts")))))
 
-(define-builtin (sub-atom atom before length after sub) (rulebase environment depth emit)
+(define-builtin (sub_atom atom before length after sub) (rulebase environment depth emit)
   (declare (cl:ignore rulebase depth))
   (let* ((operation (%iso-atom "SUB_ATOM"))
          (resolved-atom (%term-resolve atom environment))
@@ -268,10 +268,10 @@
           (%raise-instantiation-error environment operation
                                       "one argument must be instantiated"))))))
 
-(define-atom-list-conversion atom-chars %character-list-text %atom-character-list)
-(define-atom-list-conversion atom-codes %code-list-text %atom-code-list)
+(define-atom-list-conversion atom_chars %character-list-text %atom-character-list)
+(define-atom-list-conversion atom_codes %code-list-text %atom-code-list)
 
-(define-builtin (char-code character code) (rulebase environment depth emit)
+(define-builtin (char_code character code) (rulebase environment depth emit)
   (declare (cl:ignore rulebase depth))
   (let* ((operation (%iso-atom "CHAR_CODE"))
          (resolved-character (%term-resolve character environment))
@@ -317,5 +317,5 @@
           (%raise-instantiation-error environment operation
                                       "one argument must be instantiated"))))))
 
-(define-number-list-conversion number-chars %character-list-text %atom-character-list)
-(define-number-list-conversion number-codes %code-list-text %atom-code-list)
+(define-number-list-conversion number_chars %character-list-text %atom-character-list)
+(define-number-list-conversion number_codes %code-list-text %atom-code-list)

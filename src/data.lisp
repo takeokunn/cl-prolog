@@ -10,12 +10,19 @@
 
 (defstruct (%stored-clause (:copier nil)
                            (:constructor %make-stored-clause
-                               (clause module born-revision)))
+                               (clause module born-revision &optional source)))
   "Internal lifetime metadata for one clause in a rulebase."
   (clause (make-clause '()) :type clause :read-only t)
   (module +default-prolog-module+ :type symbol :read-only t)
   (born-revision 0 :type (integer 0 *) :read-only t)
+  (source nil :type (or null pathname) :read-only t)
   (died-revision nil :type (or null (integer 0 *))))
+
+(defstruct (%source-record (:constructor %make-source-record (state)))
+  "Artifacts owned by one canonical source file."
+  (state :loading :type (member :loading :loaded))
+  (operators '() :type list)
+  (predicate-properties '() :type list))
 
 (defstruct (%table-entry (:copier nil)
                          (:constructor %make-table-entry ()))
@@ -24,16 +31,23 @@
 
 (defstruct (%table-session
             (:copier nil)
-            (:constructor %make-table-session (entries)))
+            (:constructor %make-table-session
+                (entries module-entries left-recursion)))
   "Tables shared by every proof nested within one public query."
-  (entries (make-hash-table :test #'equal) :type hash-table :read-only t))
+  (entries (make-hash-table :test #'equal) :type hash-table :read-only t)
+  (module-entries (make-hash-table :test #'equal)
+                  :type hash-table :read-only t)
+  (left-recursion (make-hash-table :test #'equal)
+                  :type hash-table :read-only t))
 
 (defparameter +variant-variable-marker+ (gensym "VARIANT-VARIABLE-")
   "Unforgeable marker used in canonical table keys and answers.")
 
 (defun %make-rulebase-table-session (rulebase)
   (declare (cl:ignore rulebase))
-  (%make-table-session (make-hash-table :test #'equal)))
+  (%make-table-session (make-hash-table :test #'equal)
+                       (make-hash-table :test #'equal)
+                       (make-hash-table :test #'equal)))
 
 (defun %canonicalize-variant (term)
   "Rename TERM's variables by first occurrence, preserving sharing."
@@ -77,15 +91,24 @@
 (defun %copy-source-registry (registry)
   "Return a detached copy of REGISTRY for a rulebase transaction."
   (let ((copy (%make-source-registry)))
-    (maphash (lambda (pathname state)
-               (setf (gethash pathname copy) state))
+    (maphash (lambda (pathname record)
+               (setf (gethash pathname copy)
+                     (let ((clone (%make-source-record
+                                   (%source-record-state record))))
+                       (setf (%source-record-operators clone)
+                             (copy-tree (%source-record-operators record))
+                             (%source-record-predicate-properties clone)
+                             (copy-tree
+                              (%source-record-predicate-properties record)))
+                       clone)))
              registry)
     copy))
 
 (defstruct (rulebase (:copier nil)
                      (:constructor %make-rulebase
                          (entries revision operator-table predicate-properties
-                          io-context module-registry source-registry)))
+                          io-context module-registry source-registry
+                          prolog-flag-values)))
   "An ordered logical-update database of clauses."
   (entries '() :type list)
   (revision 0 :type (integer 0 *))
@@ -93,16 +116,26 @@
   (predicate-properties (make-hash-table :test #'equal) :type hash-table)
   (io-context (make-prolog-io-context) :type prolog-io-context)
   (module-registry (make-module-registry) :type module-registry)
-  (source-registry (%make-source-registry) :type hash-table))
+  (source-registry (%make-source-registry) :type hash-table)
+  (prolog-flag-values (make-hash-table :test #'equal) :type hash-table))
 
 (defun %rulebase-source-state (rulebase canonical-pathname)
   "Return CANONICAL-PATHNAME's load state and whether it is registered."
+  (let ((record (gethash canonical-pathname
+                         (rulebase-source-registry rulebase))))
+    (and record (%source-record-state record))))
+
+(defun %rulebase-source-record (rulebase canonical-pathname)
   (gethash canonical-pathname (rulebase-source-registry rulebase)))
 
 (defun %set-rulebase-source-state! (rulebase canonical-pathname state)
   "Record STATE for CANONICAL-PATHNAME and return STATE."
   (check-type state (member :loading :loaded))
-  (setf (gethash canonical-pathname (rulebase-source-registry rulebase)) state))
+  (let ((record (or (%rulebase-source-record rulebase canonical-pathname)
+                    (%make-source-record state))))
+    (setf (%source-record-state record) state
+          (gethash canonical-pathname (rulebase-source-registry rulebase)) record)
+    state))
 
 (defun make-rulebase (&key (clauses '()) (io-context (make-prolog-io-context)))
   "Return a rulebase containing CLAUSES in resolution order."
@@ -115,7 +148,8 @@
    (make-hash-table :test #'equal)
    io-context
    (make-module-registry)
-   (%make-source-registry)))
+   (%make-source-registry)
+   (make-hash-table :test #'equal)))
 
 (defun %copy-rulebase (rulebase)
   "Return a detached mutable copy suitable for transactional updates."
@@ -124,7 +158,8 @@
              (let ((copy (%make-stored-clause
                           (%stored-clause-clause entry)
                           (%stored-clause-module entry)
-                          (%stored-clause-born-revision entry))))
+                          (%stored-clause-born-revision entry)
+                          (%stored-clause-source entry))))
                (setf (%stored-clause-died-revision copy)
                      (%stored-clause-died-revision entry))
                copy))
@@ -137,7 +172,11 @@
      copy)
    (%copy-prolog-io-context (rulebase-io-context rulebase))
    (module-registry-copy (rulebase-module-registry rulebase))
-   (%copy-source-registry (rulebase-source-registry rulebase))))
+   (%copy-source-registry (rulebase-source-registry rulebase))
+   (let ((copy (make-hash-table :test #'equal)))
+     (maphash (lambda (name value) (setf (gethash name copy) value))
+              (rulebase-prolog-flag-values rulebase))
+     copy)))
 
 (defun %replace-rulebase! (target source)
   "Replace TARGET's complete state with SOURCE after a successful transaction."
@@ -150,7 +189,9 @@
         (rulebase-module-registry target)
         (rulebase-module-registry source)
         (rulebase-source-registry target)
-        (rulebase-source-registry source))
+        (rulebase-source-registry source)
+        (rulebase-prolog-flag-values target)
+        (rulebase-prolog-flag-values source))
   target)
 
 (defun %rulebase-predicate-property (rulebase predicate arity
@@ -171,12 +212,12 @@
 
 (defun %rulebase-declared-predicate-indicators
     (rulebase &optional (module +default-prolog-module+))
-  "Return a detached list of declared predicate indicators as (NAME / ARITY)."
+  "Return declared predicate indicators in parser AST form (/ NAME ARITY)."
   (let ((indicators '()))
     (maphash (lambda (key property)
                (declare (cl:ignore property))
                (when (eq (first key) module)
-                 (push (list (second key) '/ (third key)) indicators)))
+                 (push (list '/ (second key) (third key)) indicators)))
              (rulebase-predicate-properties rulebase))
     indicators))
 
@@ -210,10 +251,12 @@
 
 (defun rulebase-insert-clause! (rulebase clause
                                 &key (position :last)
-                                  (module +default-prolog-module+))
+                                  (module +default-prolog-module+)
+                                  source)
   "Insert CLAUSE at POSITION (:FIRST or :LAST) and return RULEBASE."
   (let ((entry (%make-stored-clause clause module
-                                    (%next-rulebase-revision! rulebase))))
+                                    (%next-rulebase-revision! rulebase)
+                                    source)))
     (ecase position
       (:first (push entry (rulebase-entries rulebase)))
       (:last (setf (rulebase-entries rulebase)

@@ -79,8 +79,8 @@ is extensible (see DEFINE-FOREIGN-PREDICATE).")
    #:!
    #:call
    #:once
-   #:setup-call-cleanup
-   #:call-cleanup
+   #:setup_call_cleanup
+   #:call_cleanup
    #:forall
    #:if-then-else
    #:soft-if-then-else
@@ -96,16 +96,15 @@ is extensible (see DEFINE-FOREIGN-PREDICATE).")
    #:true
    #:fail
    #:false
-   #:|\+|
+   #:|\\+|
    #:asserta
    #:assertz
    #:retract
    #:retractall
-   #:current-predicate
+   #:current_predicate
    #:abolish
    #:clause
-   #:!=
-   #:/=
+   #:|\\=|
    #:is
    #:in
    #:|..|
@@ -131,7 +130,7 @@ is extensible (see DEFINE-FOREIGN-PREDICATE).")
    #:integer
    #:float
    #:==
-   #:|\==|
+   #:|\\==|
    #:@<
    #:@=<
    #:@>

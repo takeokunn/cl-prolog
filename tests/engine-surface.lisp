@@ -62,6 +62,27 @@
       (is-equal '(ancestor ?x ?y) (clause-head rule))
       (is-equal '((parent ?x ?y)) (clause-body rule)))))
 
+(deftest proof-analysis-cache-follows-rulebase-revisions ()
+  (let* ((rulebase (make-family-rulebase))
+         (session (cl-prolog::%make-rulebase-table-session rulebase))
+         (state (cl-prolog::%make-proof-state
+                 rulebase '() nil cl-prolog::+default-prolog-module+ session
+                 (cl-prolog::%make-cut-tag)))
+         (first-snapshot (cl-prolog::%proof-module-entries state)))
+    (is (eq first-snapshot (cl-prolog::%proof-module-entries state)))
+    (cl-prolog::%left-recursive-p '(ancestor tom ?who) state)
+    (let ((analysis-count
+            (hash-table-count
+             (cl-prolog::%table-session-left-recursion session))))
+      (cl-prolog::%left-recursive-p '(ancestor tom ?who) state)
+      (is-equal analysis-count
+                (hash-table-count
+                 (cl-prolog::%table-session-left-recursion session))))
+    (rulebase-insert-clause! rulebase (make-clause '(parent eve ada)))
+    (let ((next-snapshot (cl-prolog::%proof-module-entries state)))
+      (is (not (eq first-snapshot next-snapshot)))
+      (is-equal (1+ (length first-snapshot)) (length next-snapshot)))))
+
 (deftest-table rulebase-default-constructors ()
   (:equal '() (clause-body (make-clause '(lonely))))
   (:equal '() (rulebase-visible-clauses (make-rulebase))))
@@ -79,7 +100,7 @@
       (multiple-value-bind (state present-p)
           (cl-prolog::%rulebase-source-state rulebase second-source)
         (is-equal nil state)
-        (is-not present-p))
+        (is (not present-p)))
       (cl-prolog::%replace-rulebase! rulebase transaction)
       (is-equal :loading
                 (cl-prolog::%rulebase-source-state rulebase first-source))

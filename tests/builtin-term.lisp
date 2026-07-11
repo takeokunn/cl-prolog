@@ -168,10 +168,19 @@
           (term-builtin-error-summary '(cl-prolog::|=..| ?term (7 value)))))
 
 (deftest term-order-properties ()
-  (let ((terms '(?x -3 1 1.0 3/2 alpha beta (node) (node left))))
-    (dolist (left terms)
-      (dolist (right terms)
-        (let ((forward (cl-prolog::%compare-terms left right))
-              (reverse (cl-prolog::%compare-terms right left)))
-          (is (= forward (- reverse)))
-          (is (member forward '(-1 0 1))))))))
+  (cl-prolog::%with-logic-variable-order
+    (let ((terms (list (cl-prolog:fresh-logic-variable "?Z")
+                       -3 1 1.0 3/2 'alpha 'beta '(node) '(node left))))
+      (dolist (left terms)
+        (dolist (right terms)
+          (let ((forward (cl-prolog::%compare-terms left right))
+                (reverse (cl-prolog::%compare-terms right left)))
+            (is (= forward (- reverse)))
+            (is (member forward '(-1 0 1)))))))))
+
+(deftest term-order-uses-variable-creation-order ()
+  (cl-prolog::%with-logic-variable-order
+    (let ((first (cl-prolog:fresh-logic-variable "?Z"))
+          (second (cl-prolog:fresh-logic-variable "?A")))
+      (is (= -1 (cl-prolog::%compare-terms first second)))
+      (is (= 1 (cl-prolog::%compare-terms second first))))))

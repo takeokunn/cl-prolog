@@ -6,6 +6,41 @@
 
 (in-package #:cl-prolog)
 
+(defvar *logic-variable-ordinals* nil)
+(defvar *next-logic-variable-ordinal* 0)
+
+(defmacro %with-logic-variable-order (&body body)
+  "Run BODY inside a variable-creation-order context.
+
+An enclosing context is reused so nested queries (e.g. a builtin proving a
+sub-query) keep the ordinals of variables created by their caller."
+  `(if *logic-variable-ordinals*
+       (progn ,@body)
+       (let ((*logic-variable-ordinals* (make-hash-table :test #'eq))
+             (*next-logic-variable-ordinal* 0))
+         ,@body)))
+
+(defun %register-logic-variable (variable)
+  "Assign VARIABLE its stable creation ordinal and return VARIABLE."
+  (unless *logic-variable-ordinals*
+    (error "Logic variables require an active ordering context."))
+  (multiple-value-bind (ordinal present-p)
+      (gethash variable *logic-variable-ordinals*)
+    (declare (ignore ordinal))
+    (unless present-p
+      (setf (gethash variable *logic-variable-ordinals*)
+            (prog1 *next-logic-variable-ordinal*
+              (incf *next-logic-variable-ordinal*)))))
+  variable)
+
+(defun %logic-variable-ordinal (variable)
+  "Return VARIABLE's registered ordinal."
+  (multiple-value-bind (ordinal present-p)
+      (gethash variable *logic-variable-ordinals*)
+    (unless present-p
+      (error "Unregistered logic variable ~S." variable))
+    ordinal))
+
 (defun logic-var-p (term)
   "Return true when TERM is a logic variable (a non-keyword ?-prefixed symbol)."
   (and (symbolp term)
@@ -15,7 +50,10 @@
 
 (defun fresh-logic-variable (&optional (prefix "?VAR"))
   "Return a fresh, never-before-seen logic variable."
-  (gensym prefix))
+  (let ((variable (gensym prefix)))
+    (if *logic-variable-ordinals*
+        (%register-logic-variable variable)
+        variable)))
 
 (defun %walk-term (term env)
   "Chase TERM through ENV until it is unbound or not a variable."
@@ -73,6 +111,8 @@ Returns (VALUES EXTENDED-ENV T) on success and (VALUES NIL NIL) on failure."
     (labels ((walk (node)
                (cond
                  ((logic-var-p node)
+                  (when *logic-variable-ordinals*
+                    (%register-logic-variable node))
                   (unless (gethash node seen)
                     (setf (gethash node seen) t)
                     (push node variables)))

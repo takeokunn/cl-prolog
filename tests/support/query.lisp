@@ -7,7 +7,9 @@
   (ecase kind
     ((:first)
      `(query-prolog-first ,rulebase ',query ,@options))
-    ((=> :set :signals :succeeds :fails)
+    ((:succeeds)
+     `(query-prolog ,rulebase ',query :limit 1 ,@options))
+    ((=> :set :signals :fails)
      `(query-prolog ,rulebase ',query ,@options))))
 
 (defun %query-spec-assertion (spec)

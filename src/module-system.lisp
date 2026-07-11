@@ -6,7 +6,7 @@
 
 (defstruct (prolog-module
             (:constructor %make-prolog-module (name exports imports)))
-  "One module declaration.  Predicate indicators are represented as (NAME / ARITY)."
+  "One module declaration.  Predicate indicators use the parser AST (/ NAME ARITY)."
   (name +default-prolog-module+ :type symbol :read-only t)
   (exports (make-hash-table :test #'equal) :type hash-table :read-only t)
   (imports (make-hash-table :test #'equal) :type hash-table :read-only t))
@@ -38,9 +38,6 @@
           indicator
           (%module-error operation "invalid predicate indicator ~S" indicator))
     (cond
-      ((and (symbolp first) (eq second '/)
-            (typep third '(integer 0)))
-       (cons first third))
       ((and (eq first '/) (symbolp second)
             (typep third '(integer 0)))
        (cons second third))

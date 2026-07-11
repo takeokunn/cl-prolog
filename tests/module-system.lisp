@@ -3,9 +3,9 @@
 (deftest module-registry-declaration-and-resolution ()
   (let ((registry (cl-prolog::make-module-registry)))
     (cl-prolog::module-registry-declare!
-     registry 'lists '((member / 2) (append / 3)))
+     registry 'lists '((/ member 2) (/ append 3)))
     (cl-prolog::module-registry-declare! registry 'client '())
-    (cl-prolog::module-registry-import! registry 'client 'lists '((member / 2)))
+    (cl-prolog::module-registry-import! registry 'client 'lists '((/ member 2)))
     (is (cl-prolog::module-registry-exported-p registry 'lists 'member 2))
     (is (not (cl-prolog::module-registry-exported-p registry 'lists 'member 3)))
     (is-equal 'lists
@@ -34,18 +34,18 @@
 
 (deftest module-registry-rejects-invalid-imports ()
   (let ((registry (cl-prolog::make-module-registry)))
-    (cl-prolog::module-registry-declare! registry 'left '((same / 1)))
-    (cl-prolog::module-registry-declare! registry 'right '((same / 1)))
+    (cl-prolog::module-registry-declare! registry 'left '((/ same 1)))
+    (cl-prolog::module-registry-declare! registry 'right '((/ same 1)))
     (cl-prolog::module-registry-declare! registry 'client '())
     (cl-prolog::module-registry-import! registry 'client 'left)
     (signals-error
       (cl-prolog::module-registry-import! registry 'client 'right))
     (signals-error
-      (cl-prolog::module-registry-import! registry 'client 'left '((hidden / 1))))))
+      (cl-prolog::module-registry-import! registry 'client 'left '((/ hidden 1))))))
 
 (deftest module-registry-rejects-import-redefinition-and-undefined-export ()
   (let ((registry (cl-prolog::make-module-registry)))
-    (cl-prolog::module-registry-declare! registry 'library '((public / 1)))
+    (cl-prolog::module-registry-declare! registry 'library '((/ public 1)))
     (cl-prolog::module-registry-declare! registry 'client '())
     (cl-prolog::module-registry-import! registry 'client 'library)
     (signals-error

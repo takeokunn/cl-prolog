@@ -71,44 +71,9 @@
     (when ok
       (%unify-emit bag values extended emit))))
 
-(defun %prolog-term-rank (term)
-  (cond
-    ((logic-var-p term) 0)
-    ((numberp term) 1)
-    ((symbolp term) 2)
-    ((consp term) 3)
-    (t 4)))
-
-(defun %prolog-atom< (left right)
-  (string< (symbol-name left) (symbol-name right)))
-
-(defun %prolog-term-list< (left right)
-  (loop for left-term in left
-        for right-term in right
-        when (%prolog-term< left-term right-term)
-          return t
-        when (%prolog-term< right-term left-term)
-          return nil
-        finally (return nil)))
-
 (defun %prolog-term< (left right)
   "Compare terms using the standard Prolog order."
-  (let ((left-rank (%prolog-term-rank left))
-        (right-rank (%prolog-term-rank right)))
-    (cond
-      ((/= left-rank right-rank) (< left-rank right-rank))
-      ((logic-var-p left) (string< (symbol-name left) (symbol-name right)))
-      ((numberp left) (< left right))
-      ((symbolp left) (%prolog-atom< left right))
-      ((consp left)
-       (let ((left-arity (length (cdr left)))
-             (right-arity (length (cdr right))))
-         (cond
-           ((/= left-arity right-arity) (< left-arity right-arity))
-           ((%prolog-atom< (car left) (car right)) t)
-           ((%prolog-atom< (car right) (car left)) nil)
-           (t (%prolog-term-list< (cdr left) (cdr right))))))
-      (t (string< (prin1-to-string left) (prin1-to-string right))))))
+  (minusp (%compare-terms left right)))
 
 (defun %emit-bagof-solutions (template quantified-goal bag setp
                               rulebase environment depth emit)

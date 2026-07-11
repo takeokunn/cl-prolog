@@ -39,22 +39,34 @@
     ((consp term) 3)
     (t 4)))
 
-(defun %compare-scalars (left right)
+(defun %compare-strings (left right)
+  (cond
+    ((string< left right) -1)
+    ((string> left right) 1)
+    (t 0)))
+
+(defun %compare-numbers (left right)
   (cond
     ((equal left right) 0)
     ((and (realp left) (realp right))
      (cond
        ((< left right) -1)
        ((> left right) 1)
-       (t (%compare-scalars (prin1-to-string left)
+       (t (%compare-strings (prin1-to-string left)
                             (prin1-to-string right)))))
-    (t
-     (let ((left-representation (prin1-to-string left))
-           (right-representation (prin1-to-string right)))
-       (cond
-         ((string< left-representation right-representation) -1)
-         ((string> left-representation right-representation) 1)
-         (t 0))))))
+    (t (%compare-strings (prin1-to-string left)
+                         (prin1-to-string right)))))
+
+(defun %compare-atoms (left right)
+  (%compare-strings (symbol-name left) (symbol-name right)))
+
+(defun %compare-variables (left right)
+  (let ((left-ordinal (%logic-variable-ordinal left))
+        (right-ordinal (%logic-variable-ordinal right)))
+    (cond
+      ((< left-ordinal right-ordinal) -1)
+      ((> left-ordinal right-ordinal) 1)
+      (t 0))))
 
 (declaim (ftype (function (t t) integer) %compare-terms))
 
@@ -66,7 +78,7 @@
         finally (return 0)))
 
 (defun %compare-compound-terms (left right)
-  (let ((arity-comparison (%compare-scalars (length (rest left))
+  (let ((arity-comparison (%compare-numbers (length (rest left))
                                             (length (rest right)))))
     (if (zerop arity-comparison)
         (let ((functor-comparison (%compare-terms (first left) (first right))))
@@ -83,8 +95,11 @@
         (cond
           ((< left-class right-class) -1)
           ((> left-class right-class) 1)
+          ((= left-class 0) (%compare-variables left right))
+          ((= left-class 1) (%compare-numbers left right))
+          ((= left-class 2) (%compare-atoms left right))
           ((= left-class 3) (%compare-compound-terms left right))
-          (t (%compare-scalars left right))))))
+          (t (error "Not a Prolog term: ~S" left))))))
 
 (defun %emit-term-comparison (predicate left right environment emit)
   (when (funcall predicate
