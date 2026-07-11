@@ -19,6 +19,55 @@
     (%arithmetic-error expression "operator ~S expects ~D argument~:P, got ~D"
                        (first expression) expected (length arguments))))
 
+(defun %check-integer-operands (expression left right)
+  (unless (and (integerp left) (integerp right))
+    (%arithmetic-error expression "operator ~S requires integer operands"
+                       (first expression))))
+
+(defun %check-nonzero-divisor (expression divisor)
+  (when (zerop divisor)
+    (%arithmetic-error expression "division by zero in ~S" expression)))
+
+(defun %arithmetic-operator-key (operator)
+  (and (symbolp operator)
+       (intern (symbol-name operator) :keyword)))
+
+(defun %evaluate-binary-arithmetic (operator left right expression)
+  (case (%arithmetic-operator-key operator)
+    (:+ (+ left right))
+    (:- (- left right))
+    (:* (* left right))
+    (:/ (%check-nonzero-divisor expression right) (/ left right))
+    (:// (%check-integer-operands expression left right)
+        (%check-nonzero-divisor expression right)
+        (truncate left right))
+    (:div (%check-integer-operands expression left right)
+         (%check-nonzero-divisor expression right)
+         (floor left right))
+    (:rem (%check-integer-operands expression left right)
+         (%check-nonzero-divisor expression right)
+         (rem left right))
+    (:mod (%check-integer-operands expression left right)
+         (%check-nonzero-divisor expression right)
+         (mod left right))
+    (:min (min left right))
+    (:max (max left right))
+    ((:** :^) (expt left right))
+    (otherwise (%arithmetic-error expression "unknown binary operator ~S" operator))))
+
+(defun %evaluate-unary-arithmetic (operator argument expression)
+  (case (%arithmetic-operator-key operator)
+    (:+ argument)
+    (:- (- argument))
+    (:abs (abs argument))
+    (:sign (signum argument))
+    (:truncate (truncate argument))
+    (:round (round argument))
+    (:ceiling (ceiling argument))
+    (:floor (floor argument))
+    (:sqrt (sqrt argument))
+    (otherwise (%arithmetic-error expression "unknown unary operator ~S" operator))))
+
 (defun %evaluate-arithmetic-expression (expression environment)
   "Evaluate a ground arithmetic EXPRESSION after applying ENVIRONMENT."
   (let ((resolved (logic-substitute expression environment)))
@@ -34,36 +83,18 @@
                  (t
                   (let ((operator (first term))
                         (arguments (rest term)))
-                    (case operator
-                      ((+ * / mod)
-                       (%check-arithmetic-arity term arguments 2)
-                       (let ((left (evaluate (first arguments)))
-                             (right (evaluate (second arguments))))
-                         (case operator
-                           (+ (+ left right))
-                           (* (* left right))
-                           (/ (when (zerop right)
-                                (%arithmetic-error expression "division by zero in ~S" term))
-                              (/ left right))
-                           (mod (unless (and (integerp left) (integerp right))
-                                  (%arithmetic-error expression
-                                                     "MOD operands must be integers in ~S" term))
-                                (when (zerop right)
-                                  (%arithmetic-error expression "division by zero in ~S" term))
-                                (mod left right)))))
-                      (-
-                       (unless (member (length arguments) '(1 2))
-                         (%arithmetic-error term "operator - expects one or two arguments, got ~D"
-                                            (length arguments)))
-                       (if (rest arguments)
-                           (- (evaluate (first arguments))
-                              (evaluate (second arguments)))
-                           (- (evaluate (first arguments)))))
-                      (abs
-                       (%check-arithmetic-arity term arguments 1)
-                       (abs (evaluate (first arguments))))
+                    (case (length arguments)
+                      (1 (%evaluate-unary-arithmetic
+                          operator (evaluate (first arguments)) term))
+                      (2 (%evaluate-binary-arithmetic
+                          operator
+                          (evaluate (first arguments))
+                          (evaluate (second arguments))
+                          term))
                       (otherwise
-                       (%arithmetic-error expression "unknown arithmetic operator ~S" operator))))))))
+                       (%arithmetic-error term
+                                          "operator ~S expects one or two arguments, got ~D"
+                                          operator (length arguments)))))))))
       (evaluate resolved))))
 
 (define-builtin (is result expression) (rulebase environment depth emit)

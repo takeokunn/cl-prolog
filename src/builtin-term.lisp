@@ -239,6 +239,20 @@
                               (make-hash-table :test #'eq))
                environment emit))
 
+(define-builtin (numbervars term start end) (rulebase environment depth emit)
+  (declare (ignore rulebase depth))
+  (let* ((resolved-term (%term-resolve term environment))
+         (resolved-start (%term-resolve start environment)))
+    (when (and (integerp resolved-start) (not (minusp resolved-start)))
+      (let ((variables (%collect-variables resolved-term)))
+        (%term-unify-sequence
+         (append
+          (loop for variable in variables
+                for index from resolved-start
+                collect (cons variable (list '$var index)))
+          (list (cons end (+ resolved-start (length variables)))))
+         environment emit)))))
+
 (define-builtin (|=..| term list) (rulebase environment depth emit)
   (declare (ignore rulebase depth))
   (let ((resolved-term (%term-resolve term environment))
