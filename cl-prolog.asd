@@ -12,9 +12,10 @@
   :pathname "src"
   :serial t
   :components ((:file "package")
-               (:file "data")
-               (:file "unification")
-               (:file "parser")
+                 (:file "data")
+                 (:file "unification")
+                 (:file "operator-table")
+                 (:file "parser")
                (:file "engine")
                (:file "prover")
                (:module "builtins"
