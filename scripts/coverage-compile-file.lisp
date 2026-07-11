@@ -16,7 +16,8 @@
                    :directory (butlast (pathname-directory here))
                    :defaults here)))
 
-(load (merge-pathnames "scripts/bootstrap.lisp" (repo-root)))
+(defun repo-file (path)
+  (merge-pathnames path (repo-root)))
 
 (defun usage (&optional (stream *standard-output*))
   (format stream "Usage: sbcl --script scripts/coverage-compile-file.lisp SOURCE OUTPUT [DEPENDENCY ...]~%")
@@ -34,10 +35,10 @@
     (values (first args) (second args) (cddr args))))
 
 (multiple-value-bind (source output dependencies)
-    (parse-args)
+  (parse-args)
   (dolist (dependency dependencies)
-    (load (cl-prolog.bootstrap:repo-file dependency)))
-  (compile-file (cl-prolog.bootstrap:repo-file source)
-                :output-file (cl-prolog.bootstrap:repo-file output)
+    (load (repo-file dependency)))
+  (compile-file (repo-file source)
+                :output-file (repo-file output)
                 :verbose nil
                 :print nil))
