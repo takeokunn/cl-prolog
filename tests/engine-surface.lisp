@@ -66,6 +66,26 @@
   (:equal '() (clause-body (make-clause '(lonely))))
   (:equal '() (rulebase-visible-clauses (make-rulebase))))
 
+(deftest rulebase-source-registry-is-transactional ()
+  (let* ((first-source #p"/canonical/first.pl")
+         (second-source #p"/canonical/second.pl")
+         (rulebase (make-rulebase)))
+    (cl-prolog::%set-rulebase-source-state! rulebase first-source :loaded)
+    (let ((transaction (cl-prolog::%copy-rulebase rulebase)))
+      (cl-prolog::%set-rulebase-source-state! transaction first-source :loading)
+      (cl-prolog::%set-rulebase-source-state! transaction second-source :loaded)
+      (is-equal :loaded
+                (cl-prolog::%rulebase-source-state rulebase first-source))
+      (multiple-value-bind (state present-p)
+          (cl-prolog::%rulebase-source-state rulebase second-source)
+        (is-equal nil state)
+        (is-not present-p))
+      (cl-prolog::%replace-rulebase! rulebase transaction)
+      (is-equal :loading
+                (cl-prolog::%rulebase-source-state rulebase first-source))
+      (is-equal :loaded
+                (cl-prolog::%rulebase-source-state rulebase second-source)))))
+
 (deftest-table prolog-invalid-clauses-signal ()
   (:signals (macroexpand-1 '(prolog (:facts (parent tom bob))))
             "Invalid PROLOG clause should fail at expansion time")

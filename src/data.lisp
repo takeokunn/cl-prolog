@@ -70,17 +70,39 @@
                  (t node))))
       (instantiate term))))
 
+(defun %make-source-registry ()
+  "Return an empty registry of canonical source pathnames and load states."
+  (make-hash-table :test #'equal))
+
+(defun %copy-source-registry (registry)
+  "Return a detached copy of REGISTRY for a rulebase transaction."
+  (let ((copy (%make-source-registry)))
+    (maphash (lambda (pathname state)
+               (setf (gethash pathname copy) state))
+             registry)
+    copy))
+
 (defstruct (rulebase (:copier nil)
                      (:constructor %make-rulebase
                          (entries revision operator-table predicate-properties
-                          io-context module-registry)))
+                          io-context module-registry source-registry)))
   "An ordered logical-update database of clauses."
   (entries '() :type list)
   (revision 0 :type (integer 0 *))
   (operator-table *standard-operator-table* :type operator-table)
   (predicate-properties (make-hash-table :test #'equal) :type hash-table)
   (io-context (make-prolog-io-context) :type prolog-io-context)
-  (module-registry (make-module-registry) :type module-registry))
+  (module-registry (make-module-registry) :type module-registry)
+  (source-registry (%make-source-registry) :type hash-table))
+
+(defun %rulebase-source-state (rulebase canonical-pathname)
+  "Return CANONICAL-PATHNAME's load state and whether it is registered."
+  (gethash canonical-pathname (rulebase-source-registry rulebase)))
+
+(defun %set-rulebase-source-state! (rulebase canonical-pathname state)
+  "Record STATE for CANONICAL-PATHNAME and return STATE."
+  (check-type state (member :loading :loaded))
+  (setf (gethash canonical-pathname (rulebase-source-registry rulebase)) state))
 
 (defun make-rulebase (&key (clauses '()) (io-context (make-prolog-io-context)))
   "Return a rulebase containing CLAUSES in resolution order."
@@ -92,7 +114,8 @@
    *standard-operator-table*
    (make-hash-table :test #'equal)
    io-context
-   (make-module-registry)))
+   (make-module-registry)
+   (%make-source-registry)))
 
 (defun %copy-rulebase (rulebase)
   "Return a detached mutable copy suitable for transactional updates."
@@ -113,7 +136,8 @@
               (rulebase-predicate-properties rulebase))
      copy)
    (%copy-prolog-io-context (rulebase-io-context rulebase))
-   (module-registry-copy (rulebase-module-registry rulebase))))
+   (module-registry-copy (rulebase-module-registry rulebase))
+   (%copy-source-registry (rulebase-source-registry rulebase))))
 
 (defun %replace-rulebase! (target source)
   "Replace TARGET's complete state with SOURCE after a successful transaction."
@@ -124,7 +148,9 @@
         (rulebase-predicate-properties source)
         (rulebase-io-context target) (rulebase-io-context source)
         (rulebase-module-registry target)
-        (rulebase-module-registry source))
+        (rulebase-module-registry source)
+        (rulebase-source-registry target)
+        (rulebase-source-registry source))
   target)
 
 (defun %rulebase-predicate-property (rulebase predicate arity
