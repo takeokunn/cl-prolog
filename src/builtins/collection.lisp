@@ -79,24 +79,35 @@
     ((consp term) 3)
     (t 4)))
 
-(defun %symbol-order-name (symbol)
-  (format nil "~A::~A"
-          (if (symbol-package symbol) (package-name (symbol-package symbol)) "")
-          (symbol-name symbol)))
+(defun %prolog-atom< (left right)
+  (string< (symbol-name left) (symbol-name right)))
+
+(defun %prolog-term-list< (left right)
+  (loop for left-term in left
+        for right-term in right
+        when (%prolog-term< left-term right-term)
+          return t
+        when (%prolog-term< right-term left-term)
+          return nil
+        finally (return nil)))
 
 (defun %prolog-term< (left right)
-  "A deterministic approximation of the standard Prolog term order."
+  "Compare terms using the standard Prolog order."
   (let ((left-rank (%prolog-term-rank left))
         (right-rank (%prolog-term-rank right)))
     (cond
       ((/= left-rank right-rank) (< left-rank right-rank))
       ((logic-var-p left) (string< (symbol-name left) (symbol-name right)))
       ((numberp left) (< left right))
-      ((symbolp left) (string< (%symbol-order-name left) (%symbol-order-name right)))
+      ((symbolp left) (%prolog-atom< left right))
       ((consp left)
-       (if (equal (car left) (car right))
-           (%prolog-term< (cdr left) (cdr right))
-           (%prolog-term< (car left) (car right))))
+       (let ((left-arity (length (cdr left)))
+             (right-arity (length (cdr right))))
+         (cond
+           ((/= left-arity right-arity) (< left-arity right-arity))
+           ((%prolog-atom< (car left) (car right)) t)
+           ((%prolog-atom< (car right) (car left)) nil)
+           (t (%prolog-term-list< (cdr left) (cdr right))))))
       (t (string< (prin1-to-string left) (prin1-to-string right))))))
 
 (defun %emit-bagof-solutions (template quantified-goal bag setp
@@ -126,6 +137,48 @@
 
 (define-builtin (setof template goal bag) (rulebase environment depth emit)
   (%emit-bagof-solutions template goal bag t rulebase environment depth emit))
+
+(defun %resolved-collection-list (term environment predicate)
+  (let ((resolved (logic-substitute term environment)))
+    (cond
+      ((logic-var-p resolved)
+       (%raise-instantiation-error environment predicate
+                                   "The input list must be instantiated"))
+      ((not (%proper-list-p resolved))
+       (%raise-type-error "LIST" resolved environment predicate
+                          "The input must be a proper list"))
+      (t resolved))))
+
+(defun %key-value-term-p (term)
+  (and (%proper-list-p term)
+       (= (length term) 3)
+       (symbolp (first term))
+       (string= (symbol-name (first term)) "-")))
+
+(defun %keysort-key (pair environment)
+  (unless (%key-value-term-p pair)
+    (%raise-type-error "PAIR" pair environment (%iso-atom "KEYSORT")
+                       "KEYSORT/2 expects Key-Value pairs"))
+  (second pair))
+
+(define-builtin (sort input sorted) (rulebase environment depth emit)
+  (declare (cl:ignore rulebase depth))
+  (let* ((values (%resolved-collection-list input environment (%iso-atom "SORT")))
+         (ordered (stable-sort (remove-duplicates values :test #'equal)
+                               #'%prolog-term<)))
+    (%unify-emit sorted ordered environment emit)))
+
+(define-builtin (keysort input sorted) (rulebase environment depth emit)
+  (declare (cl:ignore rulebase depth))
+  (let ((pairs (%resolved-collection-list input environment
+                                          (%iso-atom "KEYSORT"))))
+    (dolist (pair pairs)
+      (%keysort-key pair environment))
+    (%unify-emit sorted
+                 (stable-sort (copy-list pairs) #'%prolog-term<
+                              :key (lambda (pair)
+                                     (%keysort-key pair environment)))
+                 environment emit)))
 
 (define-builtin (:when test &rest variables) (rulebase environment depth emit)
   ;; TEST receives the solved value of each of VARIABLES.  The DSL compiles

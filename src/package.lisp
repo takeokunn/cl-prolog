@@ -60,6 +60,8 @@ is extensible (see DEFINE-BUILTIN).")
    ;; text parser
    #:read-prolog-term
    #:read-prolog-clause
+   #:write-prolog-term
+   #:prolog-term-string
    #:parse-prolog
    #:consult-prolog
    ;; rule DSL
@@ -84,6 +86,8 @@ is extensible (see DEFINE-BUILTIN).")
    #:findall
    #:bagof
    #:setof
+   #:sort
+   #:keysort
    #:true
    #:fail
    #:false
@@ -98,6 +102,16 @@ is extensible (see DEFINE-BUILTIN).")
    #:!=
    #:/=
    #:is
+   #:in
+   #:|..|
+   #:|#=|
+   #:|#\\=|
+   #:|#<|
+   #:|#=<|
+   #:|#>|
+   #:|#>=|
+   #:all_different
+   #:labeling
    #:|=:=|
    #:|=\\=|
    #:<
@@ -118,13 +132,13 @@ is extensible (see DEFINE-BUILTIN).")
    #:@>
    #:@>=
    #:compare
-   #:term-variables
+   #:term_variables
    #:compound
    #:callable
    #:ground
    #:functor
    #:arg
-   #:copy-term
+   #:copy_term
    #:numbervars
    #:|=..|
    ;; DCG
