@@ -14,6 +14,7 @@
   :components ((:file "package")
                (:file "data")
                (:file "unification")
+               (:file "parser")
                (:file "engine")
                (:file "prover")
                (:module "builtins"
@@ -36,10 +37,7 @@
   :depends-on (#:cl-prolog)
   :pathname ""
   :serial t
-  :components ((:file "tests"))
-  :perform (asdf:test-op (op c)
-             (declare (ignore op c))
-             (uiop:symbol-call "CL-PROLOG.TESTS" "RUN-TESTS")))
+  :components ((:file "tests")))
 
 (asdf:defsystem #:cl-prolog/weave-tests
   :depends-on (#:cl-prolog #:cl-weave)

@@ -27,6 +27,7 @@
   '("src/package.lisp"
     "src/data.lisp"
     "src/unification.lisp"
+    "src/parser.lisp"
     "src/engine.lisp"
     "src/prover.lisp"
     "src/builtins/core.lisp"
@@ -45,6 +46,7 @@
 (defparameter *test-source-files*
   '("tests/support.lisp"
     "tests/unification.lisp"
+    "tests/parser.lisp"
     "tests/engine-surface.lisp"
     "tests/engine-queries.lisp"
     "tests/engine-runtime.lisp"

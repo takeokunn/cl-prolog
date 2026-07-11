@@ -10,10 +10,10 @@
   (require :asdf)
   (unless (find-package "CL-PROLOG")
     (unless (asdf:find-system "cl-prolog/tests" nil)
-      (asdf:load-asd
-       (merge-pathnames "cl-prolog.asd"
-                        (or *load-truename* *load-pathname*
-                            (error "Cannot determine the repository path.")))))
+      (load (merge-pathnames "cl-prolog.asd"
+                             (or *load-truename* *load-pathname*
+                                 (error "Cannot determine the repository path.")))
+            :verbose nil :print nil))
     (asdf:load-system :cl-prolog)))
 
 ;; The shared bootstrap defines the CL-PROLOG.BOOTSTRAP loader that the test

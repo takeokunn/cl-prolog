@@ -1,3 +1,8 @@
+(defpackage #:cl-prolog.user-atoms
+  (:use)
+  (:documentation
+   "Interned Prolog atoms whose names would otherwise resolve to inherited Common Lisp symbols."))
+
 (defpackage #:cl-prolog
   (:use #:cl)
   (:shadow #:! #:catch #:throw)
@@ -27,6 +32,10 @@ is extensible (see DEFINE-BUILTIN).")
    #:logic-substitute
    ;; engine
    #:*max-prolog-depth*
+   #:invalid-max-depth-error
+   #:invalid-max-depth-error-value
+   #:prolog-depth-limit-exceeded
+   #:prolog-depth-limit-exceeded-goal
    #:invalid-goal-error
    #:invalid-goal-error-goal
    #:prolog-exception
@@ -42,6 +51,11 @@ is extensible (see DEFINE-BUILTIN).")
    #:query-prolog-first
    #:prolog-succeeds-p
    #:solution-binding
+   ;; text parser
+   #:read-prolog-term
+   #:read-prolog-clause
+   #:parse-prolog
+   #:consult-prolog
    ;; rule DSL
    #:prolog
    #:define-rulebase
@@ -53,6 +67,8 @@ is extensible (see DEFINE-BUILTIN).")
    #:!
    #:call
    #:once
+   #:if-then-else
+   #:soft-if-then-else
    #:catch
    #:throw
    #:repeat
@@ -100,6 +116,7 @@ is extensible (see DEFINE-BUILTIN).")
    #:functor
    #:arg
    #:copy-term
+   #:numbervars
    #:|=..|
    ;; DCG
    #:def-dcg-rule
