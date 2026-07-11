@@ -80,8 +80,8 @@
                   :succeeds)
     (is-equal "'+'(1,2)" (get-output-stream-string output))))
 
-(deftest rulebase-copies-share-io-context ()
+(deftest rulebase-copies-isolate-io-context ()
   (with-io-rulebase (rulebase input output) ""
     (let ((copy (cl-prolog::%copy-rulebase rulebase)))
-      (is (eq (cl-prolog::rulebase-io-context rulebase)
-              (cl-prolog::rulebase-io-context copy))))))
+      (is (not (eq (cl-prolog::rulebase-io-context rulebase)
+                   (cl-prolog::rulebase-io-context copy)))))))

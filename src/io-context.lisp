@@ -103,6 +103,26 @@
             (prolog-io-context-current-output context) output-entry))
     context))
 
+(defun %copy-prolog-io-context (context)
+  "Return a detached registry that refers to the same underlying streams."
+  (let ((streams (make-hash-table :test #'eq))
+        (aliases (make-hash-table :test #'eq))
+        (entries (make-hash-table :test #'eq)))
+    (maphash
+     (lambda (handle entry)
+       (let ((copy (copy-prolog-stream entry)))
+         (setf (gethash handle streams) copy
+               (gethash entry entries) copy)))
+     (prolog-io-context-streams context))
+    (maphash (lambda (alias handle)
+               (setf (gethash alias aliases) handle))
+             (prolog-io-context-aliases context))
+    (%make-prolog-io-context
+     streams aliases
+     (gethash (prolog-io-context-current-input context) entries)
+     (gethash (prolog-io-context-current-output context) entries)
+     (prolog-io-context-next-handle context))))
+
 (defun %find-prolog-stream (context designator)
   (cond
     ((prolog-stream-p designator)
