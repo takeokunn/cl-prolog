@@ -6,7 +6,8 @@
 A small, dependency-free Prolog engine for Common Lisp, built around three ideas:
 
 - **macro-first rule definition** — clauses are data, macros own the syntax
-- **CPS proof search** — solutions stream through continuations, nothing buffers
+- **CPS proof search** — the engine emits solutions through continuations; callers
+  choose streaming or collection
 - **data / logic separation** — rulebases are plain structs the engine walks
 
 The public package is `cl-prolog`.
@@ -61,8 +62,10 @@ dispatches like `cond` over queries.
 | Lists | `(member ?x list)`, `(append ?a ?b ?c)`, `(reverse ?a ?b)`, `(length ?l ?n)` | list relations in their supported proper-list modes |
 | Lisp guard | `(:when fn ?x...)` | call a Lisp predicate with solved values |
 
-Arithmetic expressions use prefix Lisp-shaped terms. The supported operators are
-binary `+`, `-`, `*`, `/`, and `mod`, plus unary `-` and `abs`.
+Arithmetic expressions use prefix Lisp-shaped terms. Binary operators are `+`,
+`-`, `*`, `/`, `//`, `div`, `rem`, `mod`, `min`, `max`, `**`, and `^`. Unary
+operators are `+`, `-`, `abs`, `sign`, `truncate`, `round`, `ceiling`, `floor`,
+and `sqrt`.
 
 Collection and dynamic-database goals can be used like any other query:
 
@@ -97,18 +100,8 @@ In the `prolog` / `def-rule` DSL you write guards as expressions —
 `(:when (> ?n 10))` — and the macro compiles them to closures. The engine
 never evaluates user expressions at runtime.
 
-The builtin set is extensible:
-
-```lisp
-(define-builtin (twice input output) (rulebase environment depth emit)
-  (let ((value (logic-substitute input environment)))
-    (when (numberp value)
-      (multiple-value-bind (extended ok) (unify output (* 2 value) environment)
-        (when ok (funcall emit extended))))))
-```
-
-Foreign predicates use the same CPS solution protocol and dispatch by exact
-name and arity:
+Extend the goal set with `define-foreign-predicate`. Foreign predicates use
+the engine's CPS solution protocol and dispatch by exact name and arity:
 
 ```lisp
 (define-foreign-predicate (choose output) (rulebase environment depth emit)
