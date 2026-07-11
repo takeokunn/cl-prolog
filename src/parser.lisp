@@ -15,10 +15,35 @@
 (defun %identifier-character-p (character)
   (or (alphanumericp character) (char= character #\_)))
 
+(defun %operator-lexeme (definition)
+  (string-downcase (symbol-name (operator-definition-name definition))))
+
+(defun %word-operator-lexeme-p (lexeme)
+  (and (plusp (length lexeme))
+       (lower-case-p (char lexeme 0))
+       (every #'%identifier-character-p lexeme)))
+
+(defun %standard-operator-lexemes (&optional word-p)
+  (remove-duplicates
+   (loop for definition in (%operator-table-current *standard-operator-table*)
+         for lexeme = (%operator-lexeme definition)
+         when (eq word-p (%word-operator-lexeme-p lexeme))
+           collect lexeme)
+   :test #'string=))
+
+(defun %symbolic-token-lexemes ()
+  (stable-sort (remove-duplicates
+                (append (%standard-operator-lexemes nil)
+                        '("(" ")" "[" "]" "." "|"))
+                :test #'string=)
+               #'> :key #'length))
+
 (defun %tokenize-prolog (source)
   (let* ((text (%prolog-source-string source))
          (length (length text))
          (position 0)
+         (word-operators (%standard-operator-lexemes t))
+         (symbolic-tokens (%symbolic-token-lexemes))
          (tokens '()))
     (labels ((peek (&optional (offset 0))
                (let ((index (+ position offset)))
@@ -81,7 +106,7 @@
           ((or (upper-case-p (peek)) (char= (peek) #\_)) (emit :variable (scan-name)))
           ((lower-case-p (peek))
            (let ((name (scan-name)))
-             (if (member name '("is" "mod" "div" "rem") :test #'string=)
+             (if (member name word-operators :test #'string=)
                  (emit :operator name)
                  (emit :atom name))))
           (t
@@ -90,17 +115,15 @@
                               (and (<= (+ position (length candidate)) length)
                                    (string= candidate text :start2 position
                                                         :end2 (+ position (length candidate)))))
-                            '("*->" "=:=" "=\\=" "\\==" "@=<" "@>="
-                              "=.." ":-" "?-" "->" "**" "//" "\\+" "\\="
-                              "=<" ">=" "==" "@<" "@>"))))
+                            symbolic-tokens)))
              (if operator
-                 (progn (incf position (length operator)) (emit :operator operator))
+                 (progn
+                   (incf position (length operator))
+                   (emit :operator operator))
                  (let ((character (take)))
                    (if (char= character #\!)
                        (emit :atom "!")
-                       (if (find character "()[],.|;+-*/=<>^")
-                           (emit :operator (string character))
-                           (error "Unexpected Prolog character ~S." character)))))))))
+                       (error "Unexpected Prolog character ~S." character))))))))
       (emit :eof)
       (coerce (nreverse tokens) 'vector))))
 
@@ -139,27 +162,29 @@
                 (intern (concatenate 'string "?" (string-upcase name))
                         (find-package '#:cl-prolog))))))
 
-(defun %binary-precedence (token)
+(defun %operator-definition-for-token (token specifiers)
   (when (eq :operator (%token-kind token))
-    (cdr (assoc (%token-value token)
-                '((";" . 10) ("->" . 20) ("*->" . 20) ("," . 30)
-                  ("=" . 40) ("\\=" . 40) ("==" . 40) ("\\==" . 40) ("=:=" . 40)
-                  ("=\\=" . 40) ("=.." . 40) ("=<" . 40) (">=" . 40) ("<" . 40)
-                  (">" . 40) ("is" . 40) ("+" . 50) ("-" . 50)
-                  ("*" . 60) ("/" . 60) ("//" . 60) ("div" . 60)
-                  ("rem" . 60) ("**" . 70) ("^" . 70))
-                :test #'string=))))
+    (let ((name (%prolog-symbol (%token-value token))))
+      (find-if (lambda (definition)
+                 (member (operator-definition-specifier definition)
+                         specifiers :test #'eq))
+               (%operator-table-find *standard-operator-table* name)))))
+
+(defun %operator-binding-power (definition)
+  (- +maximum-operator-priority+
+     (operator-definition-priority definition)))
+
+(defun %binary-operator-definition (token)
+  (%operator-definition-for-token token '(:xfx :xfy :yfx)))
+
+(defun %prefix-operator-definition (token)
+  (%operator-definition-for-token token '(:fx :fy)))
 
 (defun %operator-symbol (operator)
   (cond ((string= operator ",") 'and)
         ((string= operator ";") 'or)
         ((string= operator "\\+") 'not)
         (t (%prolog-symbol operator))))
-
-(defun %xfx-operator-p (operator)
-  (member operator '("=" "\\=" "==" "\\==" "=:=" "=\\=" "=.."
-                     "=<" ">=" "<" ">" "is")
-          :test #'string=))
 
 (defun %normalize-control-expression (operator left right)
   (cond
@@ -171,19 +196,26 @@
 
 (declaim (ftype function %parse-expression %parse-list))
 
-(defun %parse-primary (parser variables)
+(defun %parse-primary (parser variables minimum-precedence)
   (let ((token (%current-token parser)))
     (cond
       ((%accept-token parser :operator "(")
        (prog1 (%parse-expression parser variables 0)
          (%expect-token parser :operator ")")))
       ((%accept-token parser :operator "[") (%parse-list parser variables))
-      ((or (%accept-token parser :operator "\\+")
-           (%accept-token parser :operator "+")
-           (%accept-token parser :operator "-"))
-       (list (%operator-symbol (%token-value token))
-             (%parse-expression parser variables
-                                (if (string= (%token-value token) "\\+") 40 65))))
+      ((%prefix-operator-definition token)
+       (let* ((definition (%prefix-operator-definition token))
+              (binding-power (%operator-binding-power definition)))
+         (when (< binding-power minimum-precedence)
+           (error "Prefix Prolog operator ~A is not valid in this context."
+                  (%token-value token)))
+         (incf (%parser-position parser))
+         (list (%operator-symbol (%token-value token))
+               (%parse-expression
+                parser variables
+                (if (eq :fx (operator-definition-specifier definition))
+                    (1+ binding-power)
+                    binding-power)))))
       ((eq :number (%token-kind token))
        (incf (%parser-position parser)) (%token-value token))
       ((eq :variable (%token-kind token))
@@ -197,7 +229,7 @@
          (if (%accept-token parser :operator "(")
              (let ((arguments '()))
                (unless (%accept-token parser :operator ")")
-                 (loop (push (%parse-expression parser variables 31) arguments)
+                 (loop (push (%parse-expression parser variables 201) arguments)
                        (cond ((%accept-token parser :operator ","))
                              (t (%expect-token parser :operator ")") (return)))))
                (cons atom (nreverse arguments)))
@@ -207,31 +239,36 @@
 (defun %parse-list (parser variables)
   (when (%accept-token parser :operator "]") (return-from %parse-list '()))
   (let ((elements '()) (tail '()))
-    (loop (push (%parse-expression parser variables 31) elements)
+    (loop (push (%parse-expression parser variables 201) elements)
           (cond
             ((%accept-token parser :operator ","))
             ((%accept-token parser :operator "|")
-             (setf tail (%parse-expression parser variables 31))
+             (setf tail (%parse-expression parser variables 201))
              (%expect-token parser :operator "]") (return))
             (t (%expect-token parser :operator "]") (return))))
     (reduce #'cons (nreverse elements) :from-end t :initial-value tail)))
 
 (defun %parse-expression (parser variables minimum-precedence)
-  (let ((left (%parse-primary parser variables)))
+  (let ((left (%parse-primary parser variables minimum-precedence)))
     (loop for token = (%current-token parser)
-          for precedence = (%binary-precedence token)
+          for definition = (%binary-operator-definition token)
+          for precedence = (and definition (%operator-binding-power definition))
           while (and precedence (>= precedence minimum-precedence))
           for operator = (%token-value token)
+          for specifier = (operator-definition-specifier definition)
           do (incf (%parser-position parser))
              (setf left (%normalize-control-expression
                          operator left
                          (%parse-expression parser variables
-                                            (if (member operator '(";" "->" "*->" "**" "^")
-                                                        :test #'string=)
+                                            (if (eq specifier :xfy)
                                                  precedence
                                                  (1+ precedence)))))
-             (when (and (%xfx-operator-p operator)
-                        (eql 40 (%binary-precedence (%current-token parser))))
+             (when (and (eq specifier :xfx)
+                        (let ((next (%binary-operator-definition
+                                     (%current-token parser))))
+                          (and next
+                               (= (operator-definition-priority definition)
+                                  (operator-definition-priority next)))))
                (error "Non-associative Prolog operator ~A cannot be chained."
                       operator))
           finally (return left))))
@@ -247,7 +284,7 @@
         (let ((body (%parse-expression parser variables 0)))
           (%expect-token parser :operator ".")
           (values body :query))
-        (let ((head (%parse-expression parser variables 31)))
+        (let ((head (%parse-expression parser variables 201)))
           (if (%accept-token parser :operator ":-")
               (let ((body (%parse-expression parser variables 0)))
                 (%expect-token parser :operator ".")

@@ -46,19 +46,42 @@
             (read-prolog-term "p *-> q ; r"))
   (is-equal '(not (= cl-prolog::?X 1)) (read-prolog-term "\\+ X = 1"))
   (is-equal '(is cl-prolog::?X (+ 1 (* 2 3))) (read-prolog-term "X is 1 + 2 * 3"))
-  (is-equal '(cl-prolog::** 2 (cl-prolog::** 3 4))
-            (read-prolog-term "2 ** 3 ** 4"))
+  (signals-error (read-prolog-term "2 ** 3 ** 4"))
   (is-equal '(cl-prolog::^ 2 (cl-prolog::^ 3 4))
             (read-prolog-term "2 ^ 3 ^ 4"))
   (is-equal '(cl-prolog::rem (cl-prolog::div (cl-prolog::// 20 3) 2) 2)
             (read-prolog-term "20 // 3 div 2 rem 2"))
+  (is-equal '(cl-prolog::mod 17 5) (read-prolog-term "17 mod 5"))
+  (is-equal '(cl-prolog::@< cl-prolog::a cl-prolog::b)
+            (read-prolog-term "a @< b"))
   (is-equal '(cl-prolog::=.. cl-prolog::?X
               (cl-prolog::foo cl-prolog::a cl-prolog::b))
              (read-prolog-term "X =.. [foo,a,b]"))
   (dolist (operator '("=" "\\=" "==" "\\==" "=:=" "=\\=" "=.."
                       "=<" ">=" "<" ">" "is"))
     (signals-error
-     (read-prolog-term (format nil "X ~A Y ~A Z" operator operator)))))
+     (read-prolog-term (format nil "X ~A Y ~A Z" operator operator))))
+  (signals-error (read-prolog-term "X = Y < Z"))
+  (signals-error (read-prolog-term "X = \\+ p"))
+  (is-equal '(cl-prolog::pair (+ 1 2) (* 3 4))
+            (read-prolog-term "pair(1 + 2, 3 * 4)")))
+
+(deftest prolog-operator-table-drives-parser ()
+  (dolist (case '(("1 + 2 * 3" (+ 1 (* 2 3)))
+                  ("8 - 3 - 1" (- (- 8 3) 1))
+                  ("2 ^ 3 ^ 4" (cl-prolog::^ 2 (cl-prolog::^ 3 4)))
+                  ("\\+ X = 1" (not (= cl-prolog::?X 1)))))
+    (destructuring-bind (source expected) case
+      (is-equal expected (read-prolog-term source))))
+  (dolist (definition
+           (cl-prolog::%operator-table-current
+            cl-prolog::*standard-operator-table*))
+    (let ((lexeme (cl-prolog::%operator-lexeme definition)))
+      (if (cl-prolog::%word-operator-lexeme-p lexeme)
+          (is (member lexeme (cl-prolog::%standard-operator-lexemes t)
+                      :test #'string=))
+          (is (member lexeme (cl-prolog::%symbolic-token-lexemes)
+                      :test #'string=))))))
 
 (deftest prolog-source-parser-and-consult ()
   (let* ((source (format nil "% family~% parent(tom,bob). /* rule */~% child(X) :- parent(tom,X).~% ?- child(X)."))
