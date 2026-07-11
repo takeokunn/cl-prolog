@@ -58,6 +58,9 @@ is extensible (see DEFINE-BUILTIN).")
    #:call
    #:once
    #:repeat
+   #:findall
+   #:bagof
+   #:setof
    #:true
    #:asserta
    #:assertz

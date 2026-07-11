@@ -37,6 +37,28 @@
   ((once (parent nobody ?x))     :fails)
   ((repeat)                      => (nil nil nil) :limit 3))
 
+(deftest-queries solution-collection-builtins
+    ((make-rulebase
+      :facts (list (make-fact :predicate 'edge :args '(a 2))
+                   (make-fact :predicate 'edge :args '(a 1))
+                   (make-fact :predicate 'edge :args '(a 2))
+                   (make-fact :predicate 'edge :args '(b 3)))))
+  ((findall ?value (edge a ?value) ?bag)
+                                   => (((?value . ?value) (?bag 2 1 2))))
+  ((findall ?value (edge missing ?value) ?bag)
+                                   => (((?value . ?value) (?bag))))
+  ((bagof ?value (edge ?key ?value) ?bag)
+                                   => (((?value . ?value) (?key . a) (?bag 2 1 2))
+                                       ((?value . ?value) (?key . b) (?bag 3))))
+  ((bagof ?value (^ ?key (edge ?key ?value)) ?bag)
+                                   => (((?value . ?value) (?key . ?key)
+                                        (?bag 2 1 2 3))))
+  ((bagof ?value (edge missing ?value) ?bag) :fails)
+  ((setof ?value (edge ?key ?value) ?bag)
+                                   => (((?value . ?value) (?key . a) (?bag 1 2))
+                                       ((?value . ?value) (?key . b) (?bag 3))))
+  ((setof ?value (edge missing ?value) ?bag) :fails))
+
 (deftest dynamic-database-builtins ()
   (let ((rulebase (make-rulebase)))
     (assert-fact! rulebase (make-fact :predicate 'legacy-order :args '(fact)))
