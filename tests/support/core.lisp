@@ -102,9 +102,14 @@
 (defmacro signals-error (form &optional (message "Expected an error"))
   `(progn
      (incf *assertion-count*)
-     (handler-case
-         (progn ,form (error "~A: ~S" ,message ',form))
-       (error () t))))
+     (let ((signaled-p nil))
+       (handler-case
+           ,form
+         (error ()
+           (setf signaled-p t)))
+       (unless signaled-p
+         (error "~A: ~S" ,message ',form))
+       t)))
 
 (defun %table-spec-assertion (spec)
   "Compile one table SPEC into an assertion form."
