@@ -64,12 +64,13 @@ Cut is implemented with the condition system, the idiomatic Lisp tool for
 dynamically scoped control flow:
 
 - `!` emits its solution, then signals the internal `%cut` condition
-- `%with-cut-barrier` (a `handler-case`) marks each choice point; the
-  dynamically nearest barrier absorbs the signal and reports "a cut fired"
-  as its return value
-- barrier owners re-signal to propagate the cut outward: a cut in a rule
-  body prunes the body's earlier choice points and then the predicate's
-  remaining clauses
+- conjunction barriers propagate the signal through earlier choice points
+  in the same invocation
+- each user-defined predicate invocation owns the boundary that consumes the
+  signal, so a rule-body cut prunes remaining clauses without escaping into
+  its caller
+- opaque meta-calls consume their nested cut, while transparent control
+  branches explicitly re-signal it into the containing invocation
 
 ### Guards
 

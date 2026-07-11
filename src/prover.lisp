@@ -120,13 +120,14 @@ alternatives as well."
                     (funcall succeed (proof-state-bindings state)))))
 
 (defun %prove-clauses/k (goal state succeed)
-  "Prove GOAL against the foreign hook and a logical-update-view snapshot."
-  (%continue-foreign-proof goal state succeed)
-  (dolist (clause (rulebase-visible-clauses (proof-state-rulebase state)))
-    (if (null (clause-body clause))
-        (%continue-matching-fact goal clause state succeed)
-        (when (%matching-rule-p goal clause)
-          (%prove-rule/k goal clause state succeed)))))
+  "Prove GOAL within one predicate invocation and consume its cut."
+  (%with-cut-barrier
+    (%continue-foreign-proof goal state succeed)
+    (dolist (clause (rulebase-visible-clauses (proof-state-rulebase state)))
+      (if (null (clause-body clause))
+          (%continue-matching-fact goal clause state succeed)
+          (when (%matching-rule-p goal clause)
+            (%prove-rule/k goal clause state succeed))))))
 
 (defun %prove-rule/k (goal clause state succeed)
   "Resolve GOAL against one CLAUSE; a cut in the body prunes the clause list."

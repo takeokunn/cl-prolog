@@ -121,13 +121,14 @@
     (rulebase environment depth emit)
   (multiple-value-bind (condition-environment matched-p)
       (%first-proof-environment condition rulebase environment depth)
-    (%prove-bindings/k
-     (logic-substitute (if matched-p then else)
-                       (if matched-p condition-environment environment))
-     rulebase
-     (if matched-p condition-environment environment)
-     depth
-     emit)))
+    (when (%prove-bindings/k
+           (logic-substitute (if matched-p then else)
+                             (if matched-p condition-environment environment))
+           rulebase
+           (if matched-p condition-environment environment)
+           depth
+           emit)
+      (%propagate-cut))))
 
 (define-builtin (soft-if-then-else condition then else)
     (rulebase environment depth emit)
@@ -137,13 +138,15 @@
      rulebase environment depth
      (lambda (condition-environment)
        (setf matched-p t)
-       (%prove-bindings/k
-        (logic-substitute then condition-environment)
-        rulebase condition-environment depth emit)))
+       (when (%prove-bindings/k
+              (logic-substitute then condition-environment)
+              rulebase condition-environment depth emit)
+         (%propagate-cut))))
     (unless matched-p
-      (%prove-bindings/k
-       (logic-substitute else environment)
-       rulebase environment depth emit))))
+      (when (%prove-bindings/k
+             (logic-substitute else environment)
+             rulebase environment depth emit)
+        (%propagate-cut)))))
 
 (define-builtin (throw ball) (rulebase environment depth emit)
   (declare (cl:ignore rulebase depth emit))
