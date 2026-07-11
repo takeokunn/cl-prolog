@@ -53,7 +53,7 @@ dispatches like `cond` over queries.
 
 | Category | Goals | Meaning |
 |---|---|---|
-| Unification | `(= a b)`, `(/= a b)`, `(!= a b)` | unify two terms, or require that they cannot unify |
+| Unification | `(= a b)`, `(\= a b)` | unify two terms, or require that they cannot unify |
 | Control | `!`, `(not g)`, `(and g...)`, `(or g...)` | cut, negation as failure, conjunction, and disjunction |
 | Meta-call | `(call g)`, `(once g)`, `(repeat)` | invoke a goal, keep its first proof, or generate repeated proofs |
 | Collection | `(findall t g ?bag)`, `(bagof t g ?bag)`, `(setof t g ?set)` | collect templates; `bagof` groups free variables and `setof` also removes duplicates and sorts |

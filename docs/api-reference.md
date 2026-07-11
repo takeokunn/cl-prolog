@@ -70,7 +70,7 @@ value and calls the function; it never evaluates user expressions.
 ## Builtin Goals
 
 - `(= left right)` — unify
-- `(/= left right)` — fail when the terms unify
+- `(\= left right)` — fail when the terms unify
 - `!` — cut: prunes the running clause's remaining choice points and the
   predicate's remaining rule clauses
 - `(not goal)` — negation as failure

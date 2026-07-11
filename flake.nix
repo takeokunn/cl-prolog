@@ -8,7 +8,13 @@
   inputs.cl-weave.url = "github:takeokunn/cl-weave";
   inputs.cl-weave.inputs.nixpkgs.follows = "nixpkgs";
 
-  outputs = { self, nixpkgs, cl-weave }:
+  # paredit-cli provides structural S-expression tooling for this repo's
+  # Lisp sources: a dev-shell binary for agent-driven refactors and a
+  # structural-parse lint gate reused in `checks`.
+  inputs.paredit-cli.url = "github:takeokunn/paredit-cli";
+  inputs.paredit-cli.inputs.nixpkgs.follows = "nixpkgs";
+
+  outputs = { self, nixpkgs, cl-weave, paredit-cli }:
     let
       systems = [ "x86_64-linux" "aarch64-linux" "x86_64-darwin" "aarch64-darwin" ];
       forAllSystems = f: builtins.listToAttrs (map
@@ -91,6 +97,13 @@
               sbcl --script scripts/run-weave-tests.lisp
               touch $out
             '';
+
+          # Structural parse gate over every tracked Lisp source: fails if
+          # any .lisp/.asd file is not a balanced S-expression document.
+          paredit-lint = paredit-cli.lib.${system}.mkLintCheck {
+            src = src;
+            name = "cl-prolog-paredit-lint";
+          };
         });
 
       apps = forAllSystems (system:
@@ -126,6 +139,7 @@
               pkgs.nixpkgs-fmt
               pkgs.sbcl
               self.packages.${system}.default
+              paredit-cli.packages.${system}.default
             ];
           };
         });

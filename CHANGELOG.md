@@ -16,6 +16,39 @@ section at the top of the file.
 - `flake.nix` gains a `cl-weave` input and a `checks.weave-tests` derivation, so
   `nix flake check` runs the cl-weave suite locally and in CI with no extra
   entrypoint; `scripts/run-weave-tests.lisp` is the standalone runner
+- `flake.nix` gains a `paredit-cli` input: `nix develop` puts the `paredit`
+  structural S-expression CLI on `PATH` for renames, moves, and other
+  refactors of Lisp sources, and `checks.paredit-lint` fails `nix flake
+  check` if any tracked `.lisp`/`.asd` file is not a balanced S-expression
+  document
+
+### Changed
+
+- cut (`!`) is now implemented with `CATCH`/`THROW` tags carried through the
+  proof state instead of dynamically-scoped condition handlers, so a cut in a
+  clause body correctly prunes both the alternatives of goals to its left and
+  the remaining clauses of its own predicate — without leaking through
+  predicate invocations that merely run in its continuation
+- `and`, `or`, and the taken branch of `->` / `*->` are transparent to cut,
+  while `call/1`, `once/1`, `\+/1`, `findall`-family goals, `catch/3`, and the
+  condition of `->` keep cuts local, matching ISO
+- calling a builtin name at an unsupported arity (e.g. `=/1`) signals the ISO
+  `existence_error` for that predicate indicator instead of an engine-specific
+  arity error
+
+### Fixed
+
+- the bitwise arithmetic operator names `\\`, `/\\`, and `\\/` and the
+  `\\+` / `\\==` exports were written with a single backslash inside
+  multiple-escape bars, which the reader treats as an escaped `|`; the
+  runaway token silently swallowed the entire binary arithmetic table, so
+  every `is/2` query over a binary operator died on an unbound table
+- `atan/2` now checks both operands are real and evaluates in double-float,
+  so `atan(0, -1) =:= pi` holds
+- `stream_property/2` no longer crashes computing `end_of_stream` for input
+  streams (an internal helper was called with the wrong argument count)
+- `(and true !)`-style conjunctions whose first goal is a bare atom are no
+  longer misread as a single compound goal
 
 ## 0.2.0 - 2026-07-10
 

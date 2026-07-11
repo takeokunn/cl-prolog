@@ -15,12 +15,28 @@ User support and triage routing are defined in [`SUPPORT.md`](SUPPORT.md).
 2. Run the library test suite before and after changes:
    `sbcl --non-interactive --eval '(require :asdf)' --load cl-prolog.asd --eval '(asdf:test-system :cl-prolog)'`
 3. Run `nix flake check` for packaging and reproducibility coverage when the
-   change affects distribution, ASDF loading, or documentation examples.
+   change affects distribution, ASDF loading, or documentation examples. This
+   also runs `checks.paredit-lint`, which fails if any tracked `.lisp`/`.asd`
+   file is not a balanced S-expression document.
 4. When adding release artifacts exposed from `README.md` or `docs/`,
    ensure the files are tracked in git before relying on `nix flake check`:
    this repository's `cleanSourceWith` flake source omits untracked files,
    so docs, example scripts, alias `.asd` files, and verifier entrypoints can
    disappear from Nix builds even when they exist in a dirty worktree.
+
+## Structural refactors
+
+`nix develop` puts [`paredit`](https://github.com/takeokunn/paredit-cli) on
+`PATH`. Prefer it over hand-editing parentheses for renames, moves, and other
+structural changes to Lisp sources:
+
+```sh
+paredit inspect check --file src/engine.lisp
+paredit refactor rename-function --from old-name --to new-name --output json src/*.lisp
+```
+
+Run a plan/preview command without `--write` first, review the JSON, then
+re-run with `--write`. See the tool's own docs for the full command surface.
 
 ## Compatibility expectations
 
