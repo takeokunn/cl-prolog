@@ -2,6 +2,16 @@
 
 (in-package #:cl-prolog)
 
+(define-condition prolog-parse-error (error)
+  ((description :initarg :description :reader prolog-parse-error-description))
+  (:report (lambda (condition stream)
+             (write-string (prolog-parse-error-description condition) stream)))
+  (:documentation "A syntax error detected while reading Prolog source text."))
+
+(defun %parse-error (control &rest arguments)
+  (error 'prolog-parse-error
+         :description (apply #'format nil control arguments)))
+
 (defstruct (%token (:constructor %token (kind &optional value))) kind value)
 (defstruct (%parser (:constructor %parser (tokens operator-table)))
   tokens
@@ -20,8 +30,8 @@
             do (unless character
                  (if (member state '(:code :line-comment))
                      (return)
-                     (error "Unexpected end of Prolog input while reading ~A."
-                            state)))
+                     (%parse-error "Unexpected end of Prolog input while reading ~A."
+                                   state)))
                (write-char character out)
                (ecase state
                  (:code
@@ -133,7 +143,7 @@
                (incf position 2)
                (loop until (and (peek) (peek 1)
                                 (char= (peek) #\*) (char= (peek 1) #\/))
-                     do (unless (peek) (error "Unterminated Prolog block comment."))
+                     do (unless (peek) (%parse-error "Unterminated Prolog block comment."))
                         (take))
                (incf position 2))
              (scan-name ()
@@ -144,7 +154,7 @@
                (take)
                (with-output-to-string (out)
                  (loop
-                   (unless (peek) (error "Unterminated quoted Prolog atom."))
+                   (unless (peek) (%parse-error "Unterminated quoted Prolog atom."))
                    (let ((character (take)))
                      (cond
                        ((and (char= character #\') (peek) (char= (peek) #\'))
@@ -166,7 +176,7 @@
                    (take)
                    (when (and (peek) (member (peek) '(#\+ #\-))) (take))
                    (unless (and (peek) (digit-char-p (peek)))
-                     (error "Malformed Prolog exponent."))
+                     (%parse-error "Malformed Prolog exponent."))
                    (loop while (and (peek) (digit-char-p (peek))) do (take)))
                  (let ((lexeme (subseq text start position)))
                    (if float-p
@@ -200,7 +210,7 @@
                  (let ((character (take)))
                    (if (char= character #\!)
                        (emit :atom "!")
-                       (error "Unexpected Prolog character ~S." character))))))))
+                       (%parse-error "Unexpected Prolog character ~S." character))))))))
       (emit :eof)
       (coerce (nreverse tokens) 'vector))))
 
@@ -216,8 +226,8 @@
 
 (defun %expect-token (parser kind &optional value)
   (or (%accept-token parser kind value)
-      (error "Expected Prolog token ~S~@[ ~S~], got ~S."
-             kind value (%current-token parser))))
+      (%parse-error "Expected Prolog token ~S~@[ ~S~], got ~S."
+                    kind value (%current-token parser))))
 
 (defun %prolog-symbol (name &key preserve-case)
   (intern (if preserve-case name (string-upcase name))
@@ -290,8 +300,8 @@
        (let* ((definition (%prefix-operator-definition parser token))
               (binding-power (%operator-binding-power definition)))
          (when (< binding-power minimum-precedence)
-           (error "Prefix Prolog operator ~A is not valid in this context."
-                  (%token-value token)))
+           (%parse-error "Prefix Prolog operator ~A is not valid in this context."
+                         (%token-value token)))
          (incf (%parser-position parser))
          (list (%operator-symbol (%token-value token))
                (%parse-expression
@@ -319,7 +329,7 @@
                              (t (%expect-token parser :operator ")") (return)))))
                (cons atom (nreverse arguments)))
              atom)))
-      (t (error "Expected a Prolog term, got ~S." token)))))
+      (t (%parse-error "Expected a Prolog term, got ~S." token)))))
 
 (defun %parse-list (parser variables)
   (when (%accept-token parser :operator "]") (return-from %parse-list '()))
@@ -358,8 +368,8 @@
                           (and next
                                (= (operator-definition-priority definition)
                                   (operator-definition-priority next)))))
-               (error "Non-associative Prolog operator ~A cannot be chained."
-                      operator))
+               (%parse-error "Non-associative Prolog operator ~A cannot be chained."
+                             operator))
           finally (return left))))
 
 (defun %body-goals (body)
@@ -396,7 +406,7 @@
   "Read one fact or rule from SOURCE and return a CLAUSE."
   (let ((parser (%parser (%tokenize-prolog source operator-table) operator-table)))
     (multiple-value-bind (form kind) (%parse-next-prolog-form parser)
-      (unless (eq kind :clause) (error "Expected a Prolog clause."))
+      (unless (eq kind :clause) (%parse-error "Expected a Prolog clause."))
       (%expect-token parser :eof)
       form)))
 

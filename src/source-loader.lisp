@@ -3,6 +3,8 @@
 (in-package #:cl-prolog)
 
 (defvar *current-prolog-source-directory* nil)
+(defvar *current-prolog-source* nil)
+(defvar *current-prolog-source-record* nil)
 
 (define-condition prolog-source-not-found (file-error) ())
 
@@ -100,16 +102,29 @@
        (error "OP directive requires priority, specifier, and name."))
      (destructuring-bind (name priority specifier operator) goal
        (declare (ignore name))
-       (setf (rulebase-operator-table rulebase)
-             (%operator-table-define
-              (rulebase-operator-table rulebase)
-              operator priority (%operator-specifier-keyword specifier)))))
+       (let* ((keyword (%operator-specifier-keyword specifier))
+              (previous (%operator-table-find
+                         (rulebase-operator-table rulebase) operator keyword)))
+         (when *current-prolog-source-record*
+           (push (list operator keyword
+                       (and previous
+                            (operator-definition-priority (first previous)))
+                       priority)
+                 (%source-record-operators *current-prolog-source-record*)))
+         (setf (rulebase-operator-table rulebase)
+               (%operator-table-define
+                (rulebase-operator-table rulebase)
+                operator priority keyword)))))
     (dynamic
      (unless (= (length goal) 2)
        (error "DYNAMIC directive requires one predicate indicator."))
      (multiple-value-bind (predicate arity)
          (%predicate-indicator-values (second goal) 'dynamic)
-       (%set-rulebase-predicate-property! rulebase predicate arity :dynamic module)))
+       (%set-rulebase-predicate-property! rulebase predicate arity :dynamic module)
+       (when *current-prolog-source-record*
+         (push (list module predicate arity :dynamic)
+               (%source-record-predicate-properties
+                *current-prolog-source-record*)))))
     (use_module
      (unless (member (length goal) '(2 3))
        (error "USE_MODULE directive requires a module and optional imports."))
@@ -161,8 +176,77 @@
       (module-registry-ensure-definition-allowed
        (rulebase-module-registry rulebase) module predicate arity)
       (unless (%rulebase-predicate-property rulebase predicate arity module)
-        (%set-rulebase-predicate-property! rulebase predicate arity :static module)))
-    (rulebase-insert-clause! rulebase clause :module module)))
+        (%set-rulebase-predicate-property! rulebase predicate arity :static module)
+        (when *current-prolog-source-record*
+          (push (list module predicate arity :static)
+                (%source-record-predicate-properties
+                 *current-prolog-source-record*)))))
+    (rulebase-insert-clause! rulebase clause :module module
+                             :source *current-prolog-source*)))
+
+(defun %remove-source-clauses! (rulebase canonical)
+  (multiple-value-bind (revision entries) (%rulebase-snapshot rulebase)
+    (declare (ignore revision))
+    (%rulebase-retract-entries!
+     rulebase
+     (remove canonical entries :test-not #'equal
+                               :key #'%stored-clause-source))))
+
+(defun %remove-source-operators! (rulebase record)
+  ;; Effects are pushed during loading, so replaying them restores prior layers.
+  (dolist (effect (%source-record-operators record))
+    (destructuring-bind (name specifier previous-priority source-priority) effect
+      (let ((current (%operator-table-find
+                      (rulebase-operator-table rulebase) name specifier)))
+        (when (if (zerop source-priority)
+                  (null current)
+                  (and current
+                       (= source-priority
+                          (operator-definition-priority (first current)))))
+          (setf (rulebase-operator-table rulebase)
+                (%operator-table-define
+                 (rulebase-operator-table rulebase) name
+                 (or previous-priority 0) specifier)))))))
+
+(defun %source-operator-overrides (rulebase record)
+  "Return runtime definitions currently shadowing RECORD's latest effects."
+  (let ((seen '())
+        (overrides '()))
+    (dolist (effect (%source-record-operators record) overrides)
+      (destructuring-bind (name specifier previous-priority source-priority) effect
+        (declare (ignore previous-priority))
+        (let ((key (list name specifier)))
+          (unless (member key seen :test #'equal)
+            (push key seen)
+            (let ((current (%operator-table-find
+                            (rulebase-operator-table rulebase) name specifier)))
+              (when (and current
+                         (/= source-priority
+                             (operator-definition-priority (first current))))
+                (push (first current) overrides)))))))))
+
+(defun %restore-operator-overrides! (rulebase overrides)
+  (dolist (definition overrides)
+    (setf (rulebase-operator-table rulebase)
+          (%operator-table-define
+           (rulebase-operator-table rulebase)
+           (operator-definition-name definition)
+           (operator-definition-priority definition)
+           (operator-definition-specifier definition)))))
+
+(defun %remove-source-predicate-properties! (rulebase record)
+  (dolist (effect (%source-record-predicate-properties record))
+    (destructuring-bind (module predicate arity property) effect
+      (when (eq property
+                (%rulebase-predicate-property
+                 rulebase predicate arity module))
+        (%remove-rulebase-predicate-property!
+         rulebase predicate arity module)))))
+
+(defun %remove-source-artifacts! (rulebase canonical record)
+  (%remove-source-clauses! rulebase canonical)
+  (%remove-source-operators! rulebase record)
+  (%remove-source-predicate-properties! rulebase record))
 
 (defun %load-prolog-source-transaction (stream rulebase initializations)
   (let ((module +default-prolog-module+)
@@ -221,11 +305,22 @@
          (state (%rulebase-source-state rulebase canonical)))
     (unless (or (eq state :loading)
                 (and (eq state :loaded) (eq if-loaded :skip)))
-      (%set-rulebase-source-state! rulebase canonical :loading)
-      (%call-with-prolog-source-stream
-       canonical
-       (lambda (stream)
-         (%load-prolog-source-transaction stream rulebase initializations)))
+      (let* ((old-record (%rulebase-source-record rulebase canonical))
+             (operator-overrides
+               (and old-record
+                    (%source-operator-overrides rulebase old-record)))
+            (new-record (%make-source-record :loading)))
+        (when old-record
+          (%remove-source-artifacts! rulebase canonical old-record))
+        (setf (gethash canonical (rulebase-source-registry rulebase)) new-record)
+        (let ((*current-prolog-source* canonical)
+              (*current-prolog-source-record* new-record))
+          (%call-with-prolog-source-stream
+           canonical
+           (lambda (stream)
+             (%load-prolog-source-transaction
+              stream rulebase initializations))))
+        (%restore-operator-overrides! rulebase operator-overrides))
       (%set-rulebase-source-state! rulebase canonical :loaded)))
   rulebase)
 
@@ -240,12 +335,18 @@
   "Consult SOURCE and atomically replace RULEBASE after successful validation."
   (let ((transaction (%copy-rulebase rulebase))
         (initializations (list '())))
-    (if (and (listp source) (not (stringp source)))
-        (%load-prolog-pathnames-into-rulebase source transaction initializations)
-        (%call-with-prolog-source-stream
-         source
-         (lambda (stream)
-           (%load-prolog-source-transaction stream transaction initializations))))
+    (cond
+      ((pathnamep source)
+       (%load-prolog-pathnames-into-rulebase
+        (list source) transaction initializations))
+      ((and (listp source) (not (stringp source)))
+       (%load-prolog-pathnames-into-rulebase source transaction initializations))
+      (t
+       (%call-with-prolog-source-stream
+        source
+        (lambda (stream)
+          (%load-prolog-source-transaction
+           stream transaction initializations)))))
     (%run-source-initializations! initializations transaction)
     (%replace-rulebase! rulebase transaction)))
 
@@ -322,7 +423,9 @@
                                   (file-error-pathname condition))
                                  :preserve-case t)
                                 environment operation
-                                "Source file does not exist")))))
+                                "Source file does not exist"))
+      (prolog-parse-error (condition)
+        (%raise-syntax-error condition environment operation)))))
 
 (define-builtin (consult source) (rulebase environment depth emit)
   (declare (ignore depth))
@@ -344,7 +447,9 @@
          "SOURCE_SINK"
          (%prolog-atom-symbol (namestring (file-error-pathname condition))
                               :preserve-case t)
-         environment 'ensure_loaded "Source file does not exist")))))
+         environment 'ensure_loaded "Source file does not exist"))
+      (prolog-parse-error (condition)
+        (%raise-syntax-error condition environment 'ensure_loaded)))))
 
 (define-builtin (load_files sources options) (rulebase environment depth emit)
   (declare (ignore depth))
@@ -364,4 +469,6 @@
          "SOURCE_SINK"
          (%prolog-atom-symbol (namestring (file-error-pathname condition))
                               :preserve-case t)
-         environment 'load_files "Source file does not exist")))))
+         environment 'load_files "Source file does not exist"))
+      (prolog-parse-error (condition)
+        (%raise-syntax-error condition environment 'load_files)))))

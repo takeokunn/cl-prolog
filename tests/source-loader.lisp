@@ -85,6 +85,17 @@
     (let ((rulebase (%consult-through-medium medium "loaded(ok).")))
       (is (%source-query-succeeds-p rulebase "loaded(ok)")))))
 
+(deftest source-loader-syntax-errors-are-catchable-iso-errors ()
+  (with-temporary-prolog-files ((source "broken( ."))
+    (let ((rulebase (make-rulebase)))
+      (is
+       (prolog-succeeds-p
+        rulebase
+        (read-prolog-term
+         (format nil
+                 "catch(consult(~A), error(syntax_error(_), context(consult, _)), true)."
+                 (%prolog-path-atom source))))))))
+
 (deftest source-loader-applies-directives-in-source-order ()
   (let ((rulebase
           (consult-prolog
@@ -292,6 +303,63 @@
                 (count 'cl-prolog::loaded_once
                        (rulebase-visible-clauses rulebase)
                        :key (lambda (clause) (first (clause-head clause))))))))
+
+(deftest consult-replaces-artifacts-owned-by-the-same-source ()
+  (with-temporary-prolog-files
+      ((source ":- op(500, xfx, source_operator). old_clause."))
+    (let ((rulebase (consult-prolog source)))
+      (with-open-file (output source :direction :output :if-exists :supersede)
+        (write-string "new_clause." output))
+      (consult-prolog source rulebase)
+      (is (not (%source-predicate-defined-p rulebase 'cl-prolog::old_clause)))
+      (is (%source-query-succeeds-p rulebase "new_clause"))
+      (is (null (cl-prolog::%operator-table-find
+                 (cl-prolog::rulebase-operator-table rulebase)
+                 'cl-prolog::source_operator))))))
+
+(deftest consult-reload-preserves-runtime-clauses-and-operator-overrides ()
+  (with-temporary-prolog-files
+      ((source ":- op(500, xfx, layered_operator). source_clause."))
+    (let ((rulebase (consult-prolog source)))
+      (is (%source-query-succeeds-p rulebase "assertz(runtime_clause)"))
+      (is (%source-query-succeeds-p
+           rulebase "op(600, xfx, 'LAYERED_OPERATOR')"))
+      (with-open-file (output source :direction :output :if-exists :supersede)
+        (write-string "replacement_clause." output))
+      (consult-prolog source rulebase)
+      (is (%source-query-succeeds-p rulebase "runtime_clause"))
+      (is-equal 600
+                (cl-prolog::operator-definition-priority
+                 (first (cl-prolog::%operator-table-find
+                         (cl-prolog::rulebase-operator-table rulebase)
+                         'cl-prolog::layered_operator :xfx)))))))
+
+(deftest consult-reload-failure-restores-owned-artifacts ()
+  (with-temporary-prolog-files
+      ((source ":- op(500, xfx, rollback_operator). preserved_source_clause."))
+    (let ((rulebase (consult-prolog source)))
+      (with-open-file (output source :direction :output :if-exists :supersede)
+        (write-string "transient_source_clause. ?- invalid." output))
+      (signals-error (consult-prolog source rulebase))
+      (is (%source-query-succeeds-p rulebase "preserved_source_clause"))
+      (is (cl-prolog::%operator-table-find
+           (cl-prolog::rulebase-operator-table rulebase)
+           'cl-prolog::rollback_operator :xfx)))))
+
+(deftest canonical-source-identity-collapses-symbolic-links ()
+  (with-temporary-prolog-files ((source "linked_clause."))
+    (let ((link (%temporary-prolog-pathname)))
+      (unwind-protect
+           (progn
+             (uiop:run-program (list "ln" "-s" (namestring source)
+                                     (namestring link)))
+             (let ((rulebase (ensure-prolog-loaded source)))
+               (ensure-prolog-loaded link rulebase)
+               (is-equal 1
+                         (hash-table-count
+                          (cl-prolog::rulebase-source-registry rulebase)))
+               (is-equal 1 (length (rulebase-visible-clauses rulebase)))))
+        (when (probe-file link) (delete-file link))))))
 
 (deftest ensure-loaded-breaks-circular-source-directives ()
   (with-temporary-prolog-files

@@ -65,6 +65,8 @@
   (is-equal '(cl-prolog::mod 17 5) (read-prolog-term "17 mod 5"))
   (is-equal '(cl-prolog::@< cl-prolog::a cl-prolog::b)
             (read-prolog-term "a @< b"))
+  (is-equal '(cl-prolog:|\\=| cl-prolog::?X cl-prolog::?Y)
+            (read-prolog-term "X \\= Y"))
   (is-equal '(cl-prolog::=.. cl-prolog::?X
               (cl-prolog::foo cl-prolog::a cl-prolog::b))
              (read-prolog-term "X =.. [foo,a,b]"))
