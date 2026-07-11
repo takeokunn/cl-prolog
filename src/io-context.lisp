@@ -53,7 +53,7 @@
       return handle))
 
 (defun %register-prolog-stream! (context stream mode
-                                 &key alias (owned-p t) source
+                                 &key alias (owned-p t) source (type :text)
                                    environment (operation "OPEN"))
   (unless (streamp stream)
     (%raise-type-error "STREAM" stream environment operation
@@ -72,9 +72,12 @@
       (%raise-permission-error (string-upcase (symbol-name direction))
                                "STREAM" (or alias stream) environment operation
                                "Common Lisp stream has the wrong direction"))
+    (unless (member type '(:text :binary))
+      (%raise-domain-error "STREAM_OPTION" type environment operation
+                           "Stream type must be text or binary"))
     (let* ((handle (%next-prolog-stream-handle context))
            (entry (%make-prolog-stream handle stream access-mode direction
-                                       :text alias owned-p source)))
+                                       type alias owned-p source)))
       (setf (gethash handle (prolog-io-context-streams context)) entry)
       (when alias
         (setf (gethash alias (prolog-io-context-aliases context)) handle))
