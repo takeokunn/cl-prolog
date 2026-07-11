@@ -24,6 +24,17 @@
     (is (not (eq car-atom 'cl:car)))
     (is-equal '() (read-prolog-term "[]"))))
 
+(deftest prolog-stream-term-reader-is-incremental ()
+  (with-input-from-string
+      (stream (format nil
+                      "first(1.5, 'not.a.term'). % between terms~%second([a,b])."))
+    (is-equal '(cl-prolog.user-atoms::first 1.5d0 cl-prolog::|not.a.term|)
+              (read-prolog-term stream))
+    (is-equal '(cl-prolog.user-atoms::second (cl-prolog::a cl-prolog::b))
+              (read-prolog-term stream)))
+  (with-input-from-string (stream "value % comment at end of file")
+    (is-equal 'cl-prolog::value (read-prolog-term stream))))
+
 (deftest prolog-clause-parser ()
   (let ((fact (read-prolog-clause "parent(tom, bob)."))
         (rule (read-prolog-clause "ancestor(X,Y) :- parent(X,Z), ancestor(Z,Y).")))
