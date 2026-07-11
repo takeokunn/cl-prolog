@@ -69,7 +69,6 @@
   (let ((total-ns 0)
         (last-result nil))
     (dotimes (index iterations)
-      (declare (ignore index))
       (let ((start (get-internal-real-time)))
         (setf last-result (funcall thunk))
         (incf total-ns
@@ -89,7 +88,6 @@
     (error "Iterations must be a positive integer, got: ~S" iterations))
   (let ((thunk (make-scenario-runner scenario)))
     (dotimes (index (warmup-runs))
-      (declare (ignore index))
       (funcall thunk))
     (append (list :scenario scenario :ok t)
             (run-measured-iterations thunk iterations))))

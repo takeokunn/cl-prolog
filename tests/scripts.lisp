@@ -1,40 +1,45 @@
 ;;;; CLI script JSON-contract tests.
 ;;;;
-;;;; These spawn nested SBCL images and require a working ASDF, so they
-;;;; are loaded only by the full suite entry point (tests.lisp), not by
-;;;; scripts/run-tests-noasdf.lisp.
+;;;; These spawn nested SBCL images, so they are loaded only by the full
+;;;; suite entry point (tests.lisp), not by scripts/run-tests-noasdf.lisp.
 
 (in-package #:fx.prolog.tests)
 
-(defun repo-root ()
-  (uiop:ensure-directory-pathname
-   (asdf:system-source-directory :cl-prolog)))
-
 (defun sbcl-program ()
-  (or (uiop:getenv "SBCL") "sbcl"))
+  (or (sb-ext:posix-getenv "SBCL") "sbcl"))
 
 (defun run-script (script &rest arguments)
-  (multiple-value-bind (output error-output exit-code)
-      (uiop:run-program
-       (append (list (sbcl-program) "--script" script) arguments)
-       :directory (repo-root)
-       :output '(:string :stripped nil)
-       :error-output '(:string :stripped nil)
-       :ignore-error-status t
-       :timeout 120)
-    (list :output output
-          :error-output error-output
-          :exit-code exit-code)))
+  (cl-prolog.bootstrap:run-command-capture
+   (sbcl-program)
+   (append (list "--script" script) arguments)
+   :timeout 120
+   :directory (cl-prolog.bootstrap:repo-root)))
 
 (defun compact-json (string)
-  (coerce (remove-if (lambda (ch)
-                       (find ch '(#\Space #\Tab #\Newline #\Return)))
-                     string)
-          'string))
+  (with-output-to-string (out)
+    (loop with in-string = nil
+          with escaped = nil
+          for ch across string
+          do (cond
+               (escaped
+                (write-char ch out)
+                (setf escaped nil))
+               ((char= ch #\\)
+                (write-char ch out)
+                (when in-string
+                  (setf escaped t)))
+               ((char= ch #\")
+                (write-char ch out)
+                (setf in-string (not in-string)))
+               ((and (not in-string)
+                     (find ch '(#\Space #\Tab #\Newline #\Return)))
+                nil)
+               (t
+                (write-char ch out))))))
 
 (defun %project-version-fragment ()
   (format nil "\"project_version\":\"~A\""
-          (asdf:component-version (asdf:find-system :cl-prolog))))
+          (cl-prolog.bootstrap:project-version)))
 
 (defun %script-json (script &rest arguments)
   (let* ((result (apply #'run-script script arguments))
@@ -51,47 +56,56 @@
 (defun %json-includes-p (json fragment)
   (not (null (search fragment json :test #'char=))))
 
-(deftest verifier-json-contract ()
-  (let ((json (%script-json "scripts/verify-public-contract.lisp" "--json")))
-    (is (%json-includes-p json "\"report_type\":\"public_contract\""))
-    (is (%json-includes-p json "\"manifest\":\"contracts/public-contract.sexp\""))
-    (is (%json-includes-p json (%project-version-fragment)))
-    (is (%json-includes-p json "\"manifest_version\":"))
-    (is (%json-includes-p json "\"ok\":true"))
-    (is (%json-includes-p json "\"summary\":{"))
-    (is (%json-includes-p json "\"results\":["))
-    (is (%json-includes-p json "\"check\":\"package/FX.PROLOG/exports\""))))
+(defun assert-json-fragments (json fragments)
+  (dolist (fragment fragments)
+    (is (%json-includes-p json fragment)
+        (format nil "Missing JSON fragment: ~A~%JSON: ~A" fragment json))))
 
-(deftest benchmark-json-contract ()
-  (let ((json (%script-json "scripts/benchmark.lisp"
-                            "--json"
-                            "--iterations"
-                            "1"
-                            "--scenario"
-                            "ancestor-first")))
-    (is (%json-includes-p json "\"report_type\":\"benchmark\""))
-    (is (%json-includes-p json (%project-version-fragment)))
-    (is (%json-includes-p json "\"requested_scenarios\":[\"ancestor-first\"]"))
-    (is (%json-includes-p json "\"iterations\":1"))
-    (is (%json-includes-p json "\"scenario_count\":1"))
-    (is (%json-includes-p json "\"ok\":true"))
-    (is (%json-includes-p json "\"results\":[{"))
-    (is (%json-includes-p json "\"scenario\":\"ancestor-first\""))
-    (is (%json-includes-p json "\"total_ns\":"))
-    (is (%json-includes-p json "\"avg_ns\":"))
-    (is (%json-includes-p json "\"last_result\":"))))
+(defmacro define-json-contract-tests (&body cases)
+  `(progn
+     ,@(mapcar
+        (lambda (case)
+          (destructuring-bind (&key name command fragments (timeout 60)) case
+            `(deftest ,name (:timeout ,timeout)
+               (let ((json (apply #'%script-json ',command)))
+                 (assert-json-fragments json (list ,@fragments))))))
+        cases)))
 
-(deftest release-audit-json-contract ()
-  (let ((json (%script-json "scripts/release-audit.lisp"
-                            "--dry-run"
-                            "--json"
-                            "--with-benchmarks")))
-    (is (%json-includes-p json "\"report_type\":\"release_audit\""))
-    (is (%json-includes-p json (%project-version-fragment)))
-    (is (%json-includes-p json "\"requested_checks\":[\"tests\",\"core\",\"benchmarks\"]"))
-    (is (%json-includes-p json "\"dry_run\":true"))
-    (is (%json-includes-p json "\"ok\":true"))
-    (is (%json-includes-p json "\"exit_code\":0"))
-    (is (%json-includes-p json "\"check\":\"tests\""))
-    (is (%json-includes-p json "\"check\":\"core\""))
-    (is (%json-includes-p json "\"check\":\"benchmarks\""))))
+(define-json-contract-tests
+  (:name verifier-json-contract
+   :command ("scripts/verify-public-contract.lisp" "--json")
+   :fragments ("\"report_type\":\"public_contract\""
+               "\"manifest\":\"contracts/public-contract.sexp\""
+               (%project-version-fragment)
+               "\"manifest_version\":"
+               "\"ok\":true"
+               "\"summary\":{"
+               "\"results\":["
+               "\"check\":\"package/FX.PROLOG/exports\""
+               "\"check\":\"workflow-contract/.github/workflows/ci.yml\""
+               "\"check\":\"content-contract/scripts/release-audit-main.lisp\""))
+  (:name benchmark-json-contract
+   :command ("scripts/benchmark.lisp" "--json" "--iterations" "1" "--scenario" "ancestor-first")
+   :fragments ("\"report_type\":\"benchmark\""
+               (%project-version-fragment)
+               "\"requested_scenarios\":[\"ancestor-first\"]"
+               "\"iterations\":1"
+               "\"scenario_count\":1"
+               "\"ok\":true"
+               "\"results\":[{"
+               "\"scenario\":\"ancestor-first\""
+               "\"total_ns\":"
+               "\"avg_ns\":"
+               "\"last_result\":"))
+  (:name release-audit-json-contract
+   :command ("scripts/release-audit.lisp" "--dry-run" "--json" "--with-benchmarks" "--with-script-contracts")
+   :fragments ("\"report_type\":\"release_audit\""
+               (%project-version-fragment)
+               "\"requested_checks\":[\"tests\",\"core\",\"benchmarks\"]"
+               "\"dry_run\":true"
+               "\"ok\":true"
+               "\"exit_code\":0"
+               "\"command\":\"env CL_PROLOG_TEST_SCRIPTS=1 sbcl --script tests.lisp\""
+               "\"check\":\"tests\""
+               "\"check\":\"core\""
+               "\"check\":\"benchmarks\"")))

@@ -9,7 +9,7 @@ codebase optimizes for:
 - CPS proof search: solutions stream through continuations
 - explicit separation between data and logic
 - immutable rulebase construction as the default style
-- a narrow, machine-verified public API with no compatibility aliases
+- a narrow, machine-verified public API with one canonical surface
 
 It is not trying to emulate a full ISO Prolog runtime. It is a focused Lisp
 library.
@@ -109,8 +109,8 @@ immutable: build with `prolog`, extend with `extend-rulebase`, query with
 ## Verification Layers
 
 1. `scripts/verify-public-contract.lisp` — exact public surface and shipped files
-2. `asdf:test-system :cl-prolog` — regression behavior
-3. `sbcl --script scripts/run-tests-noasdf.lisp` — same core suite without ASDF
+2. `sbcl --script tests.lisp` — regression behavior
+3. `sbcl --script scripts/run-tests-noasdf.lisp` — same core suite without script-contract tests
 4. `scripts/benchmark.lisp` — proof-search and DCG performance smoke
 5. `scripts/release-audit.lisp` — release orchestration
 6. `nix flake check` — packaging and clean-source verification

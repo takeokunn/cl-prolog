@@ -12,6 +12,7 @@ sbcl --script scripts/release-audit.lisp --version
 sbcl --script scripts/release-audit.lisp
 sbcl --script scripts/release-audit.lisp --with-benchmarks
 sbcl --script scripts/release-audit.lisp --with-nix
+sbcl --script scripts/release-audit.lisp --with-script-contracts
 sbcl --script scripts/release-audit.lisp --with-nix --with-benchmarks --json
 sbcl --script scripts/release-audit.lisp --dry-run --json
 ```
@@ -28,14 +29,22 @@ Default execution includes:
 - `scripts/verify-public-contract.lisp --json`
 - tracked release-artifact validation
 
+That release-artifact set includes the shipped stable scripts
+`benchmark.lisp`, `coverage.lisp`, `release-audit.lisp`, and
+`verify-public-contract.lisp`.
+
 `tests` runs:
 
 - `tests.lisp`
+
+Add `--with-script-contracts` when you also want the nested
+`CL_PROLOG_TEST_SCRIPTS=1` layer that exercises `tests/scripts.lisp`.
 
 Optional checks:
 
 - `nix`: `nix flake check`
 - `benchmarks`: `scripts/benchmark.lisp --json --iterations 100`
+- `tests` with `--with-script-contracts`: `CL_PROLOG_TEST_SCRIPTS=1 sbcl --script tests.lisp`
 
 ## Exit Codes
 
@@ -80,6 +89,7 @@ When `core` fails:
 When `tests` fail:
 
 - rerun `sbcl --script tests.lisp`
+- rerun `sbcl --script scripts/release-audit.lisp --with-script-contracts`
 - inspect the split test files under `tests/`
 
 When `benchmarks` fail:

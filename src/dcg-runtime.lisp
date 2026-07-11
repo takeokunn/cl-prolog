@@ -28,6 +28,13 @@
     ((%dcg-sync-token-p (first tokens)) tokens)
     (t (%skip-to-sync-token (rest tokens)))))
 
+(defun %dcg-progress-p (stream-in stream-out environment)
+  "Return true when STREAM-OUT represents actual progress from STREAM-IN."
+  (let ((resolved-in (logic-substitute stream-in environment))
+        (resolved-out (logic-substitute stream-out environment)))
+    (and (not (logic-var-p resolved-out))
+         (not (equal resolved-in resolved-out)))))
+
 (defun %solve-dcg-star (rule stream-in stream-out rulebase environment depth emit)
   "Match zero or more repetitions of RULE between STREAM-IN and STREAM-OUT."
   (%unify-emit stream-out stream-in environment emit)
@@ -35,12 +42,12 @@
     (%with-cut-barrier
       (%prove-goal (list rule stream-in midpoint) rulebase environment depth
                    (lambda (extended)
-                     ;; Only recurse when RULE consumed input, so nullable
-                     ;; rules cannot loop forever.
-                     (unless (equal (logic-substitute midpoint extended)
-                                    (logic-substitute stream-in extended))
-                       (%solve-dcg-star rule midpoint stream-out
-                                        rulebase extended depth emit)))))))
+                     ;; Only recurse when RULE actually advanced the stream.
+                     ;; A nullable rule leaves MIDPOINT unresolved, which
+                     ;; would otherwise keep generating the same proof forever.
+                     (when (%dcg-progress-p stream-in midpoint extended)
+                        (%solve-dcg-star rule midpoint stream-out
+                                         rulebase extended depth emit)))))))
 
 (define-builtin (dcg-token-match expected input rest) (rulebase environment depth emit)
   (let ((tokens (logic-substitute input environment)))

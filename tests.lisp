@@ -1,34 +1,33 @@
+;;;; ASDF test-op entry point for cl-prolog/tests.
+;;;;
+;;;; Loads the test suites in-process and runs them.  Paths are resolved from
+;;;; the ASDF system source directory (not *LOAD-TRUENAME*), so this works even
+;;;; when tests.lisp is loaded as a compiled fasl from the ASDF output cache.
+
 (eval-when (:compile-toplevel :load-toplevel :execute)
-  (labels ((runtime-call (package-name symbol-name &rest args)
-             (let ((symbol (find-symbol symbol-name package-name)))
-               (unless symbol
-                 (error "Cannot resolve ~A::~A while bootstrapping tests.lisp."
-                        package-name
-                        symbol-name))
-               (apply (symbol-function symbol) args))))
-    (require :asdf)
-    (unless (find-package "FX.PROLOG")
-      (let* ((script-path (or *load-truename*
-                              (error "Cannot determine tests.lisp path from *LOAD-TRUENAME*.")))
-             (repo-root (runtime-call "UIOP" "PATHNAME-DIRECTORY-PATHNAME" script-path)))
-        (runtime-call "ASDF" "LOAD-ASD" (merge-pathnames "cl-prolog.asd" repo-root))
-        (runtime-call "ASDF" "LOAD-SYSTEM" :cl-prolog)))))
+  (require :asdf)
+  (unless (find-package "FX.PROLOG")
+    (let ((repo-root (asdf:system-source-directory "cl-prolog/tests")))
+      (asdf:load-asd (merge-pathnames "cl-prolog.asd" repo-root))
+      (asdf:load-system :cl-prolog))))
 
-(defun test-file (relative-path)
-  (asdf:system-relative-pathname :cl-prolog/tests relative-path))
+;; The shared bootstrap defines the CL-PROLOG.BOOTSTRAP loader that the test
+;; support files use to pull in fixtures and table-driven assertion macros.
+(load (asdf:system-relative-pathname :cl-prolog/tests "scripts/bootstrap.lisp")
+      :verbose nil :print nil)
 
-(load (test-file "tests/support.lisp") :verbose nil :print nil)
-(load (test-file "tests/core.lisp") :verbose nil :print nil)
-(load (test-file "tests/engine.lisp") :verbose nil :print nil)
-(load (test-file "tests/dcg.lisp") :verbose nil :print nil)
+;; LOAD-TEST-SOURCES loads tests/support.lisp (which defines FX.PROLOG.TESTS)
+;; followed by every suite file listed in the bootstrap manifest.
+(funcall (or (find-symbol "LOAD-TEST-SOURCES" "CL-PROLOG.BOOTSTRAP")
+             (error "CL-PROLOG.BOOTSTRAP:LOAD-TEST-SOURCES is unavailable.")))
 
-;; The script JSON-contract tests spawn a tree of fresh SBCL images (the
-;; contract verifier itself spawns more), which is too heavy for sandboxed
-;; or memory-constrained environments (nix build sandboxes, CI runners).
-;; CI exercises the scripts directly as workflow steps instead; set
+;; The script JSON-contract tests spawn a tree of fresh SBCL images, which is
+;; too heavy for sandboxed environments (nix build sandboxes, CI runners).  CI
+;; exercises the scripts directly as workflow steps instead; set
 ;; CL_PROLOG_TEST_SCRIPTS=1 to include the meta-tests here.
 (when (uiop:getenvp "CL_PROLOG_TEST_SCRIPTS")
-  (load (test-file "tests/scripts.lisp") :verbose nil :print nil))
+  (funcall (or (find-symbol "LOAD-SCRIPT-CONTRACT-TESTS" "CL-PROLOG.BOOTSTRAP")
+               (error "CL-PROLOG.BOOTSTRAP:LOAD-SCRIPT-CONTRACT-TESTS is unavailable."))))
 
 (let ((runner (find-symbol "RUN-TESTS" "FX.PROLOG.TESTS")))
   (unless runner

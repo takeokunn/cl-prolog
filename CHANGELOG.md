@@ -7,6 +7,16 @@ section at the top of the file.
 
 ## Unreleased
 
+### Added
+
+- cl-weave (Vitest-shaped) testing library integration: the new
+  `cl-prolog/weave-tests` ASDF system exercises the public engine surface with
+  `describe` / `it` / `expect` suites (unification, family relations, list and
+  control-flow builtins, goal validation)
+- `flake.nix` gains a `cl-weave` input and a `checks.weave-tests` derivation, so
+  `nix flake check` runs the cl-weave suite locally and in CI with no extra
+  entrypoint; `scripts/run-weave-tests.lisp` is the standalone runner
+
 ## 0.2.0 - 2026-07-10
 
 Engine and API overhaul. The public surface was re-cut to the ideal API;

@@ -29,7 +29,7 @@
 (define-builtin (= left right) (rulebase environment depth emit)
   (%unify-emit left right environment emit))
 
-(define-builtin ((!= /=) left right) (rulebase environment depth emit)
+(define-builtin (/= left right) (rulebase environment depth emit)
   (unless (nth-value 1 (unify left right environment))
     (funcall emit environment)))
 

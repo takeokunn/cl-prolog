@@ -44,7 +44,7 @@
     (is-equal '(((?rest . (:noun))))
               (query-prolog *global-rulebase* '(epsilon-run (:noun) ?rest)))))
 
-(deftest-queries dcg-token-builtins ((make-empty-rulebase))
+(deftest-queries dcg-token-builtins ((make-rulebase))
   ((dcg-token-match :noun (:noun :verb) ?rest)  => (((?rest . (:verb)))))
   ((dcg-token-match :noun ((:noun . cat) :verb) ?rest) => (((?rest . (:verb)))))
   ((dcg-token-match :noun (:verb) ?rest)        :fails)
@@ -55,7 +55,7 @@
   ((dcg-token-match-value :age 30 (:age) ?rest) :fails)
   ((dcg-token-match-value :name ?v () ?rest)    :fails))
 
-(deftest-queries dcg-error-recovery ((make-empty-rulebase))
+(deftest-queries dcg-error-recovery ((make-rulebase))
   ((dcg-error-recovery (:noise (:t-rparen . ")") :tail) ?rest)
    => (((?rest . ((:t-rparen . ")") :tail)))))
   ((dcg-error-recovery (:noise :more-noise) ?rest) => (((?rest))))
@@ -79,7 +79,8 @@
             (fx.prolog::%dcg-element-goals 'node '?in '?out))
   (is-equal '((node ?x ?in ?out))
             (fx.prolog::%dcg-element-goals '(node ?x) '?in '?out))
-  (is (signals-error (macroexpand-1 '(def-dcg-rule broken 42)))
+  (is (signals-error (with-macroexpansion (expansion '(def-dcg-rule broken 42))
+                       expansion))
       "Unknown DCG body elements must fail at expansion time")
   (with-clean-global-rulebase
     (def-dcg-rule empty)

@@ -3,7 +3,12 @@
 
   inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
 
-  outputs = { self, nixpkgs }:
+  # cl-weave is the Vitest-shaped testing library used by the weave-tests
+  # suite.  It follows this flake's nixpkgs so both share a single SBCL.
+  inputs.cl-weave.url = "github:takeokunn/cl-weave";
+  inputs.cl-weave.inputs.nixpkgs.follows = "nixpkgs";
+
+  outputs = { self, nixpkgs, cl-weave }:
     let
       systems = [ "x86_64-linux" "aarch64-linux" "x86_64-darwin" "aarch64-darwin" ];
       forAllSystems = f: builtins.listToAttrs (map
@@ -66,6 +71,24 @@
                 --eval '(require :asdf)' \
                 --eval '(asdf:load-asd (truename "cl-prolog.asd"))' \
                 --eval '(asdf:test-system :cl-prolog)'
+              touch $out
+            '';
+
+          # Run the cl-weave based suite.  cl-weave is exposed to ASDF through
+          # CL_SOURCE_REGISTRY; its flake package installs its source tree under
+          # share/common-lisp/source/cl-weave.
+          weave-tests = pkgs.runCommand "cl-prolog-weave-tests"
+            {
+              nativeBuildInputs = [ pkgs.sbcl ];
+            } ''
+              cp -R ${src} source
+              chmod -R u+w source
+              cd source
+              export HOME="$TMPDIR/home"
+              export XDG_CACHE_HOME="$TMPDIR/cache"
+              mkdir -p "$HOME" "$XDG_CACHE_HOME"
+              export CL_SOURCE_REGISTRY="${cl-weave.packages.${system}.default}/share/common-lisp/source//:$PWD//:"
+              sbcl --script scripts/run-weave-tests.lisp
               touch $out
             '';
         });

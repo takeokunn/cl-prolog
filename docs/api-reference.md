@@ -12,7 +12,6 @@ internal. The exact export set is machine-checked against
 - `fact`, `fact-predicate`, `fact-args`, `make-fact`
 - `rule`, `rule-head`, `rule-body`, `make-rule`
 - `rulebase`, `rulebase-p`, `rulebase-facts`, `rulebase-rules`, `make-rulebase`
-- `make-empty-rulebase`
 - `*global-rulebase*`, `clear-global-rulebase!`
 - `assert-fact!`, `assert-rule!`
 
@@ -71,7 +70,7 @@ value and calls the function; it never evaluates user expressions.
 ## Builtin Goals
 
 - `(= left right)` — unify
-- `(!= left right)`, `(/= left right)` — fail when the terms unify
+- `(/= left right)` — fail when the terms unify
 - `!` — cut: prunes the running clause's remaining choice points and the
   predicate's remaining rule clauses
 - `(not goal)` — negation as failure
@@ -101,7 +100,7 @@ not a symbol or symbol-headed list — signal `invalid-goal-error`
 
 - the head lambda list supports required parameters and `&rest`; arity is
   enforced before the body runs
-- the head name may be a list of symbols sharing one solver (like `!=` and `/=`)
+- the head name may be a list of symbols sharing one solver
 - EMIT must be called once per solution with the extended environment;
   builtins must not collect result lists
 - `predicate-true-p` is the simpler hook: specialize it with
@@ -139,11 +138,11 @@ rules terminate.
   readers: `invalid-goal-error-goal`
 - errors signalled by `:when` guard functions propagate to the caller
 
-## ASDF Systems
+## Script Entry Points
 
-- `cl-prolog` — the library (sources under `src/`)
-- `cl-prolog/tests` — regression suite (`asdf:test-system :cl-prolog`)
-- `cl-prolog/examples` — runnable example scripts
-- `cl-prolog/benchmark` — benchmark scenario definitions
+- `sbcl --script tests.lisp` — regression suite
+- `sbcl --script scripts/run-tests-noasdf.lisp` — fast core suite without script-contract tests
+- `sbcl --script examples/quick-start.lisp` — runnable example script
+- `sbcl --script scripts/benchmark.lisp` — benchmark scenario runner
 
 Anything not exported from `fx.prolog` should be treated as internal.

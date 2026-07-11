@@ -30,12 +30,14 @@ for every push and pull request.
 
 - exact exports
 - exact nicknames
-- documented ASDF systems
+- documented script targets
 - fresh-image loadability for selected systems
 - example scripts
 - release docs
 - policy files
-- forbidden legacy references in shipped documentation
+- shipped CI workflow structure and timeout declarations
+- timeout-bearing subprocess contracts for shipped scripts
+- forbidden retired surface references in shipped documentation
 - stable CLI scripts
 
 This is the narrowest ship/no-ship signal for the release tree.
@@ -52,32 +54,35 @@ It should cover:
 - cut semantics
 - DCG behavior
 - macro-oriented usage
-- JSON contracts for shipped maintenance scripts
+
+The CLI JSON-contract layer is opt-in: set `CL_PROLOG_TEST_SCRIPTS=1`
+before running `tests.lisp` when you need the fresh-SBCL script-contract
+checks.
 
 `scripts/run-tests-noasdf.lisp` runs the same core suites (minus the
 script-contract tests, which spawn nested SBCL images) with plain `load`
 and no ASDF dependency.
 
 The script JSON-contract tests (`tests/scripts.lisp`) are opt-in: set
-`CL_PROLOG_TEST_SCRIPTS=1` before running `tests.lisp` or
-`asdf:test-system`. They spawn a tree of fresh SBCL images, which is too
-heavy for nix build sandboxes and memory-constrained CI runners; CI runs
-the underlying scripts directly as workflow steps instead.
+`CL_PROLOG_TEST_SCRIPTS=1` before running `tests.lisp`. They spawn a tree of
+fresh SBCL images, which is too heavy for nix build sandboxes and
+memory-constrained CI runners; CI runs the underlying scripts directly as
+workflow steps instead.
 
 ## Coverage Gate
 
 ```sh
 sbcl --script scripts/coverage.lisp
+sbcl --script scripts/coverage.lisp --help
+sbcl --script scripts/coverage.lisp --version
 ```
 
 compiles `src/` with `sb-cover` instrumentation, runs the core suites, and
 writes an HTML report to `coverage/cover-index.html`.
 
-The bar: every reachable expression and branch is exercised. As of 0.2.0
-all files report 100% expression coverage except constant initforms that
-SBCL folds away before instrumentation (five slot defaults in `data.lisp`,
-two `(project t)` keyword defaults in `query.lisp`) — those never execute
-as code, so `sb-cover` can never observe them.
+The bar: every reachable expression and branch is exercised. In the current
+tree, the generated `sb-cover` report shows 100.0% expression coverage and
+100.0% branch coverage for all files in `src/`.
 
 ## Benchmark Gate
 
@@ -95,3 +100,5 @@ independent command outputs.
 
 By default it runs the public-contract gate and `tests.lisp`. Add
 `--with-benchmarks` when benchmark smoke belongs in the same release report.
+Add `--with-script-contracts` when the release report should also exercise
+`tests/scripts.lisp` through `CL_PROLOG_TEST_SCRIPTS=1`.

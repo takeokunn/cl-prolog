@@ -66,19 +66,18 @@ Use `phrase-all` when you need to inspect every successful remainder stream.
 Check whether the file is tracked in git. The release checks intentionally
 validate the tracked tree, not only the working directory.
 
-## ASDF cannot load `cl-prolog`
+## Script entry point cannot find the repository root
 
 Confirm:
 
-- `(require :asdf)` ran first
-- `cl-prolog.asd` is visible to ASDF
-- you are not relying on removed alias systems
+- you are running the script with `sbcl --script`
+- you are invoking it from inside the repository checkout
+- the script has not been copied away from the tree it expects to load
 
 Direct smoke:
 
-```lisp
-(require :asdf)
-(asdf:load-system :cl-prolog)
+```sh
+sbcl --script scripts/run-tests-noasdf.lisp
 ```
 
 ## What To Include In A Bug Report

@@ -14,11 +14,9 @@ sbcl --script scripts/benchmark.lisp
 sbcl --script scripts/benchmark.lisp --json --scenario ancestor-first --iterations 500
 ```
 
-The benchmark support system is also loadable through ASDF:
-
-```lisp
-(asdf:load-system :cl-prolog/benchmark)
-```
+The benchmark runner loads its support code directly from
+`scripts/bootstrap.lisp`, so it works from a plain checkout without an ASDF
+system definition.
 
 ## Scenarios
 

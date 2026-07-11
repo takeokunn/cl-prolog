@@ -22,7 +22,6 @@ is extensible (see DEFINE-BUILTIN).")
    #:rulebase-facts
    #:rulebase-rules
    #:make-rulebase
-   #:make-empty-rulebase
    #:*global-rulebase*
    #:clear-global-rulebase!
    #:assert-fact!
@@ -53,7 +52,6 @@ is extensible (see DEFINE-BUILTIN).")
    #:prolog-match
    ;; builtin goal names
    #:!
-   #:!=
    #:/=
    ;; DCG
    #:def-dcg-rule

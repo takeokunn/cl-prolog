@@ -19,16 +19,27 @@ sbcl --script scripts/verify-public-contract.lisp --json
 
 - exact export set of the documented public packages
 - exact package nickname set
-- documented ASDF systems are defined and loadable
-- selected systems load in a fresh SBCL image
+- documented script targets run successfully
+- selected targets load in a fresh SBCL image
 - example scripts exist, are tracked, and execute
 - release docs exist and are tracked
 - policy files exist and are tracked
-- shipped docs do not mention deleted compatibility surfaces or removed
-  release artifacts
+- shipped CI workflows exist, are tracked, and still encode the documented
+  release commands plus explicit timeout declarations
+- shipped docs do not mention retired public surfaces or removed release
+  artifacts
+- subprocess-owning scripts keep explicit timeout declarations in the tracked
+  source tree
 - stable CLI scripts exist, are tracked, and satisfy `--help` and `--version`
 
-Alias ASD files are no longer part of the contract.
+The stable script set currently includes:
+
+- `scripts/benchmark.lisp`
+- `scripts/coverage.lisp`
+- `scripts/release-audit.lisp`
+- `scripts/verify-public-contract.lisp`
+
+The contract names only canonical shipped artifacts.
 
 ## Exit Codes
 
@@ -59,23 +70,42 @@ Each result object contains:
 Checks such as `doc-git/...`, `policy-git/...`, `example-git/...`, and
 `script-git/...` fail when the file exists locally but is not tracked in git.
 
+The same is true for `workflow-git/...`: CI configuration is part of the
+shipped release evidence, not local-only scaffolding.
+
 That is intentional. The verifier protects the release tree, not only the
 current worktree.
 
 ## Content Contract Failures
 
-Checks such as `content/legacy-compatibility-references/...` fail when shipped
-documentation still mentions deleted compatibility packages, removed `.asd`
-aliases, or retired verifier/doc paths.
+Checks such as `content/retired-public-surface-references/...` fail when
+shipped documentation still mentions retired public packages, removed `.asd`
+artifacts, or retired verifier/doc paths.
 
 That is intentional. Public documentation drift is treated as a release
 regression, not as a soft editorial issue.
+
+Checks such as `content-contract/scripts/release-audit-main.lisp` fail when a
+tracked subprocess script drops one of the required timeout-bearing call sites
+or the shared timeout runner stops encoding the timeout wrapper.
+
+That is intentional. This repository treats explicit subprocess timeouts as a
+release-quality invariant, not as a local implementation detail.
 
 ## Fresh-Image Checks
 
 Fresh-image validation exists to catch accidental load-order dependencies. A
 system passing in the current SBCL image is weaker evidence than loading it
 from a new process.
+
+## Workflow Contract Checks
+
+Checks such as `workflow-contract/.github/workflows/ci.yml` fail when the
+tracked CI workflow no longer contains the documented gate commands or drops
+explicit `timeout-minutes` declarations.
+
+That is intentional. This repository documents CI as part of the public
+quality story, so workflow drift is treated as contract drift.
 
 ## Relationship To Other Gates
 

@@ -1,11 +1,9 @@
 (eval-when (:compile-toplevel :load-toplevel :execute)
-  (require :asdf))
+  (load (merge-pathnames "../scripts/bootstrap.lisp"
+                         (or *load-truename* *load-pathname*))))
 
 (unless (find-package "FX.PROLOG")
-  (require :asdf)
-  (asdf:load-asd (truename (merge-pathnames "../cl-prolog.asd"
-                                           (or *load-truename* *load-pathname*))))
-  (asdf:load-system :cl-prolog))
+  (cl-prolog.bootstrap:load-core-sources))
 
 (in-package #:fx.prolog)
 

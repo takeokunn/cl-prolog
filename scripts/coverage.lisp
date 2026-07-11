@@ -10,54 +10,121 @@
 
 (require :sb-cover)
 
-(defparameter *repo-root*
-  (let ((here (or *load-truename*
-                  (error "Cannot determine script path from *LOAD-TRUENAME*."))))
-    (make-pathname :name nil :type nil :version nil
-                   :directory (butlast (pathname-directory here))
-                   :defaults here)))
+(defparameter *command-timeouts*
+  '(("compile" . 45)
+    ("report" . 120)))
 
-(defparameter *source-files*
-  '("src/package.lisp"
-    "src/data.lisp"
-    "src/unification.lisp"
-    "src/engine.lisp"
-    "src/builtins.lisp"
-    "src/dcg-runtime.lisp"
-    "src/query.lisp"
-    "src/dsl.lisp"
-    "src/dcg.lisp"))
+(defun command-timeout (kind)
+  (or (cdr (assoc kind *command-timeouts* :test #'string=))
+      15))
 
-(defparameter *test-files*
-  '("tests/support.lisp"
-    "tests/core.lisp"
-    "tests/engine.lisp"
-    "tests/dcg.lisp"))
+(defparameter *compile-timeout* (command-timeout "compile"))
+(defparameter *report-timeout* (command-timeout "report"))
+
+(defun script-path ()
+  (or *load-truename*
+      *load-pathname*
+      (error "Cannot determine script path from *LOAD-TRUENAME* or *LOAD-PATHNAME*.")))
+
+(defun bootstrap-path ()
+  (make-pathname :name nil
+                 :type nil
+                 :version nil
+                 :directory (butlast (pathname-directory (script-path)))
+                 :defaults (script-path)))
+
+(load (merge-pathnames "scripts/bootstrap.lisp" (bootstrap-path)))
+
+(defun print-version (&optional (stream *standard-output*))
+  (format stream "cl-prolog ~A~%"
+          (cl-prolog.bootstrap:project-version)))
+
+(defun usage (&optional (stream *standard-output*))
+  (format stream "Usage: sbcl --script scripts/coverage.lisp~%")
+  (format stream "       sbcl --script scripts/coverage.lisp --help~%")
+  (format stream "       sbcl --script scripts/coverage.lisp --version~%")
+  (format stream "~%")
+  (format stream "Writes an sb-cover HTML report to coverage/cover-index.html.~%")
+  (format stream "Runs only the core suites; script-contract tests stay out of this gate.~%"))
+
+(defun compile-command-arguments (source-file output)
+  (list "-MPOSIX=:sys_wait_h"
+        "-e"
+        (cl-prolog.bootstrap:perl-timeout-wrapper *compile-timeout*)
+        (write-to-string *compile-timeout*)
+        (cl-prolog.bootstrap:sbcl-program)
+        "--disable-debugger"
+        "--script"
+        (namestring (cl-prolog.bootstrap:repo-file "scripts/coverage-compile-file.lisp"))
+        source-file
+        (enough-namestring output (cl-prolog.bootstrap:repo-root))))
+
+(defun coverage-output-file (source-file)
+  (merge-pathnames
+   (format nil "~A.fasl"
+           (pathname-name (pathname source-file)))
+   (cl-prolog.bootstrap:repo-file "coverage/fasl/")))
+
+(defun compile-covered-file! (source-file dependencies)
+  (let ((output (coverage-output-file source-file)))
+    (format t "~&;; instrumenting ~A~%" source-file)
+    (finish-output)
+    (ensure-directories-exist output)
+      (let ((exit-code
+             (cl-prolog.bootstrap:run-command-stream
+              (cl-prolog.bootstrap:perl-program)
+              (append (compile-command-arguments source-file output)
+                      dependencies)
+              :timeout *compile-timeout*)))
+      (unless (zerop exit-code)
+        (error "Command failed (coverage compile): ~A" source-file)))
+    output))
+
+(defun parse-args ()
+  (let ((args sb-ext:*posix-argv*))
+    (dolist (arg (cdr args))
+      (cond
+        ((member arg '("--help" "-h") :test #'string=)
+         (usage)
+         (sb-ext:exit :code 0))
+        ((string= arg "--version")
+         (print-version)
+         (sb-ext:exit :code 0))
+        (t
+         (format *error-output* "Unknown argument: ~A~%~%" arg)
+         (usage *error-output*)
+         (sb-ext:exit :code 2))))))
 
 (declaim (optimize sb-cover:store-coverage-data))
 
-(let ((fasl-directory (merge-pathnames "coverage/fasl/" *repo-root*)))
-  (ensure-directories-exist fasl-directory)
-  (dolist (file *source-files*)
-    (let ((source (merge-pathnames file *repo-root*)))
-      (format t "~&;; instrumenting ~A~%" file)
-      (finish-output)
-      (load (compile-file source
-                          :output-file (merge-pathnames
-                                        (format nil "~A.fasl" (pathname-name source))
-                                        fasl-directory)
-                          :verbose nil
-                          :print nil)))))
+(parse-args)
+
+(let ((dependencies '())
+      (outputs '()))
+  (dolist (file (cl-prolog.bootstrap:core-source-files))
+    (push (compile-covered-file! file (reverse dependencies)) outputs)
+    (push file dependencies))
+  (dolist (output (nreverse outputs))
+    (load output)))
 
 (declaim (optimize (sb-cover:store-coverage-data 0)))
 
-(dolist (file *test-files*)
-  (format t "~&;; loading ~A~%" file)
-  (finish-output)
-  (load (merge-pathnames file *repo-root*)))
+(cl-prolog.bootstrap:load-test-sources)
 
 (funcall (symbol-function (find-symbol "RUN-TESTS" "FX.PROLOG.TESTS")))
 
-(let ((report-directory (merge-pathnames "coverage/" *repo-root*)))
-  (sb-cover:report report-directory)
-  (format t "~&;; HTML report: ~Acover-index.html~%" (namestring report-directory)))
+(defun report-coverage (report-directory)
+  #+sbcl
+  (handler-case
+      (sb-ext:with-timeout *report-timeout*
+        (sb-cover:report report-directory))
+    (sb-ext:timeout ()
+      (format *error-output* "~&;; coverage report timed out after ~A seconds~%"
+              *report-timeout*)))
+  #-sbcl
+  (sb-cover:report report-directory))
+
+(let ((report-directory (cl-prolog.bootstrap:repo-file "coverage/")))
+  (report-coverage report-directory)
+  (format t "~&;; HTML report: ~Acover-index.html~%" (namestring report-directory))
+  (sb-ext:exit :code 0))

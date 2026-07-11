@@ -8,54 +8,6 @@
 
 (in-package #:fx.prolog)
 
-(defun %when-guard-p (goal)
-  "True for a DSL-level (:when EXPR) guard goal."
-  (and (consp goal)
-       (eq (first goal) :when)
-       (consp (rest goal))
-       (null (cddr goal))))
-
-(defun %when-guard-form (goal)
-  "Compile (:when EXPR) into a form building (:when FUNCTION . VARIABLES)."
-  (let* ((test (second goal))
-         (variables (%collect-variables test)))
-    `(list :when
-           (lambda ,variables
-             (declare (ignorable ,@variables))
-             ,test)
-           ,@(mapcar (lambda (variable) `(quote ,variable)) variables))))
-
-(defun %goal-form (goal)
-  "Return a form that builds GOAL, compiling nested (:when EXPR) guards."
-  (cond
-    ((%when-guard-p goal) (%when-guard-form goal))
-    ((and (consp goal) (member (first goal) '(and or not) :test #'eq))
-     `(list ',(first goal) ,@(mapcar #'%goal-form (rest goal))))
-    ((%conjunction-p goal)
-     `(list ,@(mapcar #'%goal-form goal)))
-    (t `(quote ,goal))))
-
-(defun %clause-form (clause)
-  "Return a form constructing CLAUSE as a fact or rule; validate its shape."
-  (unless (and (consp clause) (consp (first clause)))
-    (error "Invalid PROLOG clause: ~S" clause))
-  (if (null (rest clause))
-      `(make-fact :predicate ',(first (first clause))
-                  :args ',(rest (first clause)))
-      `(make-rule :head ',(first clause)
-                  :body (list ,@(mapcar #'%goal-form (rest clause))))))
-
-(defun %partition-clause-forms (clauses)
-  "Split CLAUSES into (VALUES FACT-FORMS RULE-FORMS) preserving order."
-  (let ((fact-forms '())
-        (rule-forms '()))
-    (dolist (clause clauses)
-      (let ((form (%clause-form clause)))
-        (if (null (rest clause))
-            (push form fact-forms)
-            (push form rule-forms))))
-    (values (nreverse fact-forms) (nreverse rule-forms))))
-
 (defmacro prolog (&body clauses)
   "Build a rulebase from CLAUSES.
 
@@ -79,13 +31,16 @@ over their logic variables."
         :facts (append (rulebase-facts ,extension) (rulebase-facts ,base))
         :rules (append (rulebase-rules ,extension) (rulebase-rules ,base))))))
 
+(defun %register-global-rule (head body)
+  "Insert the rule HEAD :- BODY into *GLOBAL-RULEBASE* and return HEAD."
+  (assert-rule! *global-rulebase*
+                (make-rule :head head :body body))
+  head)
+
 (defmacro def-rule (head &body body)
   "Register the rule HEAD :- BODY in *GLOBAL-RULEBASE* at load time."
   `(eval-when (:load-toplevel :execute)
-     (assert-rule! *global-rulebase*
-                   (make-rule :head ',head
-                              :body (list ,@(mapcar #'%goal-form body))))
-     ',head))
+     (%register-global-rule ',head ,(%rule-body-form body))))
 
 (defmacro with-prolog-query (binding-vars (rulebase query &key (max-depth '*max-prolog-depth*))
                              &body body)

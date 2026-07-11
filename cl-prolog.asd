@@ -15,9 +15,11 @@
                (:file "data")
                (:file "unification")
                (:file "engine")
+               (:file "prover")
                (:file "builtins")
                (:file "dcg-runtime")
                (:file "query")
+               (:file "dsl-compiler")
                (:file "dsl")
                (:file "dcg"))
   :in-order-to ((asdf:test-op (asdf:test-op "cl-prolog/tests"))))
@@ -30,6 +32,18 @@
   :perform (asdf:test-op (op c)
              (declare (ignore op c))
              (uiop:symbol-call "FX.PROLOG.TESTS" "RUN-TESTS")))
+
+(asdf:defsystem #:cl-prolog/weave-tests
+  :depends-on (#:cl-prolog #:cl-weave)
+  :description "cl-weave (Vitest-shaped) test suite for the public cl-prolog surface."
+  :serial t
+  :pathname "tests-weave"
+  :components ((:file "package")
+               (:file "prolog"))
+  :perform (asdf:test-op (op c)
+             (declare (ignore op c))
+             (unless (uiop:symbol-call "CL-WEAVE" "RUN-ALL" :reporter :spec)
+               (uiop:quit 1))))
 
 (asdf:defsystem #:cl-prolog/examples
   :depends-on (#:cl-prolog)
