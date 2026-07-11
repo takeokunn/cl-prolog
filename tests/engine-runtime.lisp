@@ -1,18 +1,18 @@
 ;;;; Runtime, control, and internal engine behavior tests.
 
-(in-package #:fx.prolog.tests)
+(in-package #:cl-prolog.tests)
 
-(fx.prolog::define-builtin (test-twice input output)
+(cl-prolog::define-builtin (test-twice input output)
     (rulebase environment depth emit)
   (declare (ignore rulebase depth))
   (let ((value (logic-substitute input environment)))
     (when (numberp value)
-      (fx.prolog::%unify-emit output (* 2 value) environment emit))))
+      (cl-prolog::%unify-emit output (* 2 value) environment emit))))
 
-(fx.prolog::define-builtin ((test-collect test-collect-alias) output &rest arguments)
+(cl-prolog::define-builtin ((test-collect test-collect-alias) output &rest arguments)
     (rulebase environment depth emit)
   (declare (ignore rulebase depth))
-  (fx.prolog::%unify-emit output (copy-list arguments) environment emit))
+  (cl-prolog::%unify-emit output (copy-list arguments) environment emit))
 
 (deftest-queries cut-prunes-clause-alternatives
     ((prolog
@@ -101,29 +101,29 @@
 
 (deftest define-builtin-macroexpand-registers-single-name ()
   (with-macroexpansion (expansion
-                        '(fx.prolog::define-builtin (twice input output)
+                        '(cl-prolog::define-builtin (twice input output)
                            (rulebase environment depth emit)
                            (declare (ignore rulebase depth))
-                           (fx.prolog::%unify-emit output
+                           (cl-prolog::%unify-emit output
                                                    (* 2 (logic-substitute input environment))
                                                    environment
                                                    emit)))
     (is (%tree-contains-p expansion 'defmethod))
-    (is (%tree-contains-p expansion 'fx.prolog::%goal-solver))
+    (is (%tree-contains-p expansion 'cl-prolog::%goal-solver))
     (is (%tree-contains-p expansion 'eql))
     (is (%tree-contains-p expansion 'twice))))
 
 (deftest define-builtin-macroexpand-registers-aliases-and-rest ()
   (with-macroexpansion (expansion
-                        '(fx.prolog::define-builtin ((collect collect-alias) output &rest arguments)
+                        '(cl-prolog::define-builtin ((collect collect-alias) output &rest arguments)
                            (rulebase environment depth emit)
                            (declare (ignore rulebase depth))
-                           (fx.prolog::%unify-emit output
+                           (cl-prolog::%unify-emit output
                                                    (copy-list arguments)
                                                    environment
                                                    emit)))
     (is (%tree-contains-p expansion 'defmethod))
-    (is (%tree-contains-p expansion 'fx.prolog::%goal-solver))
+    (is (%tree-contains-p expansion 'cl-prolog::%goal-solver))
     (is (%tree-contains-p expansion 'collect))
     (is (%tree-contains-p expansion 'collect-alias))))
 
@@ -143,14 +143,14 @@
           (search "expects" (princ-to-string condition))))))
 
 (deftest-table query-normalization-internals ()
-  (:equal '() (fx.prolog::%normalize-query nil))
+  (:equal '() (cl-prolog::%normalize-query nil))
   (:equal '((parent tom bob))
-          (fx.prolog::%normalize-query '(parent tom bob)))
+          (cl-prolog::%normalize-query '(parent tom bob)))
   (:equal '((parent tom bob) (parent bob alice))
-          (fx.prolog::%normalize-query '((parent tom bob) (parent bob alice))))
-  (:equal '(!) (fx.prolog::%normalize-query '!))
-  (:equal nil (fx.prolog::%with-cut-barrier :ok))
-  (:is (fx.prolog::%with-cut-barrier (fx.prolog::%propagate-cut)))
+          (cl-prolog::%normalize-query '((parent tom bob) (parent bob alice))))
+  (:equal '(!) (cl-prolog::%normalize-query '!))
+  (:equal nil (cl-prolog::%with-cut-barrier :ok))
+  (:is (cl-prolog::%with-cut-barrier (cl-prolog::%propagate-cut)))
   (:equal '(unless (minusp depth) (run))
-          (with-macroexpansion (expansion '(fx.prolog::%with-depth-guard depth (run)))
+          (with-macroexpansion (expansion '(cl-prolog::%with-depth-guard depth (run)))
             expansion)))

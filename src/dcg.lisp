@@ -9,7 +9,7 @@
 ;;;;   NAME or (NAME ARG..) non-terminal call
 ;;;;   (dcg-* ...)          runtime combinators, threaded like non-terminals
 
-(in-package #:fx.prolog)
+(in-package #:cl-prolog)
 
 (defun %thread-dcg-elements (elements stream-in stream-out element->goals)
   "Chain ELEMENTS with fresh intermediate stream variables."

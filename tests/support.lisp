@@ -1,7 +1,7 @@
 ;;;; Test harness entry point.
 
-(defpackage #:fx.prolog.tests
-  (:use #:cl #:fx.prolog)
+(defpackage #:cl-prolog.tests
+  (:use #:cl #:cl-prolog)
   (:export #:run-tests
            #:deftest
            #:deftest-table
@@ -13,7 +13,7 @@
            #:signals-error
            #:make-family-rulebase))
 
-(in-package #:fx.prolog.tests)
+(in-package #:cl-prolog.tests)
 
 (defparameter *support-source-files*
   '("tests/support/core.lisp"

@@ -1,6 +1,6 @@
 ;;;; Test runner and table-driven assertions.
 
-(in-package #:fx.prolog.tests)
+(in-package #:cl-prolog.tests)
 
 (defvar *tests* '())
 (defvar *assertion-count* 0)
@@ -29,11 +29,18 @@
                 ,message ,expected-value ,actual-value)))))
 
 (defun %proper-list-p (value)
-  (loop for cursor = value then (cdr cursor)
+  (loop with slow = value
+        with fast = value
         do (cond
-             ((null cursor) (return t))
-             ((consp cursor))
-             (t (return nil)))))
+             ((null fast) (return t))
+             ((atom fast) (return nil))
+             ((null (cdr fast)) (return t))
+             ((atom (cdr fast)) (return nil))
+             (t
+              (setf slow (cdr slow)
+                    fast (cddr fast))
+              (when (eq slow fast)
+                (return nil))))))
 
 (defun %canonical-form (value)
   (cond
@@ -189,11 +196,14 @@ Supported spec forms:
      ,@body))
 
 (defun %run-test (name thunk timeout)
-  (declare (ignore timeout))
   (handler-case
       (progn
         (format t "running ~A~%" name)
         (finish-output)
+        #+sbcl
+        (sb-ext:with-timeout timeout
+          (funcall thunk))
+        #-sbcl
         (funcall thunk)
         (format t "ok ~A~%" name)
         (finish-output)

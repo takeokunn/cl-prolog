@@ -29,7 +29,13 @@
     "src/unification.lisp"
     "src/engine.lisp"
     "src/prover.lisp"
-    "src/builtins.lisp"
+    "src/builtins/core.lisp"
+    "src/builtins/control.lisp"
+    "src/builtins/collection.lisp"
+    "src/builtins/dynamic.lisp"
+    "src/builtins/arithmetic.lisp"
+    "src/builtins/list.lisp"
+    "src/builtin-term.lisp"
     "src/dcg-runtime.lisp"
     "src/query.lisp"
     "src/dsl-compiler.lisp"
@@ -42,6 +48,7 @@
     "tests/engine-surface.lisp"
     "tests/engine-queries.lisp"
     "tests/engine-runtime.lisp"
+    "tests/builtin-term.lisp"
     "tests/dcg.lisp"))
 
 (defparameter *script-contract-test-files*
@@ -52,6 +59,9 @@
 
 (defparameter *load-announcements* t)
 (defparameter *temporary-output-counter* 0)
+
+#+sbcl
+(defparameter *direct-load-gc-budget* 2000000000)
 
 (defun core-source-files ()
   (copy-list *core-source-files*))
@@ -220,15 +230,18 @@
   (load (repo-file relative-path)))
 
 (defun load-source-files (relative-paths)
+  #+sbcl
+  (setf (sb-ext:bytes-consed-between-gcs) *direct-load-gc-budget*)
   (dolist (relative-path relative-paths)
-    (load-source-file relative-path)))
+    (load-source-file relative-path))
+  #+sbcl
+  (sb-ext:gc :full t))
 
 (defun load-core-sources ()
   (load-source-files *core-source-files*))
 
 (defun load-test-sources ()
-  (dolist (relative-path *test-source-files*)
-    (load-source-file relative-path)))
+  (load-source-files *test-source-files*))
 
 (defun load-script-contract-tests ()
   (load-source-files *script-contract-test-files*))

@@ -6,8 +6,6 @@
 ;;;;
 ;;;; Usage: sbcl --script scripts/coverage.lisp
 
-#+sbcl (setf (sb-ext:bytes-consed-between-gcs) (* 2048 1024 1024))
-
 (require :sb-cover)
 
 (defparameter *command-timeouts*
@@ -111,7 +109,7 @@
 
 (cl-prolog.bootstrap:load-test-sources)
 
-(funcall (symbol-function (find-symbol "RUN-TESTS" "FX.PROLOG.TESTS")))
+(funcall (symbol-function (find-symbol "RUN-TESTS" "CL-PROLOG.TESTS")))
 
 (defun report-coverage (report-directory)
   #+sbcl

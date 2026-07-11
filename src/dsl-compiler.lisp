@@ -3,7 +3,7 @@
 ;;;; The public DSL macros stay thin by delegating all data shaping here.
 ;;;; This keeps runtime proof search free from authoring concerns.
 
-(in-package #:fx.prolog)
+(in-package #:cl-prolog)
 
 (declaim (ftype function %goal-forms))
 

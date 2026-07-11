@@ -6,7 +6,7 @@
 ;;;; EMIT; combinator sub-proofs run inside their own cut barrier so a cut
 ;;;; in a grammar rule stays local to that rule.
 
-(in-package #:fx.prolog)
+(in-package #:cl-prolog)
 
 (defparameter *dcg-sync-tokens* '(:t-rparen :t-semi :t-eof)
   "Token kinds DCG-ERROR-RECOVERY skips ahead to.")
@@ -40,7 +40,8 @@
   (%unify-emit stream-out stream-in environment emit)
   (let ((midpoint (fresh-logic-variable "?MID")))
     (%with-cut-barrier
-      (%prove-goal (list rule stream-in midpoint) rulebase environment depth
+      (%prove-bindings/k (list rule stream-in midpoint)
+                         rulebase environment depth
                    (lambda (extended)
                      ;; Only recurse when RULE actually advanced the stream.
                      ;; A nullable rule leaves MIDPOINT unresolved, which
@@ -76,7 +77,8 @@
 
 (define-builtin (dcg-opt rule stream-in stream-out) (rulebase environment depth emit)
   (%with-cut-barrier
-    (%prove-goal (list rule stream-in stream-out) rulebase environment depth emit))
+    (%prove-bindings/k (list rule stream-in stream-out)
+                       rulebase environment depth emit))
   (%unify-emit stream-out stream-in environment emit))
 
 (define-builtin (dcg-star rule stream-in stream-out) (rulebase environment depth emit)
@@ -85,7 +87,8 @@
 (define-builtin (dcg-plus rule stream-in stream-out) (rulebase environment depth emit)
   (let ((midpoint (fresh-logic-variable "?MID")))
     (%with-cut-barrier
-      (%prove-goal (list rule stream-in midpoint) rulebase environment depth
+      (%prove-bindings/k (list rule stream-in midpoint)
+                         rulebase environment depth
                    (lambda (extended)
                      (%solve-dcg-star rule midpoint stream-out
                                       rulebase extended depth emit))))))
@@ -98,4 +101,5 @@
                      "DCG-ALT needs at least one alternative and two stream arguments"))
     (dolist (alternative alternatives)
       (%with-cut-barrier
-        (%prove-goal (list* alternative streams) rulebase environment depth emit)))))
+        (%prove-bindings/k (list* alternative streams)
+                           rulebase environment depth emit)))))

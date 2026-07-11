@@ -7,8 +7,8 @@ right channel with enough concrete evidence to reproduce the issue.
 
 Open a GitHub issue when you need help with:
 
-- choosing between mutable global-rulebase workflows and immutable rulebase
-  values
+- choosing between immutable construction and explicit dynamic rulebase
+  mutation
 - understanding solver limits such as `:max-depth`
 - interpreting release-audit or public-contract verifier output
 
@@ -45,7 +45,7 @@ Follow [`SECURITY.md`](SECURITY.md).
 
 The project prioritizes:
 
-- documented public `fx.prolog` behavior
+- documented public `cl-prolog` behavior
 - macro-first rule definition and CPS query semantics
 - reproducible packaging and example execution
 

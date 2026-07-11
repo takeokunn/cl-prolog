@@ -17,42 +17,46 @@
 
 (defun scenario-ancestor-first ()
   (let* ((rulebase
-           (fx.prolog:make-rulebase
-            :clauses (list (fx.prolog:make-clause '(parent tom bob))
-                           (fx.prolog:make-clause '(parent bob alice))
-                           (fx.prolog:make-clause '(parent alice eve))
-                           (fx.prolog:make-clause '(ancestor ?x ?y)
+           (cl-prolog:make-rulebase
+            :clauses (list (cl-prolog:make-clause '(parent tom bob))
+                           (cl-prolog:make-clause '(parent bob alice))
+                           (cl-prolog:make-clause '(parent alice eve))
+                           (cl-prolog:make-clause '(ancestor ?x ?y)
                                                   '((parent ?x ?y)))
-                           (fx.prolog:make-clause '(ancestor ?x ?y)
+                           (cl-prolog:make-clause '(ancestor ?x ?y)
                                                   '((parent ?x ?z)
                                                     (ancestor ?z ?y)))))))
     (lambda ()
-      (let ((result (fx.prolog:query-prolog-first rulebase '(ancestor tom ?who))))
+      (let ((result (cl-prolog:query-prolog-first rulebase '(ancestor tom ?who))))
         (unless (equal '((?who . bob)) result)
           (error "Unexpected ancestor-first benchmark result: ~S" result))
         result))))
 
 (defun scenario-append-first ()
   (let ((rulebase
-          (fx.prolog:prolog
+          (cl-prolog:prolog
             ((append () ?ys ?ys))
             ((append (?x . ?xs) ?ys (?x . ?zs))
              (append ?xs ?ys ?zs)))))
     (lambda ()
-      (let ((result (fx.prolog:query-prolog-first rulebase '(append ?left ?right (a b c)))))
+      (let ((result (cl-prolog:query-prolog-first rulebase '(append ?left ?right (a b c)))))
         (unless (equal '((?left) (?right a b c)) result)
           (error "Unexpected append-first benchmark result: ~S" result))
         result))))
 
 (defun scenario-dcg-phrase ()
-  (fx.prolog:clear-global-rulebase!)
-  (fx.prolog:def-dcg-rule benchmark-int
-    (terminal :t-int))
-  (lambda ()
-    (let ((result (fx.prolog:phrase 'benchmark-int '((:t-int . 1)))))
-      (unless (null result)
-        (error "Unexpected dcg-phrase benchmark result: ~S" result))
-      result)))
+  (let ((rulebase
+          (cl-prolog:make-rulebase
+           :clauses
+           (list (cl-prolog:def-dcg-rule benchmark-int
+                   (terminal :t-int))))))
+    (lambda ()
+      (multiple-value-bind (remainder matched-p)
+          (cl-prolog:phrase rulebase 'benchmark-int '((:t-int . 1)))
+        (unless (and matched-p (null remainder))
+          (error "Unexpected dcg-phrase benchmark result: ~S, matched: ~S"
+                 remainder matched-p))
+        remainder))))
 
 (defun make-scenario-runner (scenario)
   (cond

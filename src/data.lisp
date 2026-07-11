@@ -1,6 +1,6 @@
 ;;;; Ordered clause data model and operations.
 
-(in-package #:fx.prolog)
+(in-package #:cl-prolog)
 
 (defstruct (clause (:copier nil)
                    (:constructor make-clause (head &optional (body '()))))

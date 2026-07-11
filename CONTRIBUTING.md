@@ -3,7 +3,7 @@
 ## Scope
 
 `cl-prolog` is a macro-first Prolog engine for Common Lisp.
-Changes should preserve the documented `fx.prolog` public API, the CPS query
+Changes should preserve the documented `cl-prolog` public API, the CPS query
 surface, and the explicit separation between rule data and solver logic.
 
 Community conduct expectations are defined in [`CODE_OF_CONDUCT.md`](CODE_OF_CONDUCT.md).

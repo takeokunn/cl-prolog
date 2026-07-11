@@ -4,9 +4,28 @@
 ;;;; normalized here, then proven against the builtin registry, foreign
 ;;;; predicate hook, facts, and rules.
 
-(in-package #:fx.prolog)
+(in-package #:cl-prolog)
 
-(declaim (ftype function %prove-goal %prove-with-clauses %prove-with-rule))
+(declaim (ftype function %prove-goal/k %prove-clauses/k %prove-rule/k))
+
+(defstruct (proof-state
+            (:constructor %make-proof-state (rulebase bindings remaining-depth)))
+  "Immutable data carried through the proof-search continuation."
+  (rulebase (make-rulebase) :type rulebase :read-only t)
+  (bindings '() :type list :read-only t)
+  (remaining-depth *max-prolog-depth* :type integer :read-only t))
+
+(defun %state-with-bindings (state bindings)
+  "Return STATE advanced with BINDINGS while preserving its search budget."
+  (%make-proof-state (proof-state-rulebase state)
+                     bindings
+                     (proof-state-remaining-depth state)))
+
+(defun %state-descending-into-rule (state bindings)
+  "Return the state for proving a matched rule body."
+  (%make-proof-state (proof-state-rulebase state)
+                     bindings
+                     (1- (proof-state-remaining-depth state))))
 
 (defun %conjunction-p (query)
   "True when QUERY is already a list of goals rather than a single goal."
@@ -32,42 +51,43 @@
       (list goal)
       goal))
 
-(defun %emit-foreign-proof (goal environment emit)
-  "Emit ENVIRONMENT when the foreign predicate hook proves GOAL."
-  (when (predicate-true-p (first goal) (rest goal) environment)
-    (funcall emit environment)))
+(defun %continue-foreign-proof (goal state succeed)
+  "Call SUCCEED with STATE when the foreign predicate hook proves GOAL."
+  (when (predicate-true-p (first goal) (rest goal)
+                          (proof-state-bindings state))
+    (funcall succeed state)))
 
-(defun %emit-matching-fact (goal clause environment emit)
-  "Unify GOAL against fact CLAUSE and emit each successful environment."
+(defun %continue-matching-fact (goal clause state succeed)
+  "Unify GOAL against fact CLAUSE and continue with the extended state."
   (when (eq (first goal) (first (clause-head clause)))
     (multiple-value-bind (extended ok)
-        (unify goal (clause-head (%freshen-clause clause)) environment)
+        (unify goal (clause-head (%freshen-clause clause))
+               (proof-state-bindings state))
       (when ok
-        (funcall emit extended)))))
+        (funcall succeed (%state-with-bindings state extended))))))
 
 (defun %matching-rule-p (goal clause)
   "True when CLAUSE can be considered for GOAL."
   (and (consp (clause-head clause))
        (eq (first goal) (first (clause-head clause)))))
 
-(defun %prove-goal-sequence (goals rulebase environment depth emit)
-  "Prove the conjunction GOALS, calling EMIT with each solution environment.
+(defun %prove-goals/k (goals state succeed)
+  "Prove conjunction GOALS, calling SUCCEED with each solution state.
 
 Return true when a cut fired inside GOALS, so the caller can prune its own
 alternatives as well."
-  (%with-depth-guard depth
+  (%with-depth-guard (proof-state-remaining-depth state)
     (if (endp goals)
-        (progn (funcall emit environment) nil)
+        (progn (funcall succeed state) nil)
         (%with-cut-barrier
-          (%prove-goal (first goals) rulebase environment depth
-                       (lambda (extended)
-                         (when (%prove-goal-sequence (rest goals) rulebase
-                                                     extended depth emit)
+          (%prove-goal/k (first goals) state
+                       (lambda (next-state)
+                         (when (%prove-goals/k (rest goals) next-state succeed)
                            (%propagate-cut))))))))
 
-(defun %prove-goal (goal rulebase environment depth emit)
-  "Prove a single GOAL, dispatching to builtins or clause search."
-  (%with-depth-guard depth
+(defun %prove-goal/k (goal state succeed)
+  "Prove GOAL from STATE, dispatching each result to SUCCEED."
+  (%with-depth-guard (proof-state-remaining-depth state)
     (let ((normalized-goal (%ensure-goal-form goal)))
       (cond
         ((not (%goal-form-p normalized-goal))
@@ -75,33 +95,50 @@ alternatives as well."
         (t
          (let ((solver (%goal-solver (first normalized-goal))))
            (if solver
-               (funcall solver normalized-goal rulebase environment depth emit)
-               (%prove-with-clauses normalized-goal rulebase environment depth emit))))))))
+               (funcall solver
+                        normalized-goal
+                        (proof-state-rulebase state)
+                        (proof-state-bindings state)
+                        (proof-state-remaining-depth state)
+                        (lambda (bindings)
+                          (funcall succeed (%state-with-bindings state bindings))))
+               (%prove-clauses/k normalized-goal state succeed))))))))
 
-(defun %prove-with-clauses (goal rulebase environment depth emit)
+(defun %prove-bindings/k (query rulebase bindings remaining-depth succeed)
+  "Prove QUERY and call SUCCEED with each resulting binding environment."
+  (%prove-goals/k (%normalize-query query)
+                  (%make-proof-state rulebase bindings remaining-depth)
+                  (lambda (state)
+                    (funcall succeed (proof-state-bindings state)))))
+
+(defun %prove-clauses/k (goal state succeed)
   "Prove GOAL against the foreign hook and a logical-update-view snapshot."
-  (%emit-foreign-proof goal environment emit)
-  (dolist (clause (copy-list (rulebase-clauses rulebase)))
+  (%continue-foreign-proof goal state succeed)
+  (dolist (clause (copy-list (rulebase-clauses (proof-state-rulebase state))))
     (if (null (clause-body clause))
-        (%emit-matching-fact goal clause environment emit)
-        (when (and (plusp depth) (%matching-rule-p goal clause))
-          (%prove-with-rule goal clause rulebase environment depth emit)))))
+        (%continue-matching-fact goal clause state succeed)
+        (when (and (plusp (proof-state-remaining-depth state))
+                   (%matching-rule-p goal clause))
+          (%prove-rule/k goal clause state succeed)))))
 
-(defun %prove-with-rule (goal clause rulebase environment depth emit)
+(defun %prove-rule/k (goal clause state succeed)
   "Resolve GOAL against one CLAUSE; a cut in the body prunes the clause list."
   (let ((fresh-rule (%freshen-clause clause)))
     (multiple-value-bind (extended ok)
-        (unify goal (clause-head fresh-rule) environment)
+        (unify goal (clause-head fresh-rule) (proof-state-bindings state))
       (when ok
-        (when (%prove-goal-sequence (clause-body fresh-rule) rulebase
-                                    extended (1- depth) emit)
+        (when (%prove-goals/k
+               (clause-body fresh-rule)
+               (%state-descending-into-rule state extended)
+               succeed)
           (%propagate-cut))))))
 
 (defun %provable-p (query rulebase environment depth)
   "Return true when QUERY has at least one proof."
   (block provable
-    (%prove-goal-sequence (%normalize-query query) rulebase environment depth
-                          (lambda (extended)
-                            (declare (ignore extended))
+    (%prove-goals/k (%normalize-query query)
+                          (%make-proof-state rulebase environment depth)
+                          (lambda (state)
+                            (declare (ignore state))
                             (return-from provable t)))
     nil))

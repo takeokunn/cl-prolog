@@ -23,7 +23,8 @@ Sources live under `src/`, in dependency (and load) order:
 - `unification.lisp` — unification, substitution, variable renaming
 - `engine.lisp` — CPS provers, cut, depth bound, the builtin registry,
   the `predicate-true-p` hook
-- `builtins.lisp` — control and list builtins, declared with `define-builtin`
+- `builtin-term.lisp` — ISO-style term inspection and ordering builtins
+- `builtins/` — control, collection, database, arithmetic, and list builtins
 - `dcg-runtime.lisp` — DCG combinator builtins
 - `query.lisp` — public query API over the engine
 - `dsl.lisp` — `prolog`, `def-rule`, and friends; compiles `(:when EXPR)`
@@ -94,17 +95,17 @@ runtime, so rule data can be treated as inert.
   ((rich ?x) (score ?x ?n) (:when (> ?n 10))))
 ```
 
-expands into `make-fact` / `make-rule` forms (guards become closures).
+expands into `make-clause` forms (guards become closures).
 Macros keep relational source compact; runtime code only executes
 normalized data; tests can assert both syntax-level intent and runtime
 behavior.
 
-## Mutable Surface
+## Explicit State
 
-`*global-rulebase*`, `assert-fact!`, `assert-rule!`, and `def-rule` are the
-narrow mutable edge, kept for REPL and DCG workflows. The default style is
-immutable: build with `prolog`, extend with `extend-rulebase`, query with
-`query-prolog`.
+There is no process-global rulebase. Build a value with `prolog`, derive a
+new value with `extend-rulebase`, and pass that value to every query. Dynamic
+database predicates mutate only the explicitly supplied rulebase, keeping
+state ownership visible at the call site.
 
 ## Verification Layers
 

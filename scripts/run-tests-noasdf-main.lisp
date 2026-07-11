@@ -27,9 +27,9 @@
 (defun run-tests ()
   (call-bootstrap "LOAD-CORE-SOURCES")
   (call-bootstrap "LOAD-TEST-SOURCES")
-  (let ((runner (find-symbol "RUN-TESTS" "FX.PROLOG.TESTS")))
+  (let ((runner (find-symbol "RUN-TESTS" "CL-PROLOG.TESTS")))
     (unless runner
-      (error "Cannot resolve FX.PROLOG.TESTS::RUN-TESTS after loading test suites."))
+      (error "Cannot resolve CL-PROLOG.TESTS::RUN-TESTS after loading test suites."))
     (funcall (symbol-function runner))))
 
 (defun main ()

@@ -1,6 +1,6 @@
 ;;;; DCG surface and runtime tests.
 
-(in-package #:fx.prolog.tests)
+(in-package #:cl-prolog.tests)
 
 (deftest dcg-phrase-surface ()
   (let ((rulebase
@@ -77,11 +77,11 @@
 
 (deftest dcg-expansion-internals ()
   (is-equal '((:when t) (= ?in ?out))
-            (fx.prolog::%dcg-element-goals '(brace t) '?in '?out))
+            (cl-prolog::%dcg-element-goals '(brace t) '?in '?out))
   (is-equal '((node ?in ?out))
-            (fx.prolog::%dcg-element-goals 'node '?in '?out))
+            (cl-prolog::%dcg-element-goals 'node '?in '?out))
   (is-equal '((node ?x ?in ?out))
-            (fx.prolog::%dcg-element-goals '(node ?x) '?in '?out))
+            (cl-prolog::%dcg-element-goals '(node ?x) '?in '?out))
   (is (signals-error (with-macroexpansion (expansion '(def-dcg-rule broken 42))
                        expansion))
       "Unknown DCG body elements must fail at expansion time")

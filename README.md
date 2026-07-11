@@ -9,14 +9,14 @@ A small, dependency-free Prolog engine for Common Lisp, built around three ideas
 - **CPS proof search** — solutions stream through continuations, nothing buffers
 - **data / logic separation** — rulebases are plain structs the engine walks
 
-The public package is `fx.prolog`.
+The public package is `cl-prolog`.
 
 ## Quick Start
 
 ```lisp
 (ql:quickload :cl-prolog)
 
-(in-package #:fx.prolog)
+(in-package #:cl-prolog)
 
 (define-rulebase *family*
   ((parent tom bob))
@@ -50,14 +50,48 @@ dispatches like `cond` over queries.
 
 ## Builtin Goals
 
-| Goal | Meaning |
-|---|---|
-| `(= a b)` / `(/= a b)` | unification and disequality |
-| `!` | cut: commit to the current choice |
-| `(not g)` | negation as failure |
-| `(and g...)` / `(or g...)` | conjunction / disjunction |
-| `(:when fn ?x...)` | Lisp guard function over solved values |
-| `(member ?x list)` `(append ?a ?b ?c)` `(reverse ?a ?b)` `(length ?l ?n)` | relational list operations |
+| Category | Goals | Meaning |
+|---|---|---|
+| Unification | `(= a b)`, `(/= a b)`, `(!= a b)` | unify two terms, or require that they cannot unify |
+| Control | `!`, `(not g)`, `(and g...)`, `(or g...)` | cut, negation as failure, conjunction, and disjunction |
+| Meta-call | `(call g)`, `(once g)`, `(repeat)` | invoke a goal, keep its first proof, or generate repeated proofs |
+| Collection | `(findall t g ?bag)`, `(bagof t g ?bag)`, `(setof t g ?set)` | collect templates; `bagof` groups free variables and `setof` also removes duplicates and sorts |
+| Dynamic database | `(asserta c)`, `(assertz c)`, `(retract c)`, `(abolish (p / n))`, `(clause h b)` | inspect or mutate clauses in the rulebase passed to the query |
+| Arithmetic | `(is ?x expr)`, `(=:= a b)`, `(=\= a b)`, `(< a b)`, `(=< a b)`, `(> a b)`, `(>= a b)` | evaluate arithmetic expressions and compare their numeric values |
+| Lists | `(member ?x list)`, `(append ?a ?b ?c)`, `(reverse ?a ?b)`, `(length ?l ?n)` | list relations in their supported proper-list modes |
+| Lisp guard | `(:when fn ?x...)` | call a Lisp predicate with solved values |
+
+Arithmetic expressions use prefix Lisp-shaped terms. The supported operators are
+binary `+`, `-`, `*`, `/`, and `mod`, plus unary `-` and `abs`.
+
+Collection and dynamic-database goals can be used like any other query:
+
+```lisp
+(query-prolog *family* '(findall ?child (parent tom ?child) ?children))
+;; => (((?CHILDREN BOB)))
+
+(query-prolog *family* '(assertz (parent tom eve)))
+(query-prolog *family* '(parent tom ?child))
+;; includes EVE
+
+(query-prolog (make-rulebase) '(is ?total (+ 20 (* 2 11))))
+;; => (((?TOTAL . 42)))
+```
+
+For explicit rulebase composition, `define-rulebase` creates a named rulebase
+and `extend-rulebase` returns a new rulebase with additional clauses, leaving the
+base object unchanged:
+
+```lisp
+(define-rulebase *base*
+  ((color apple red)))
+
+(defparameter *extended*
+  (extend-rulebase *base*
+    ((color lime green))))
+
+(query-prolog *extended* '(color ?fruit ?color))
+```
 
 In the `prolog` / `def-rule` DSL you write guards as expressions —
 `(:when (> ?n 10))` — and the macro compiles them to closures. The engine

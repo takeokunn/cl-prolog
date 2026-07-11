@@ -1,6 +1,6 @@
 ;;;; Query-oriented engine and builtin behavior tests.
 
-(in-package #:fx.prolog.tests)
+(in-package #:cl-prolog.tests)
 
 (deftest-queries family-relations ((make-family-rulebase))
   ((ancestor tom ?who)           => (((?who . bob)) ((?who . alice)) ((?who . eve))))
@@ -118,8 +118,8 @@
   ((is 4 (+ 1 2))                :fails)
   ((|=:=| (+ 1 2) 3)             :succeeds)
   ((|=:=| 3 4)                   :fails)
-  ((|=\=| 3 4)                   :succeeds)
-  ((|=\=| 3 (+ 1 2))             :fails)
+  ((|=\\=| 3 4)                  :succeeds)
+  ((|=\\=| 3 (+ 1 2))            :fails)
   ((< 2 3)                       :succeeds)
   ((< 3 2)                       :fails)
   ((=< 3 3)                      :succeeds)

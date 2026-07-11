@@ -10,7 +10,7 @@
 ;;;; dynamically-closest choice point; re-signalling from a barrier owner
 ;;;; propagates the cut outward (e.g. from a rule body to the clause list).
 
-(in-package #:fx.prolog)
+(in-package #:cl-prolog)
 
 (defparameter *max-prolog-depth* 64
   "Default bound on rule-resolution depth during proof search.")

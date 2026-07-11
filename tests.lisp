@@ -8,7 +8,7 @@
 
 (eval-when (:compile-toplevel :load-toplevel :execute)
   (require :asdf)
-  (unless (find-package "FX.PROLOG")
+  (unless (find-package "CL-PROLOG")
     (unless (asdf:find-system "cl-prolog/tests" nil)
       (asdf:load-asd
        (merge-pathnames "cl-prolog.asd"
@@ -21,7 +21,7 @@
 (load (asdf:system-relative-pathname :cl-prolog/tests "scripts/bootstrap.lisp")
       :verbose nil :print nil)
 
-;; LOAD-TEST-SOURCES loads tests/support.lisp (which defines FX.PROLOG.TESTS)
+;; LOAD-TEST-SOURCES loads tests/support.lisp (which defines CL-PROLOG.TESTS)
 ;; followed by every suite file listed in the bootstrap manifest.
 (funcall (or (find-symbol "LOAD-TEST-SOURCES" "CL-PROLOG.BOOTSTRAP")
              (error "CL-PROLOG.BOOTSTRAP:LOAD-TEST-SOURCES is unavailable.")))
@@ -34,7 +34,7 @@
   (funcall (or (find-symbol "LOAD-SCRIPT-CONTRACT-TESTS" "CL-PROLOG.BOOTSTRAP")
                (error "CL-PROLOG.BOOTSTRAP:LOAD-SCRIPT-CONTRACT-TESTS is unavailable."))))
 
-(let ((runner (find-symbol "RUN-TESTS" "FX.PROLOG.TESTS")))
+(let ((runner (find-symbol "RUN-TESTS" "CL-PROLOG.TESTS")))
   (unless runner
-    (error "Cannot resolve FX.PROLOG.TESTS::RUN-TESTS after loading test suites."))
+    (error "Cannot resolve CL-PROLOG.TESTS::RUN-TESTS after loading test suites."))
   (funcall (symbol-function runner)))

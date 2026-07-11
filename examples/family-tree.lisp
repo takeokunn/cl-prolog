@@ -2,10 +2,10 @@
   (load (merge-pathnames "../scripts/bootstrap.lisp"
                          (or *load-truename* *load-pathname*))))
 
-(unless (find-package "FX.PROLOG")
+(unless (find-package "CL-PROLOG")
   (cl-prolog.bootstrap:load-core-sources))
 
-(in-package #:fx.prolog)
+(in-package #:cl-prolog)
 
 (define-rulebase *family*
   ((parent tom bob))

@@ -1,6 +1,6 @@
 ;;;; Query expectation helpers.
 
-(in-package #:fx.prolog.tests)
+(in-package #:cl-prolog.tests)
 
 (defun %query-run-form (rulebase query kind options)
   "Return the engine call used to evaluate QUERY for KIND."

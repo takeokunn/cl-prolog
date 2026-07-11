@@ -1,6 +1,6 @@
 ;;;; Shared fixture data and rulebases.
 
-(in-package #:fx.prolog.tests)
+(in-package #:cl-prolog.tests)
 
 (defvar *recorded-colors* '())
 

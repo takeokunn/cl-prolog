@@ -4,7 +4,7 @@
 ;;;; They are persistent: UNIFY never mutates an environment, it extends it,
 ;;;; so backtracking is simply "keep using the older environment".
 
-(in-package #:fx.prolog)
+(in-package #:cl-prolog)
 
 (defun logic-var-p (term)
   "Return true when TERM is a logic variable (a non-keyword ?-prefixed symbol)."

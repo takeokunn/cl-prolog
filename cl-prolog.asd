@@ -16,7 +16,15 @@
                (:file "unification")
                (:file "engine")
                (:file "prover")
-               (:file "builtins")
+               (:module "builtins"
+                :serial t
+                :components ((:file "core")
+                             (:file "control")
+                             (:file "collection")
+                             (:file "dynamic")
+                             (:file "arithmetic")
+                             (:file "list")))
+               (:file "builtin-term")
                (:file "dcg-runtime")
                (:file "query")
                (:file "dsl-compiler")
@@ -31,7 +39,7 @@
   :components ((:file "tests"))
   :perform (asdf:test-op (op c)
              (declare (ignore op c))
-             (uiop:symbol-call "FX.PROLOG.TESTS" "RUN-TESTS")))
+             (uiop:symbol-call "CL-PROLOG.TESTS" "RUN-TESTS")))
 
 (asdf:defsystem #:cl-prolog/weave-tests
   :depends-on (#:cl-prolog #:cl-weave)

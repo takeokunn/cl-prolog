@@ -4,7 +4,7 @@
 ;;;; contract directly and streams solutions as they are proven.  The other
 ;;;; entry points are conveniences layered on top of it.
 
-(in-package #:fx.prolog)
+(in-package #:cl-prolog)
 
 (defun %project-bindings (query environment)
   "Return an alist mapping each variable of QUERY to its solved value."
@@ -44,12 +44,14 @@ after that many solutions.  Returns NIL."
              limit))
     (let ((remaining limit))
       (block search
-        (%prove-goal-sequence
-         (%normalize-query query) rulebase environment max-depth
-         (lambda (environment)
-           (funcall function (if project
-                                 (%project-bindings query environment)
-                                 environment))
+        (%prove-goals/k
+         (%normalize-query query)
+         (%make-proof-state rulebase environment max-depth)
+         (lambda (state)
+           (let ((bindings (proof-state-bindings state)))
+             (funcall function (if project
+                                   (%project-bindings query bindings)
+                                   bindings)))
            (when (and remaining (zerop (decf remaining)))
              (return-from search)))))
       nil)))

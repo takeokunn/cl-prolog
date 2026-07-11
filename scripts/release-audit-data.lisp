@@ -71,8 +71,6 @@
 (defun repo-file (relative-path)
   (merge-pathnames relative-path (repo-root)))
 
-(load (repo-file "scripts/bootstrap.lisp"))
-
 (defun argv ()
   (uiop:command-line-arguments))
 

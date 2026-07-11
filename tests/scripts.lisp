@@ -3,7 +3,7 @@
 ;;;; These spawn nested SBCL images, so they are loaded only by the full
 ;;;; suite entry point (tests.lisp), not by scripts/run-tests-noasdf.lisp.
 
-(in-package #:fx.prolog.tests)
+(in-package #:cl-prolog.tests)
 
 (defun sbcl-program ()
   (or (sb-ext:posix-getenv "SBCL") "sbcl"))
@@ -81,7 +81,7 @@
                "\"ok\":true"
                "\"summary\":{"
                "\"results\":["
-               "\"check\":\"package/FX.PROLOG/exports\""
+               "\"check\":\"package/CL-PROLOG/exports\""
                "\"check\":\"workflow-contract/.github/workflows/ci.yml\""
                "\"check\":\"content-contract/scripts/release-audit-main.lisp\""))
   (:name benchmark-json-contract

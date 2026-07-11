@@ -1,6 +1,6 @@
 ;;;; Unification protocol tests.
 
-(in-package #:fx.prolog.tests)
+(in-package #:cl-prolog.tests)
 
 (deftest-unification unification-protocol
   (:substitute (pair ?x ?y) (pair left right)

@@ -1,4 +1,4 @@
-(defpackage #:fx.prolog
+(defpackage #:cl-prolog
   (:use #:cl)
   (:shadow #:!)
   (:documentation
@@ -64,11 +64,21 @@ is extensible (see DEFINE-BUILTIN).")
    #:/=
    #:is
    #:|=:=|
-   #:|=\=|
+   #:|=\\=|
    #:<
    #:=<
    #:>
    #:>=
+   #:var
+   #:nonvar
+   #:atom
+   #:number
+   #:compound
+   #:ground
+   #:functor
+   #:arg
+   #:copy-term
+   #:|=..|
    ;; DCG
    #:def-dcg-rule
    #:phrase

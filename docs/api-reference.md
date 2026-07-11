@@ -1,6 +1,6 @@
 # API Reference
 
-`cl-prolog` exposes one public package: `fx.prolog`.
+`cl-prolog` exposes one public package: `cl-prolog`.
 
 The surface is intentionally small. Data construction, unification, proof
 search, the rule DSL, and DCG support are public; everything else is
@@ -9,15 +9,14 @@ internal. The exact export set is machine-checked against
 
 ## Data
 
-- `fact`, `fact-predicate`, `fact-args`, `make-fact`
-- `rule`, `rule-head`, `rule-body`, `make-rule`
-- `rulebase`, `rulebase-p`, `rulebase-facts`, `rulebase-rules`, `make-rulebase`
-- `*global-rulebase*`, `clear-global-rulebase!`
-- `assert-fact!`, `assert-rule!`
+- `clause`, `clause-p`, `clause-head`, `clause-body`, `make-clause`
+- `rulebase`, `rulebase-p`, `rulebase-clauses`, `make-rulebase`
+- `rulebase-insert-clause!`, `rulebase-remove-clause!`
 
-Use these when you want explicit control over the data model instead of the
-macro DSL. Facts and rules are read-only structs; rulebases hold two lists
-that `assert-fact!` / `assert-rule!` push onto.
+A clause with an empty body is a fact. Rulebases are always explicit values;
+the library has no global rulebase. Prefer `prolog` and `extend-rulebase` for
+declarative construction, and use the mutators only for dynamic database
+semantics such as `asserta`, `assertz`, `retract`, and `abolish`.
 
 ## Unification
 
@@ -56,7 +55,7 @@ Conventions:
 - `prolog` — build a rulebase from clauses
 - `define-rulebase` — `defparameter` + `prolog`
 - `extend-rulebase` — functional extension; the new clauses shadow the base
-- `def-rule` — install one rule into `*global-rulebase*` at load time
+- `def-rule` — define a reusable clause-producing form
 - `with-prolog-query` — bind variables from the first solution
 - `prolog-match` — `cond` over queries
 
@@ -145,4 +144,4 @@ rules terminate.
 - `sbcl --script examples/quick-start.lisp` — runnable example script
 - `sbcl --script scripts/benchmark.lisp` — benchmark scenario runner
 
-Anything not exported from `fx.prolog` should be treated as internal.
+Anything not exported from `cl-prolog` should be treated as internal.
