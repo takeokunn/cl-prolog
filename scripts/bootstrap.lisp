@@ -64,9 +64,6 @@
 (defparameter *load-announcements* t)
 (defparameter *temporary-output-counter* 0)
 
-#+sbcl
-(defparameter *direct-load-gc-budget* 2000000000)
-
 (defun core-source-files ()
   (copy-list *core-source-files*))
 
@@ -234,10 +231,10 @@
   (load (repo-file relative-path)))
 
 (defun load-source-files (relative-paths)
-  #+sbcl
-  (setf (sb-ext:bytes-consed-between-gcs) *direct-load-gc-budget*)
   (dolist (relative-path relative-paths)
-    (load-source-file relative-path))
+    (load-source-file relative-path)
+    #+sbcl
+    (sb-ext:gc))
   #+sbcl
   (sb-ext:gc :full t))
 
