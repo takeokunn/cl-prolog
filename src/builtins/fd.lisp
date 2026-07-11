@@ -1,0 +1,92 @@
+(in-package #:cl-prolog)
+
+(defun %fd-emit (store environment emit)
+  (let ((*fd-store* store))
+    (funcall emit environment)))
+
+(defun %fd-variable-terms (term environment)
+  (let ((resolved (logic-substitute term environment)))
+    (cond ((logic-var-p resolved) (list resolved))
+          ((and (%proper-list-p resolved)
+                (every (lambda (item) (logic-var-p (logic-substitute item environment))) resolved))
+           (mapcar (lambda (item) (logic-substitute item environment)) resolved))
+          (t (%raise-type-error "VARIABLE_OR_VARIABLE_LIST" resolved environment
+                                (%iso-atom "CLPFD") "unbound variable(s) required")))))
+
+(defun %fd-post (operator arguments environment emit)
+  (multiple-value-bind (store successp)
+      (%fd-propagate (%fd-add-constraint *fd-store* operator arguments) environment)
+    (when successp (%fd-emit store environment emit))))
+
+(defmacro define-fd-relation (name)
+  `(define-builtin (,name left right) (rulebase environment depth emit)
+     (%fd-post ',name (list left right) environment emit)))
+
+(define-builtin (in variables domain-spec) (rulebase environment depth emit)
+  (let ((domain (%fd-domain-spec domain-spec environment))
+        (store *fd-store*)
+        (successp t))
+    (when domain
+      (dolist (variable (%fd-variable-terms variables environment))
+        (multiple-value-bind (next restrictedp) (%fd-restrict-domain store variable domain)
+          (unless restrictedp
+            (setf successp nil)
+            (return))
+          (setf store next)))
+      (when successp
+        (multiple-value-bind (propagated propagatedp) (%fd-propagate store environment)
+          (when propagatedp (%fd-emit propagated environment emit)))))))
+
+(define-fd-relation |#=|)
+(define-fd-relation |#\\=|)
+(define-fd-relation |#<|)
+(define-fd-relation |#=<|)
+(define-fd-relation |#>|)
+(define-fd-relation |#>=|)
+
+(define-builtin (all_different variables) (rulebase environment depth emit)
+  (%fd-post 'all_different (%fd-variable-terms variables environment) environment emit))
+
+(defun %fd-label-options (options environment)
+  (let ((resolved (logic-substitute options environment)))
+    (unless (and (%proper-list-p resolved)
+                 (every (lambda (option)
+                          (and (symbolp option)
+                               (member (symbol-name option) '("FF" "UP" "DOWN")
+                                       :test #'string=)))
+                        resolved))
+      (%raise-domain-error "LABELING_OPTIONS" resolved environment
+                           (%iso-atom "LABELING") "expected ff, up, or down"))
+    resolved))
+
+(defun %fd-option-p (name options)
+  (find name options :key #'symbol-name :test #'string=))
+
+(defun %fd-select-variable (variables store options)
+  (if (%fd-option-p "FF" options)
+      (car (sort (copy-list variables) #'<
+                 :key (lambda (variable) (length (%fd-domain-of store variable)))))
+      (first variables)))
+
+(defun %fd-label (variables store environment options emit)
+  (let ((pending (remove-if-not #'logic-var-p
+                                (mapcar (lambda (term) (logic-substitute term environment)) variables))))
+    (if (null pending)
+        (%fd-emit store environment emit)
+        (let* ((variable (%fd-select-variable pending store options))
+               (domain (%fd-domain-of store variable)))
+          (unless domain
+            (%raise-instantiation-error environment (%iso-atom "LABELING")
+                                        "every labeling variable needs a finite domain"))
+          (dolist (value (if (%fd-option-p "DOWN" options) (reverse domain) domain))
+            (let ((next-environment (unify variable value environment)))
+              (when next-environment
+                (multiple-value-bind (next-store successp)
+                    (%fd-propagate store next-environment)
+                  (when successp
+                    (let ((*fd-store* next-store))
+                      (%fd-label pending next-store next-environment options emit)))))))))))
+
+(define-builtin (labeling options variables) (rulebase environment depth emit)
+  (%fd-label (%fd-variable-terms variables environment)
+             *fd-store* environment (%fd-label-options options environment) emit))
