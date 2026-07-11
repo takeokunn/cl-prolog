@@ -9,7 +9,7 @@
 (require :sb-cover)
 
 (defparameter *command-timeouts*
-  '(("compile" . 45)
+  '(("compile" . 180)
     ("report" . 120)))
 
 (defun command-timeout (kind)
@@ -46,12 +46,7 @@
   (format stream "Runs only the core suites; script-contract tests stay out of this gate.~%"))
 
 (defun compile-command-arguments (source-file output)
-  (list "-MPOSIX=:sys_wait_h"
-        "-e"
-        (cl-prolog.bootstrap:perl-timeout-wrapper *compile-timeout*)
-        (write-to-string *compile-timeout*)
-        (cl-prolog.bootstrap:sbcl-program)
-        "--disable-debugger"
+  (list "--disable-debugger"
         "--script"
         (namestring (cl-prolog.bootstrap:repo-file "scripts/coverage-compile-file.lisp"))
         source-file
@@ -70,12 +65,18 @@
     (ensure-directories-exist output)
       (let ((exit-code
              (cl-prolog.bootstrap:run-command-stream
-              (cl-prolog.bootstrap:perl-program)
+              (cl-prolog.bootstrap:sbcl-program)
               (append (compile-command-arguments source-file output)
                       dependencies)
               :timeout *compile-timeout*)))
-      (unless (zerop exit-code)
-        (error "Command failed (coverage compile): ~A" source-file)))
+      (case exit-code
+        (0 nil)
+        (124
+         (error "Coverage compile timed out after ~D seconds: ~A"
+                *compile-timeout* source-file))
+        (otherwise
+         (error "Coverage compile failed with exit code ~D: ~A"
+                exit-code source-file))))
     output))
 
 (defun parse-args ()
@@ -100,8 +101,10 @@
 (let ((dependencies '())
       (outputs '()))
   (dolist (file (cl-prolog.bootstrap:core-source-files))
-    (push (compile-covered-file! file (reverse dependencies)) outputs)
-    (push file dependencies))
+    (let ((output (compile-covered-file! file (reverse dependencies))))
+      (push output outputs)
+      (push (enough-namestring output (cl-prolog.bootstrap:repo-root))
+            dependencies)))
   (dolist (output (nreverse outputs))
     (load output)))
 

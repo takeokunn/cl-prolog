@@ -20,7 +20,7 @@
 
 (defun usage (&optional (stream *standard-output*))
   (format stream "Usage: sbcl --script scripts/coverage-compile-file.lisp SOURCE OUTPUT [DEPENDENCY ...]~%")
-  (format stream "Compile SOURCE with sb-cover instrumentation into OUTPUT after loading DEPENDENCY source files.~%"))
+  (format stream "Compile SOURCE with sb-cover instrumentation into OUTPUT after loading DEPENDENCY files.~%"))
 
 (defun parse-args ()
   (let ((args (cdr sb-ext:*posix-argv*)))
