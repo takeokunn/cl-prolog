@@ -19,6 +19,19 @@
   (declare (cl:ignore rulebase environment depth emit))
   (error "test-only Common Lisp programmer error"))
 
+(defvar *observed-table-session* nil)
+
+(cl-prolog::define-builtin (test-nested-table-session)
+    (rulebase environment depth emit)
+  (let ((outer cl-prolog::*current-table-session*))
+    (cl-prolog::%prove-bindings/k
+     '(true) rulebase environment depth
+     (lambda (bindings)
+       (setf *observed-table-session*
+             (and outer
+                  (eq outer cl-prolog::*current-table-session*)))
+       (funcall emit bindings)))))
+
 (defun capture-prolog-condition (thunk)
   (handler-case
       (progn
@@ -68,11 +81,86 @@
       ((loop-forever) (loop-forever))))
   ((loop-forever) :signals :max-depth 16))
 
+(deftest-queries variant-tabling-terminates-left-recursion
+    ((prolog
+      ((path ?x ?y) (path ?x ?z) (edge ?z ?y))
+      ((path ?x ?y) (edge ?x ?y))
+      ((edge a b))
+      ((edge b c))
+      ((edge c d))))
+  ((path a ?who)
+   => (((?who . b)) ((?who . c)) ((?who . d)))))
+
+(deftest-queries variant-tabling-deduplicates-answers
+    ((prolog
+      ((reachable ?x ?y) (reachable ?x ?z) (arc ?z ?y))
+      ((reachable ?x ?y) (arc ?x ?y))
+      ((arc a b))
+      ((arc a b))
+      ((arc b c))
+      ((arc a c))))
+  ((reachable a ?who)
+   => (((?who . b)) ((?who . c)))))
+
+(deftest-queries variant-tabling-terminates-mutual-left-recursion
+    ((prolog
+      ((even-node ?x) (odd-node ?x))
+      ((even-node zero))
+      ((odd-node ?x) (even-node ?x))
+      ((odd-node one))))
+  ((even-node ?x) => (((?x . one)) ((?x . zero)))))
+
+(deftest-queries variant-tabling-terminates-three-node-left-recursion
+    ((prolog
+      ((cycle-a ?x) (cycle-b ?x))
+      ((cycle-a a))
+      ((cycle-b ?x) (cycle-c ?x))
+      ((cycle-c ?x) (cycle-a ?x))
+      ((cycle-c c))))
+  ((cycle-a ?x) => (((?x . c)) ((?x . a)))))
+
+(deftest builtin-proof-search-inherits-table-session ()
+  (let ((*observed-table-session* nil))
+    (is-equal '(nil)
+              (query-prolog (make-rulebase) '(test-nested-table-session)))
+    (is *observed-table-session*)))
+
+(deftest interrupted-table-build-discards-partial-entry ()
+  (let* ((rulebase (prolog
+                     ((recursive ?x) (recursive ?x))
+                     ((recursive value))))
+         (session (cl-prolog::%make-rulebase-table-session rulebase))
+         (state (cl-prolog::%make-proof-state
+                 rulebase '() nil cl-prolog::+default-prolog-module+ session)))
+    (handler-case
+        (cl-prolog::%prove-clauses/k
+         '(recursive ?x) state
+         (lambda (answer-state)
+           (declare (cl:ignore answer-state))
+           (error "interrupt table construction")))
+      (error () nil))
+    (is-equal 0
+              (hash-table-count
+               (cl-prolog::%table-session-entries session)))))
+
+(deftest table-sessions-do-not-outlive-a-query-or-rulebase-revision ()
+  (let ((rulebase (prolog ((value old)))))
+    (is-equal '(((?x . old))) (query-prolog rulebase '(value ?x)))
+    (rulebase-insert-clause! rulebase (make-clause '(value new)))
+    (is-equal '(((?x . old)) ((?x . new)))
+              (query-prolog rulebase '(value ?x)))))
+
+(deftest ordinary-predicates-are-not-replayed-for-tabling ()
+  (let ((rulebase (prolog
+                    ((run-once) (assertz marker)))))
+    (assert-query rulebase (run-once) :succeeds)
+    (is-equal 1 (length (query-prolog rulebase 'marker)))))
+
 (deftest depth-counts-only-user-rule-resolution ()
   (let ((rb (prolog
               ((ready))
               ((through-call) (call ready))
-              ((through-not) (not missing)))))
+              ((through-not) (not false)))))
     (is-equal '(nil) (query-prolog rb '(ready) :max-depth 0))
     (is-equal '(nil) (query-prolog rb '(through-call) :max-depth 1))
     (is-equal '(nil) (query-prolog rb '(through-not) :max-depth 1))
@@ -185,6 +273,12 @@
   (is-equal '(((?y . 6)))
             (query-prolog (make-rulebase) '(test-twice 3 ?y))))
 
+(deftest builtin-does-not-shadow-user-predicate-with-different-arity ()
+  (let ((rulebase (prolog ((test-twice user-defined)))))
+    (is-equal '(())
+              (query-prolog rulebase '(test-twice user-defined)))))
+
+
 (deftest define-builtin-supports-aliases-and-rest-arguments ()
   (is-equal '(((?arguments . (a b c))))
             (query-prolog (make-rulebase)
@@ -199,9 +293,8 @@
                                                    (* 2 (logic-substitute input environment))
                                                    environment
                                                    emit)))
-    (is (%tree-contains-p expansion 'defmethod))
-    (is (%tree-contains-p expansion 'cl-prolog::%goal-solver))
-    (is (%tree-contains-p expansion 'eql))
+    (is (%tree-contains-p expansion 'cl-prolog::%register-builtin-solver!))
+    (is (%tree-contains-p expansion 'eval-when))
     (is (%tree-contains-p expansion 'twice))))
 
 (deftest define-builtin-macroexpand-registers-aliases-and-rest ()
@@ -213,8 +306,8 @@
                                                    (copy-list arguments)
                                                    environment
                                                    emit)))
-    (is (%tree-contains-p expansion 'defmethod))
-    (is (%tree-contains-p expansion 'cl-prolog::%goal-solver))
+    (is (%tree-contains-p expansion 'cl-prolog::%register-builtin-solver!))
+    (is (%tree-contains-p expansion 'eval-when))
     (is (%tree-contains-p expansion 'collect))
     (is (%tree-contains-p expansion 'collect-alias))))
 
@@ -297,6 +390,32 @@
            (read-prolog-term
             "catch(loop, error(resource_error(depth_limit), C), true)")
            :max-depth 0)))))
+
+(deftest-table goal-invocation-reports-iso-errors ()
+  (:is (typep (capture-prolog-condition
+               (lambda () (query-prolog (make-rulebase) '(call ?goal argument))))
+              'prolog-instantiation-error))
+  (:is (typep (capture-prolog-condition
+               (lambda () (query-prolog (make-rulebase) '(call 42 argument))))
+              'prolog-type-error))
+  (:is (typep (capture-prolog-condition
+               (lambda () (query-prolog (make-rulebase) '(missing value))))
+              'prolog-existence-error))
+  (:is (typep (capture-prolog-condition
+               (lambda () (query-prolog (make-rulebase) '(not (missing)))))
+              'prolog-existence-error)))
+
+(deftest unknown-procedure-error-preserves-predicate-indicator ()
+  (let* ((condition
+           (capture-prolog-condition
+            (lambda () (query-prolog (make-rulebase) '(missing value)))))
+         (formal (second (prolog-exception-term condition))))
+    (is-equal "EXISTENCE_ERROR" (symbol-name (first formal)))
+    (is-equal "PROCEDURE" (symbol-name (second formal)))
+    (destructuring-bind (predicate slash arity) (third formal)
+      (is-equal 'missing predicate)
+      (is-equal "/" (symbol-name slash))
+      (is-equal 1 arity))))
 
 (deftest catch-does-not-handle-common-lisp-errors ()
   (is (handler-case

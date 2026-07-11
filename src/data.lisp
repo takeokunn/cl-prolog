@@ -10,23 +10,149 @@
 
 (defstruct (%stored-clause (:copier nil)
                            (:constructor %make-stored-clause
-                               (clause born-revision)))
+                               (clause module born-revision)))
   "Internal lifetime metadata for one clause in a rulebase."
   (clause (make-clause '()) :type clause :read-only t)
+  (module +default-prolog-module+ :type symbol :read-only t)
   (born-revision 0 :type (integer 0 *) :read-only t)
   (died-revision nil :type (or null (integer 0 *))))
 
+(defstruct (%table-entry (:copier nil)
+                         (:constructor %make-table-entry ()))
+  "Variant-call answers accumulated during one tabled proof."
+  (answers '() :type list))
+
+(defstruct (%table-session
+            (:copier nil)
+            (:constructor %make-table-session (entries)))
+  "Tables shared by every proof nested within one public query."
+  (entries (make-hash-table :test #'equal) :type hash-table :read-only t))
+
+(defparameter +variant-variable-marker+ (gensym "VARIANT-VARIABLE-")
+  "Unforgeable marker used in canonical table keys and answers.")
+
+(defun %make-rulebase-table-session (rulebase)
+  (declare (cl:ignore rulebase))
+  (%make-table-session (make-hash-table :test #'equal)))
+
+(defun %canonicalize-variant (term)
+  "Rename TERM's variables by first occurrence, preserving sharing."
+  (let ((variables (make-hash-table :test #'eq))
+        (next-index 0))
+    (labels ((canonicalize (node)
+               (cond
+                 ((logic-var-p node)
+                  (or (gethash node variables)
+                      (setf (gethash node variables)
+                            (list +variant-variable-marker+
+                                  (prog1 next-index (incf next-index))))))
+                 ((consp node)
+                  (cons (canonicalize (car node))
+                        (canonicalize (cdr node))))
+                 (t node))))
+      (canonicalize term))))
+
+(defun %instantiate-variant (term)
+  "Replace canonical variable markers in TERM with fresh logic variables."
+  (let ((variables (make-hash-table :test #'equal)))
+    (labels ((instantiate (node)
+               (cond
+                 ((and (consp node)
+                       (eq (first node) +variant-variable-marker+)
+                       (consp (rest node))
+                       (null (cddr node)))
+                  (or (gethash node variables)
+                      (setf (gethash node variables)
+                            (fresh-logic-variable "?TABLE"))))
+                 ((consp node)
+                  (cons (instantiate (car node))
+                        (instantiate (cdr node))))
+                 (t node))))
+      (instantiate term))))
+
 (defstruct (rulebase (:copier nil)
-                     (:constructor %make-rulebase (entries revision)))
+                     (:constructor %make-rulebase
+                         (entries revision operator-table predicate-properties
+                          io-context module-registry)))
   "An ordered logical-update database of clauses."
   (entries '() :type list)
-  (revision 0 :type (integer 0 *)))
+  (revision 0 :type (integer 0 *))
+  (operator-table *standard-operator-table* :type operator-table)
+  (predicate-properties (make-hash-table :test #'equal) :type hash-table)
+  (io-context (make-prolog-io-context) :type prolog-io-context)
+  (module-registry (make-module-registry) :type module-registry))
 
-(defun make-rulebase (&key (clauses '()))
+(defun make-rulebase (&key (clauses '()) (io-context (make-prolog-io-context)))
   "Return a rulebase containing CLAUSES in resolution order."
   (%make-rulebase
-   (mapcar (lambda (clause) (%make-stored-clause clause 0)) clauses)
-   0))
+   (mapcar (lambda (clause)
+             (%make-stored-clause clause +default-prolog-module+ 0))
+           clauses)
+   0
+   *standard-operator-table*
+   (make-hash-table :test #'equal)
+   io-context
+   (make-module-registry)))
+
+(defun %copy-rulebase (rulebase)
+  "Return a detached mutable copy suitable for transactional updates."
+  (%make-rulebase
+   (mapcar (lambda (entry)
+             (let ((copy (%make-stored-clause
+                          (%stored-clause-clause entry)
+                          (%stored-clause-module entry)
+                          (%stored-clause-born-revision entry))))
+               (setf (%stored-clause-died-revision copy)
+                     (%stored-clause-died-revision entry))
+               copy))
+           (rulebase-entries rulebase))
+   (rulebase-revision rulebase)
+   (rulebase-operator-table rulebase)
+   (let ((copy (make-hash-table :test #'equal)))
+     (maphash (lambda (key value) (setf (gethash key copy) value))
+              (rulebase-predicate-properties rulebase))
+     copy)
+   (%copy-prolog-io-context (rulebase-io-context rulebase))
+   (module-registry-copy (rulebase-module-registry rulebase))))
+
+(defun %replace-rulebase! (target source)
+  "Replace TARGET's complete state with SOURCE after a successful transaction."
+  (setf (rulebase-entries target) (rulebase-entries source)
+        (rulebase-revision target) (rulebase-revision source)
+        (rulebase-operator-table target) (rulebase-operator-table source)
+        (rulebase-predicate-properties target)
+        (rulebase-predicate-properties source)
+        (rulebase-io-context target) (rulebase-io-context source)
+        (rulebase-module-registry target)
+        (rulebase-module-registry source))
+  target)
+
+(defun %rulebase-predicate-property (rulebase predicate arity
+                                     &optional (module +default-prolog-module+))
+  (gethash (list module predicate arity) (rulebase-predicate-properties rulebase)))
+
+(defun %set-rulebase-predicate-property! (rulebase predicate arity property
+                                          &optional (module +default-prolog-module+))
+  (setf (gethash (list module predicate arity)
+                 (rulebase-predicate-properties rulebase))
+        property))
+
+(defun %remove-rulebase-predicate-property! (rulebase predicate arity
+                                              &optional (module +default-prolog-module+))
+  "Remove PREDICATE/ARITY's declaration and return whether one existed."
+  (remhash (list module predicate arity)
+           (rulebase-predicate-properties rulebase)))
+
+(defun %rulebase-declared-predicate-indicators
+    (rulebase &optional (module +default-prolog-module+))
+  "Return a detached list of declared predicate indicators as (NAME / ARITY)."
+  (let ((indicators '()))
+    (maphash (lambda (key property)
+               (declare (cl:ignore property))
+               (when (eq (first key) module)
+                 (push (list (second key) '/ (third key)) indicators)))
+             (rulebase-predicate-properties rulebase))
+    indicators))
 
 (defun %next-rulebase-revision! (rulebase)
   (incf (rulebase-revision rulebase)))
@@ -50,9 +176,18 @@
     (declare (cl:ignore revision))
     (mapcar #'%stored-clause-clause entries)))
 
-(defun rulebase-insert-clause! (rulebase clause &key (position :last))
+(defun %rulebase-module-entries (rulebase module)
+  "Return the visible stored clauses defined by MODULE."
+  (multiple-value-bind (revision entries) (%rulebase-snapshot rulebase)
+    (declare (cl:ignore revision))
+    (remove module entries :test-not #'eq :key #'%stored-clause-module)))
+
+(defun rulebase-insert-clause! (rulebase clause
+                                &key (position :last)
+                                  (module +default-prolog-module+))
   "Insert CLAUSE at POSITION (:FIRST or :LAST) and return RULEBASE."
-  (let ((entry (%make-stored-clause clause (%next-rulebase-revision! rulebase))))
+  (let ((entry (%make-stored-clause clause module
+                                    (%next-rulebase-revision! rulebase))))
     (ecase position
       (:first (push entry (rulebase-entries rulebase)))
       (:last (setf (rulebase-entries rulebase)
