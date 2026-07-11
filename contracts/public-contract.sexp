@@ -5,6 +5,7 @@
  ((:name "FX.PROLOG"
    :nicknames ()
    :exports ("!"
+             "ABOLISH"
              "!="
              "<"
              "/="
@@ -18,9 +19,12 @@
              "ARITHMETIC-ERROR-EXPRESSION"
              "ARITHMETIC-ERROR-REASON"
              "ARITHMETIC-EVALUATION-ERROR"
+             "ASSERTA"
+             "ASSERTZ"
              "ASSERT-FACT!"
              "ASSERT-RULE!"
              "CALL"
+             "CLAUSE"
              "CLEAR-GLOBAL-RULEBASE!"
              "DCG-ALT"
              "DCG-ERROR-RECOVERY"
@@ -57,6 +61,7 @@
              "QUERY-PROLOG"
              "QUERY-PROLOG-FIRST"
              "REPEAT"
+             "RETRACT"
              "RULE"
              "RULE-BODY"
              "RULE-HEAD"
@@ -65,6 +70,7 @@
              "RULEBASE-P"
              "RULEBASE-RULES"
              "SOLUTION-BINDING"
+             "TRUE"
              "UNIFY"
              "WITH-PROLOG-QUERY")))
  :asdf-systems

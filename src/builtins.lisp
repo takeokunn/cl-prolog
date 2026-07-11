@@ -20,6 +20,64 @@
     ((consp value) (%proper-list-p (cdr value)))
     (t nil)))
 
+(defun %entry-head (entry)
+  (ecase (clause-entry-kind entry)
+    (:fact
+     (let ((fact (clause-entry-clause entry)))
+       (cons (fact-predicate fact) (fact-args fact))))
+    (:rule (rule-head (clause-entry-clause entry)))))
+
+(defun %entry-body-term (entry)
+  (if (eq (clause-entry-kind entry) :fact)
+      'true
+      (let ((body (rule-body (clause-entry-clause entry))))
+        (cond
+          ((null body) 'true)
+          ((null (rest body)) (first body))
+          (t (cons 'and body))))))
+
+(defun %freshen-clause-entry (entry)
+  (ecase (clause-entry-kind entry)
+    (:fact
+     (let* ((fact (clause-entry-clause entry))
+            (fresh (%freshen-fact-args fact)))
+       (%clause-entry-for-fact
+        (make-fact :predicate (fact-predicate fact) :args fresh))))
+    (:rule (%clause-entry-for-rule (%freshen-rule (clause-entry-clause entry))))))
+
+(defun %builtin-predicate-p (predicate)
+  (and (symbolp predicate) (gethash predicate *builtin-solvers*)))
+
+(defun %ensure-dynamic-predicate (predicate goal)
+  (when (%builtin-predicate-p predicate)
+    (%invalid-goal goal "builtin predicate ~S cannot be inspected or modified" predicate)))
+
+(defun %clause-term-entry (term goal)
+  "Convert a substituted dynamic clause TERM to a freshly renamed entry."
+  (cond
+    ((and (%proper-list-p term) (eq (first term) ':-))
+     (unless (and (consp (rest term))
+                  (%goal-form-p (second term)))
+       (%invalid-goal goal "a rule must have shape (:- (PREDICATE . ARGS) GOAL...)"))
+     (%ensure-dynamic-predicate (first (second term)) goal)
+     (let ((body (cddr term)))
+       (unless (every #'%goal-form-p (mapcar #'%ensure-goal-form body))
+         (%invalid-goal goal "every rule body element must be a callable goal"))
+       (%clause-entry-for-rule
+        (%freshen-rule (make-rule :head (second term) :body body)))))
+    ((%goal-form-p term)
+     (%ensure-dynamic-predicate (first term) goal)
+     (%clause-entry-for-fact
+      (let ((table (make-hash-table :test #'eq)))
+        (make-fact :predicate (first term)
+                   :args (%freshen-term (rest term) table)))))
+    (t
+     (%invalid-goal goal "a dynamic clause must be a fact or (:- HEAD BODY...)"))))
+
+(defun %entry-predicate-arity (entry)
+  (let ((head (%entry-head entry)))
+    (values (first head) (length (rest head)))))
+
 (define-condition arithmetic-evaluation-error (error)
   ((expression :initarg :expression :reader arithmetic-error-expression)
    (reason :initarg :reason :reader arithmetic-error-reason))
@@ -88,6 +146,9 @@
 
 ;;; Control builtins
 
+(define-builtin (true) (rulebase environment depth emit)
+  (funcall emit environment))
+
 (define-builtin (!) (rulebase environment depth emit)
   (funcall emit environment)
   (%propagate-cut))
@@ -144,6 +205,71 @@
                          (logic-substitute variable environment))
                        variables))
     (funcall emit environment)))
+
+;;; Dynamic database builtins
+
+(define-builtin (asserta clause) (rulebase environment depth emit)
+  (let* ((goal (list 'asserta clause))
+         (entry (%clause-term-entry (logic-substitute clause environment) goal)))
+    (%assert-clause-entry! rulebase entry :first)
+    (funcall emit environment)))
+
+(define-builtin (assertz clause) (rulebase environment depth emit)
+  (let* ((goal (list 'assertz clause))
+         (entry (%clause-term-entry (logic-substitute clause environment) goal)))
+    (%assert-clause-entry! rulebase entry :last)
+    (funcall emit environment)))
+
+(define-builtin (retract clause) (rulebase environment depth emit)
+  (let* ((goal (list 'retract clause))
+         (pattern (logic-substitute clause environment)))
+    (when (and (consp pattern)
+               (not (eq (first pattern) ':-)))
+      (%ensure-dynamic-predicate (first pattern) goal))
+    (when (and (consp pattern) (eq (first pattern) ':-)
+               (consp (rest pattern)) (consp (second pattern)))
+      (%ensure-dynamic-predicate (first (second pattern)) goal))
+    (dolist (entry (copy-list (rulebase-clauses rulebase)))
+      (let* ((fresh (%freshen-clause-entry entry))
+             (stored (if (eq (clause-entry-kind fresh) :fact)
+                         (%entry-head fresh)
+                         (list* ':- (%entry-head fresh)
+                                (rule-body (clause-entry-clause fresh))))))
+        (multiple-value-bind (extended ok)
+            (unify clause stored environment)
+          (when ok
+            (%remove-clause-entry! rulebase entry)
+            (funcall emit extended)))))))
+
+(define-builtin (abolish indicator) (rulebase environment depth emit)
+  (let* ((goal (list 'abolish indicator))
+         (resolved (logic-substitute indicator environment)))
+    (unless (and (%proper-list-p resolved)
+                 (= (length resolved) 3)
+                 (symbolp (first resolved))
+                 (eq (second resolved) '/)
+                 (typep (third resolved) '(integer 0)))
+      (%invalid-goal goal "predicate indicator must have shape (NAME / ARITY)"))
+    (destructuring-bind (predicate slash arity) resolved
+      (declare (ignore slash))
+      (%ensure-dynamic-predicate predicate goal)
+      (dolist (entry (copy-list (rulebase-clauses rulebase)))
+        (multiple-value-bind (entry-predicate entry-arity)
+            (%entry-predicate-arity entry)
+          (when (and (eq predicate entry-predicate) (= arity entry-arity))
+            (%remove-clause-entry! rulebase entry)))))
+    (funcall emit environment)))
+
+(define-builtin (clause head body) (rulebase environment depth emit)
+  (let ((resolved-head (logic-substitute head environment)))
+    (when (consp resolved-head)
+      (%ensure-dynamic-predicate (first resolved-head) (list 'clause head body)))
+    (dolist (entry (copy-list (rulebase-clauses rulebase)))
+      (let ((fresh (%freshen-clause-entry entry)))
+        (multiple-value-bind (head-environment head-ok)
+            (unify head (%entry-head fresh) environment)
+          (when head-ok
+            (%unify-emit body (%entry-body-term fresh) head-environment emit)))))))
 
 ;;; Arithmetic builtins
 

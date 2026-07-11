@@ -41,26 +41,18 @@
   (when (predicate-true-p (first goal) (rest goal) environment)
     (funcall emit environment)))
 
-(defun %emit-matching-facts (goal rulebase environment emit)
-  "Unify GOAL against matching facts and emit each successful environment."
-  (dolist (fact (rulebase-facts rulebase))
-    (when (eq (first goal) (fact-predicate fact))
-      (multiple-value-bind (extended ok)
-          (unify (rest goal) (%freshen-fact-args fact) environment)
-        (when ok
-          (funcall emit extended))))))
+(defun %emit-matching-fact (goal fact environment emit)
+  "Unify GOAL against FACT and emit each successful environment."
+  (when (eq (first goal) (fact-predicate fact))
+    (multiple-value-bind (extended ok)
+        (unify (rest goal) (%freshen-fact-args fact) environment)
+      (when ok
+        (funcall emit extended)))))
 
 (defun %matching-rule-p (goal rule)
   "True when RULE can be considered for GOAL."
   (and (consp (rule-head rule))
        (eq (first goal) (first (rule-head rule)))))
-
-(defun %emit-matching-rules (goal rulebase environment depth emit)
-  "Resolve GOAL against matching rules and stream their proofs."
-  (when (plusp depth)
-    (dolist (rule (rulebase-rules rulebase))
-      (when (%matching-rule-p goal rule)
-        (%prove-with-rule goal rule rulebase environment depth emit)))))
 
 (defun %prove-goal-sequence (goals rulebase environment depth emit)
   "Prove the conjunction GOALS, calling EMIT with each solution environment.
@@ -91,10 +83,16 @@ alternatives as well."
                (%prove-with-clauses normalized-goal rulebase environment depth emit))))))))
 
 (defun %prove-with-clauses (goal rulebase environment depth emit)
-  "Prove GOAL against the foreign hook, then facts, then rules."
+  "Prove GOAL against the foreign hook and a logical-update-view snapshot."
   (%emit-foreign-proof goal environment emit)
-  (%emit-matching-facts goal rulebase environment emit)
-  (%emit-matching-rules goal rulebase environment depth emit))
+  (dolist (entry (copy-list (rulebase-clauses rulebase)))
+    (ecase (clause-entry-kind entry)
+      (:fact
+       (%emit-matching-fact goal (clause-entry-clause entry) environment emit))
+      (:rule
+       (let ((rule (clause-entry-clause entry)))
+         (when (and (plusp depth) (%matching-rule-p goal rule))
+           (%prove-with-rule goal rule rulebase environment depth emit)))))))
 
 (defun %prove-with-rule (goal rule rulebase environment depth emit)
   "Resolve GOAL against one RULE; a cut in the body prunes the clause list."

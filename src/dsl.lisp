@@ -29,7 +29,9 @@ over their logic variables."
     `(let ((,extension (prolog ,@clauses)))
        (make-rulebase
         :facts (append (rulebase-facts ,extension) (rulebase-facts ,base))
-        :rules (append (rulebase-rules ,extension) (rulebase-rules ,base))))))
+        :rules (append (rulebase-rules ,extension) (rulebase-rules ,base))
+        :clauses (append (fx.prolog::rulebase-clauses ,extension)
+                         (fx.prolog::rulebase-clauses ,base))))))
 
 (defun %register-global-rule (head body)
   "Insert the rule HEAD :- BODY into *GLOBAL-RULEBASE* and return HEAD."
