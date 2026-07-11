@@ -21,10 +21,9 @@ is extensible (see DEFINE-BUILTIN).")
    #:make-clause
    #:rulebase
    #:rulebase-p
-   #:rulebase-clauses
+   #:rulebase-visible-clauses
    #:make-rulebase
    #:rulebase-insert-clause!
-   #:rulebase-remove-clause!
    ;; unification
    #:logic-var-p
    #:fresh-logic-variable

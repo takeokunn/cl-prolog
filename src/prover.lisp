@@ -122,7 +122,7 @@ alternatives as well."
 (defun %prove-clauses/k (goal state succeed)
   "Prove GOAL against the foreign hook and a logical-update-view snapshot."
   (%continue-foreign-proof goal state succeed)
-  (dolist (clause (copy-list (rulebase-clauses (proof-state-rulebase state))))
+  (dolist (clause (rulebase-visible-clauses (proof-state-rulebase state)))
     (if (null (clause-body clause))
         (%continue-matching-fact goal clause state succeed)
         (when (%matching-rule-p goal clause)

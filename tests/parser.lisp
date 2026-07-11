@@ -73,4 +73,4 @@
   (signals-error (consult-prolog "?- true."))
   (let ((rulebase (make-rulebase)))
     (signals-error (consult-prolog "kept. ?- kept." rulebase))
-    (is-equal '() (rulebase-clauses rulebase))))
+    (is-equal '() (rulebase-visible-clauses rulebase))))

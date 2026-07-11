@@ -10,8 +10,8 @@ internal. The exact export set is machine-checked against
 ## Data
 
 - `clause`, `clause-p`, `clause-head`, `clause-body`, `make-clause`
-- `rulebase`, `rulebase-p`, `rulebase-clauses`, `make-rulebase`
-- `rulebase-insert-clause!`, `rulebase-remove-clause!`
+- `rulebase`, `rulebase-p`, `rulebase-visible-clauses`, `make-rulebase`
+- `rulebase-insert-clause!`
 
 A clause with an empty body is a fact. Rulebases are always explicit values;
 the library has no global rulebase. Prefer `prolog` and `extend-rulebase` for

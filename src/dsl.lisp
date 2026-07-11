@@ -24,8 +24,8 @@ over their logic variables."
   "Return a new rulebase whose clauses shadow-extend BASE."
   (let ((extension (gensym "EXTENSION")))
     `(let ((,extension (prolog ,@clauses)))
-       (make-rulebase :clauses (append (rulebase-clauses ,extension)
-                                       (rulebase-clauses ,base))))))
+       (make-rulebase :clauses (append (rulebase-visible-clauses ,extension)
+                                       (rulebase-visible-clauses ,base))))))
 
 (defmacro def-rule (head &body body)
   "Return a clause value for HEAD :- BODY without mutating a rulebase."
