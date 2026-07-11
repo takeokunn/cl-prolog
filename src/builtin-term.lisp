@@ -168,7 +168,37 @@
                  (1 '>))
                environment emit))
 
-(define-builtin (term-variables term variables) (rulebase environment depth emit)
+(defun %term-subsumes-p (general specific)
+  "Return true when SPECIFIC is an instance of GENERAL without binding either."
+  (let ((bindings (make-hash-table :test #'eq)))
+    (labels ((matches-p (pattern value)
+               (cond
+                 ((logic-var-p pattern)
+                  (multiple-value-bind (bound present-p)
+                      (gethash pattern bindings)
+                    (if present-p
+                        (%term-identical-p bound value)
+                        (progn
+                          (setf (gethash pattern bindings) value)
+                          t))))
+                 ((or (logic-var-p value)
+                      (atom pattern)
+                      (atom value))
+                  (%term-identical-p pattern value))
+                 ((and (consp pattern) (consp value))
+                  (and (matches-p (car pattern) (car value))
+                       (matches-p (cdr pattern) (cdr value))))
+                 (t (%term-identical-p pattern value)))))
+      (matches-p general specific))))
+
+(define-builtin (subsumes_term general specific)
+    (rulebase environment depth emit)
+  (declare (cl:ignore rulebase depth))
+  (when (%term-subsumes-p (%term-resolve general environment)
+                          (%term-resolve specific environment))
+    (funcall emit environment)))
+
+(define-builtin (term_variables term variables) (rulebase environment depth emit)
   (declare (cl:ignore rulebase depth))
   (%unify-emit variables
                (%collect-variables (%term-resolve term environment))
@@ -275,7 +305,7 @@
             (<= resolved-index (length (rest resolved-term))))
        (%unify-emit argument (nth resolved-index resolved-term) environment emit)))))
 
-(define-builtin (copy-term source copy) (rulebase environment depth emit)
+(define-builtin (copy_term source copy) (rulebase environment depth emit)
   (declare (cl:ignore rulebase depth))
   (%unify-emit copy
                (%freshen-term (%term-resolve source environment)
