@@ -12,17 +12,18 @@
   # paredit-cli provides structural S-expression tooling for this repo's
   # Lisp sources: a dev-shell binary for agent-driven refactors and a
   # structural-parse lint gate reused in `checks`.
-  inputs.paredit-cli.url = "github:takeokunn/paredit-cli";
+  inputs.paredit-cli.url = "github:takeokunn/paredit-cli/v0.4.0";
   inputs.paredit-cli.inputs.nixpkgs.follows = "nixpkgs";
 
   outputs =
-    {
-      self,
-      nixpkgs,
-      cl-weave,
-      paredit-cli,
+    { self
+    , nixpkgs
+    , cl-weave
+    , paredit-cli
+    ,
     }:
     let
+      projectVersion = "0.6.0";
       systems = [
         "x86_64-linux"
         "aarch64-linux"
@@ -30,10 +31,12 @@
       forAllSystems =
         f:
         builtins.listToAttrs (
-          map (system: {
-            name = system;
-            value = f system;
-          }) systems
+          map
+            (system: {
+              name = system;
+              value = f system;
+            })
+            systems
         );
       sourceFor =
         pkgs:
@@ -56,21 +59,21 @@
               let
                 name = builtins.baseNameOf path;
               in
-              !(
-                pkgs.lib.hasSuffix ".fasl" name
-                || pkgs.lib.hasSuffix ".cfasl" name
-                || pkgs.lib.hasSuffix ".dfsl" name
-                || pkgs.lib.hasSuffix ".ufasl" name
-                || pkgs.lib.hasSuffix ".core" name
-                || pkgs.lib.hasSuffix ".o" name
-              )
+                !(
+                  pkgs.lib.hasSuffix ".fasl" name
+                  || pkgs.lib.hasSuffix ".cfasl" name
+                  || pkgs.lib.hasSuffix ".dfsl" name
+                  || pkgs.lib.hasSuffix ".ufasl" name
+                  || pkgs.lib.hasSuffix ".core" name
+                  || pkgs.lib.hasSuffix ".o" name
+                )
             );
         };
       mkDocs =
         pkgs:
         pkgs.stdenvNoCC.mkDerivation {
           pname = "cl-prolog-docs";
-          version = "0.5.1";
+          version = projectVersion;
           src = pkgs.lib.fileset.toSource {
             root = ./docs;
             fileset = pkgs.lib.fileset.unions [
@@ -107,7 +110,7 @@
           src = sourceFor pkgs;
           cl-prolog = pkgs.sbcl.buildASDFSystem {
             pname = "cl-prolog";
-            version = "0.5.1";
+            version = projectVersion;
             src = src;
             systems = [ "cl-prolog" ];
           };
@@ -148,6 +151,67 @@
                   --eval '(asdf:load-asd (truename "cl-prolog.asd"))' \
                   --eval '(asdf:test-system :cl-prolog/tests)'
                 touch $out
+              '';
+
+          # Instrument production sources, retain the HTML report, and reject
+          # regressions from the current expression and branch coverage ratios.
+          coverage =
+            pkgs.runCommand "cl-prolog-coverage"
+              {
+                nativeBuildInputs = [ pkgs.sbcl pkgs.perl ];
+              }
+              ''
+                cp -R ${src} source
+                chmod -R u+w source
+                cd source
+                export HOME="$TMPDIR/home"
+                export XDG_CACHE_HOME="$TMPDIR/cache"
+                export COVERAGE_OUTPUT="$out/html/"
+                mkdir -p "$HOME" "$XDG_CACHE_HOME" "$COVERAGE_OUTPUT"
+                export CL_SOURCE_REGISTRY="${
+                  cl-weave.packages.${system}.default
+                }/share/common-lisp/source//:$PWD//:"
+                sbcl --noinform --non-interactive \
+                  --eval '(require :asdf)' \
+                  --eval '(require :sb-cover)' \
+                  --load tests/coverage-runner.lisp
+
+                perl -e '
+                  use strict;
+                  use warnings;
+                  my ($expression_covered, $expression_total) = (0, 0);
+                  my ($branch_covered, $branch_total) = (0, 0);
+                  while (<>) {
+                    if (m{<tr class=.?(?:odd|even).+?</a></td><td>(\d+)</td><td>(\d+)</td><td>.*?</td><td>(\d+)</td><td>(\d+)</td>}) {
+                      $expression_covered += $1;
+                      $expression_total += $2;
+                      $branch_covered += $3;
+                      $branch_total += $4;
+                    }
+                  }
+                  die "coverage report contained no instrumented expressions\n"
+                    unless $expression_total;
+                  my $expression_percent = 100 * $expression_covered / $expression_total;
+                  my $branch_percent = $branch_total
+                    ? 100 * $branch_covered / $branch_total
+                    : 100;
+                  open my $json, ">", "$ENV{COVERAGE_OUTPUT}/summary.json"
+                    or die "cannot write coverage summary: $!\n";
+                  printf {$json}
+                    qq|{"expression":{"covered":%d,"total":%d,"percent":%.2f},| .
+                    qq|"branch":{"covered":%d,"total":%d,"percent":%.2f}}\n|,
+                    $expression_covered, $expression_total, $expression_percent,
+                    $branch_covered, $branch_total, $branch_percent;
+                  close $json;
+                  printf "Expression coverage: %d/%d (%.2f%%)\n",
+                    $expression_covered, $expression_total, $expression_percent;
+                  printf "Branch coverage: %d/%d (%.2f%%)\n",
+                    $branch_covered, $branch_total, $branch_percent;
+                  die "expression coverage regressed below 1115/1196\n"
+                    if $expression_covered * 1196 < 1115 * $expression_total;
+                  die "branch coverage regressed below 161/182\n"
+                    if $branch_covered * 182 < 161 * $branch_total;
+                ' "$COVERAGE_OUTPUT/cover-index.html"
               '';
 
           # Structural parse gate over every tracked Lisp source: fails if

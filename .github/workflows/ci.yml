@@ -22,10 +22,10 @@ jobs:
       CACHIX_CACHE: ${{ vars.CACHIX_CACHE }}
       CACHIX_AUTH_TOKEN: ${{ secrets.CACHIX_AUTH_TOKEN }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
       - name: Install Nix
-        uses: cachix/install-nix-action@v31
+        uses: cachix/install-nix-action@a49548c11d9846ad46ecc0115273879b045f001c # v31.10.7
         with:
           github_access_token: ${{ secrets.GITHUB_TOKEN }}
           extra_nix_config: |
@@ -33,7 +33,7 @@ jobs:
 
       - name: Configure Cachix (pull-only)
         if: ${{ env.CACHIX_CACHE != '' && env.CACHIX_AUTH_TOKEN == '' }}
-        uses: cachix/cachix-action@v17
+        uses: cachix/cachix-action@02b16339eddcf6ea27126a830c7f1992855cae13 # v17
         with:
           name: ${{ env.CACHIX_CACHE }}
           extraPullNames: nix-community
@@ -41,7 +41,7 @@ jobs:
 
       - name: Configure Cachix (push-enabled)
         if: ${{ env.CACHIX_CACHE != '' && env.CACHIX_AUTH_TOKEN != '' }}
-        uses: cachix/cachix-action@v17
+        uses: cachix/cachix-action@02b16339eddcf6ea27126a830c7f1992855cae13 # v17
         with:
           name: ${{ env.CACHIX_CACHE }}
           authToken: ${{ env.CACHIX_AUTH_TOKEN }}

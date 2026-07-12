@@ -7,7 +7,7 @@ section at the top of the file.
 
 ## Unreleased
 
-## 0.5.1 - 2026-07-13
+## 0.6.0 - 2026-07-13
 
 - Refactor term predicates, finite-domain helpers, and I/O definitions around reusable macros.
 - Split parser, source-loader, prover-state, I/O, and engine test support into focused files.
