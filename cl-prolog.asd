@@ -45,8 +45,14 @@
                (:file "dcg"))
   :in-order-to ((asdf:test-op (asdf:test-op "cl-prolog/tests"))))
 
-(asdf:defsystem #:cl-prolog/tests
+(asdf:defsystem #:cl-prolog/weave
+  :description "cl-weave helpers for testing cl-prolog queries."
   :depends-on (#:cl-prolog #:cl-weave)
+  :pathname "src"
+  :components ((:file "weave")))
+
+(asdf:defsystem #:cl-prolog/tests
+  :depends-on (#:cl-prolog/weave)
   :pathname "tests"
   :serial t
   :components ((:file "support")
@@ -73,6 +79,7 @@
                (:file "builtin-fd")
                (:file "module-system")
                (:file "dcg")
+               (:file "weave-public")
                (:file "weave-quality"))
   :perform (asdf:test-op (op c)
              (declare (ignore op c))
