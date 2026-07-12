@@ -11,7 +11,7 @@
   :version "0.5.1"
   :pathname "src"
   :serial t
-  :components ((:file "package") (:file "operator-table") (:file "module-system") (:file "data-types") (:file "data") (:file "unification") (:file "parser") (:file "parser-source") (:file "term-writer") (:file "engine") (:file "io-context") (:file "prover-state") (:file "prover") (:module "builtins" :serial t :components ((:file "core") (:file "control") (:file "collection") (:file "dynamic") (:file "arithmetic") (:file "list") (:file "atom") (:file "operator") (:file "io") (:file "io-streams") (:file "io-code"))) (:file "fd-store") (:file "builtins/fd") (:file "term-order") (:file "builtin-term") (:file "dcg-runtime") (:file "query") (:file "source-loader") (:file "source-directives") (:file "source-loader-builtins") (:file "dsl-compiler") (:file "dsl") (:file "dcg"))
+  :components ((:file "package") (:file "operator-table") (:file "module-system") (:file "data-types") (:file "data") (:file "unification") (:file "parser") (:file "parser-source") (:file "term-writer") (:file "engine") (:file "io-context") (:file "prover-state") (:file "prover") (:module "builtins" :serial t :components ((:file "core") (:file "control") (:file "collection") (:file "dynamic") (:file "arithmetic") (:file "list") (:file "atom") (:file "operator") (:file "io-options") (:file "io") (:file "io-streams") (:file "io-code"))) (:file "fd-store") (:file "builtins/fd") (:file "term-order") (:file "builtin-term") (:file "dcg-runtime") (:file "query") (:file "source-loader") (:file "source-directives") (:file "source-loader-builtins") (:file "dsl-compiler") (:file "dsl") (:file "dcg"))
   :in-order-to ((asdf:test-op (asdf:test-op "cl-prolog/tests"))))
 
 (asdf:defsystem #:cl-prolog/weave
