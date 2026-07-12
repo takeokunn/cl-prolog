@@ -32,7 +32,7 @@ Useful evidence:
 - a minimal failing query or rulebase
 - the public API entry point involved
 - the exact command used to reproduce the failure
-- whether `nix run .` passes locally
+- whether `nix run .` passes locally on Linux
 - whether `nix flake check` passes locally
 
 ## Security issues

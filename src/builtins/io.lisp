@@ -26,7 +26,7 @@
                             "Expected true or false"))))
 
 (defparameter +io-read-option-names+
-  '("variables" "variable_names" "syntax_errors"))
+  '("variables" "variable_names" "singletons" "syntax_errors"))
 
 (defun %io-parse-option-list (term environment operation domain-name allowed
                               instantiation-predicate instantiation-message
@@ -242,10 +242,13 @@
   (ignore-errors (file-position (prolog-stream-stream entry))))
 
 (defun %io-end-of-stream-state (entry environment operation)
-  (if (and (eq (prolog-stream-direction entry) :input)
-           (%io-at-end-p entry environment operation))
-      (%iso-atom "at")
-      (%iso-atom "not")))
+  (when (eq (prolog-stream-direction entry) :input)
+    (%io-at-end-p entry environment operation))
+  (%iso-atom
+   (ecase (prolog-stream-end-of-stream entry)
+     (:not "not")
+     (:at "at")
+     (:past "past"))))
 
 (defun %io-stream-properties (entry environment operation)
   (let ((position (%io-stream-position entry)))
@@ -324,6 +327,7 @@
                                (%io-public-designator entry)
                                environment operation
                                "Stream does not support repositioning"))
+    (setf (prolog-stream-end-of-stream entry) :not)
     (funcall emit environment)))
 
 (define-builtin (current_input stream) (rulebase environment depth emit)
@@ -358,12 +362,24 @@
          (term (%parse-expression parser variables 0)))
     (%accept-token parser :operator ".")
     (%expect-token parser :eof)
-    (let ((names (make-hash-table :test #'eq)))
+    (let ((names (make-hash-table :test #'eq))
+          (occurrences (make-hash-table :test #'eq)))
       (maphash (lambda (name variable) (setf (gethash variable names) name)) variables)
+      (labels ((count-variables (node)
+                 (cond
+                   ((logic-var-p node) (incf (gethash node occurrences 0)))
+                   ((consp node)
+                    (count-variables (car node))
+                    (count-variables (cdr node))))))
+        (count-variables term))
       (let ((ordered (%collect-variables term)))
-        (values term ordered
-                (mapcar (lambda (variable)
-                          (list '= (%prolog-atom-symbol (gethash variable names)
-                                                         :preserve-case t)
-                                variable))
-                        ordered))))))
+        (let ((named
+                (loop for variable in ordered
+                      for name = (gethash variable names)
+                      when name
+                        collect (list '= (%prolog-atom-symbol name :preserve-case t)
+                                      variable))))
+          (values term ordered named
+                  (loop for entry in named
+                        when (= 1 (gethash (third entry) occurrences 0))
+                          collect entry)))))))

@@ -5,7 +5,7 @@
 
 (defpackage #:cl-prolog
   (:use #:cl)
-  (:shadow #:! #:catch #:throw)
+  (:shadow #:! #:assert #:catch #:throw)
   (:documentation
    "A small, dependency-free Prolog engine.
 
@@ -82,6 +82,8 @@ is extensible (see DEFINE-FOREIGN-PREDICATE).")
    ;; builtin goal names
    #:!
    #:call
+   #:call_nth
+   #:call_with_depth_limit
    #:once
    #:setup_call_cleanup
    #:call_cleanup
@@ -96,21 +98,25 @@ is extensible (see DEFINE-FOREIGN-PREDICATE).")
    #:bagof
    #:setof
    #:sort
+   #:msort
    #:keysort
    #:true
    #:fail
    #:false
    #:|\\+|
    #:asserta
+   #:assert
    #:assertz
    #:retract
    #:retractall
    #:current_predicate
+   #:predicate_property
    #:abolish
    #:clause
    #:|\\=|
    #:is
    #:in
+   #:ins
    #:|..|
    #:|#=|
    #:|#\\=|
@@ -120,6 +126,7 @@ is extensible (see DEFINE-FOREIGN-PREDICATE).")
    #:|#>=|
    #:all_different
    #:labeling
+   #:indomain
    #:|=:=|
    #:|=\\=|
    #:<
@@ -140,10 +147,13 @@ is extensible (see DEFINE-FOREIGN-PREDICATE).")
    #:@>
    #:@>=
    #:compare
+   #:unifiable
    #:term_variables
    #:compound
    #:callable
    #:ground
+   #:acyclic_term
+   #:cyclic_term
    #:functor
    #:arg
    #:copy_term

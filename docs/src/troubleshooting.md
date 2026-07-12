@@ -82,11 +82,14 @@ Direct smoke:
 nix run .
 ```
 
+The packaged Nix runner is Linux-only. On Darwin, skip this smoke step and
+use Quicklisp or ASDF directly for local library work.
+
 ## What To Include In A Bug Report
 
 - exact query or macro form
 - expected result
 - actual result
 - SBCL version
-- output of `nix run .`
+- output of `nix run .` when reproducing on Linux
 - output of `nix flake check --print-build-logs`

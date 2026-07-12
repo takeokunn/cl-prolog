@@ -65,48 +65,73 @@ sub-query) keep the ordinals of variables created by their caller."
 
 (defun %occurs-p (var term env)
   "Return true when VAR occurs inside TERM under ENV (prevents cyclic terms)."
-  (let ((term (%walk-term term env)))
-    (cond
-      ((eq var term) t)
-      ((consp term)
-       (or (%occurs-p var (car term) env)
-           (%occurs-p var (cdr term) env)))
-      (t nil))))
+  (let ((seen (make-hash-table :test #'eq)))
+    (labels ((occurs-p (node)
+               (let ((resolved (%walk-term node env)))
+                 (cond
+                   ((eq var resolved) t)
+                   ((not (consp resolved)) nil)
+                   ((gethash resolved seen) nil)
+                   (t
+                    (setf (gethash resolved seen) t)
+                    (or (occurs-p (car resolved))
+                        (occurs-p (cdr resolved))))))))
+      (occurs-p term))))
 
 (defun unify (left right &optional (env '()))
   "Unify LEFT and RIGHT against ENV.
 
 Returns (VALUES EXTENDED-ENV T) on success and (VALUES NIL NIL) on failure."
-  (setf left (%walk-term left env)
-        right (%walk-term right env))
-  (cond
-    ((eq left right) (values env t))
-    ((logic-var-p left)
-     (if (%occurs-p left right env)
-         (values nil nil)
-         (values (acons left right env) t)))
-    ((logic-var-p right)
-     (unify right left env))
-    ((and (consp left) (consp right))
-     (multiple-value-bind (extended ok)
-         (unify (car left) (car right) env)
-       (if ok
-           (unify (cdr left) (cdr right) extended)
-           (values nil nil))))
-    ((equal left right) (values env t))
-    (t (values nil nil))))
+  (let ((seen-pairs (make-hash-table :test #'eq)))
+    (labels ((seen-pair-p (left right)
+               (member right (gethash left seen-pairs) :test #'eq))
+             (unify-terms (left right environment)
+               (setf left (%walk-term left environment)
+                     right (%walk-term right environment))
+               (cond
+                 ((eq left right) (values environment t))
+                 ((logic-var-p left)
+                  (if (%occurs-p left right environment)
+                      (values nil nil)
+                      (values (acons left right environment) t)))
+                 ((logic-var-p right)
+                  (unify-terms right left environment))
+                 ((and (consp left) (consp right))
+                  (if (seen-pair-p left right)
+                      (values environment t)
+                      (progn
+                        (push right (gethash left seen-pairs))
+                        (multiple-value-bind (extended ok)
+                            (unify-terms (car left) (car right) environment)
+                          (if ok
+                              (unify-terms (cdr left) (cdr right) extended)
+                              (values nil nil))))))
+                 ((and (symbolp left) (symbolp right)
+                       (string= (symbol-name left) (symbol-name right)))
+                  (values environment t))
+                 ((equal left right) (values environment t))
+                 (t (values nil nil)))))
+      (unify-terms left right env))))
 
 (defun logic-substitute (template env)
   "Recursively apply ENV to TEMPLATE, preserving dotted structure."
-  (let ((resolved (%walk-term template env)))
-    (if (consp resolved)
-        (cons (logic-substitute (car resolved) env)
-              (logic-substitute (cdr resolved) env))
-        resolved)))
+  (let ((copies (make-hash-table :test #'eq)))
+    (labels ((substitute-term (term)
+               (let ((resolved (%walk-term term env)))
+                 (if (consp resolved)
+                     (or (gethash resolved copies)
+                         (let ((copy (cons nil nil)))
+                           (setf (gethash resolved copies) copy
+                                 (car copy) (substitute-term (car resolved))
+                                 (cdr copy) (substitute-term (cdr resolved)))
+                           copy))
+                     resolved))))
+      (substitute-term template))))
 
 (defun %collect-variables (term)
   "Return the logic variables of TERM in first-appearance order."
   (let ((seen (make-hash-table :test #'eq))
+        (seen-conses (make-hash-table :test #'eq))
         (variables '()))
     (labels ((walk (node)
                (cond
@@ -117,30 +142,45 @@ Returns (VALUES EXTENDED-ENV T) on success and (VALUES NIL NIL) on failure."
                     (setf (gethash node seen) t)
                     (push node variables)))
                  ((consp node)
-                  (walk (car node))
-                  (walk (cdr node))))))
+                  (unless (gethash node seen-conses)
+                    (setf (gethash node seen-conses) t)
+                    (walk (car node))
+                    (walk (cdr node)))))))
       (walk term))
     (nreverse variables)))
 
 (defun %freshen-term (term table)
   "Copy TERM, replacing each logic variable via TABLE with a fresh one."
-  (cond
-    ((logic-var-p term)
-     (or (gethash term table)
-         (setf (gethash term table) (fresh-logic-variable "?FRESH"))))
-    ((consp term)
-     (cons (%freshen-term (car term) table)
-           (%freshen-term (cdr term) table)))
-    (t term)))
+  (let ((copies (make-hash-table :test #'eq)))
+    (labels ((freshen (node)
+               (cond
+                 ((logic-var-p node)
+                  (or (gethash node table)
+                      (setf (gethash node table)
+                            (fresh-logic-variable "?FRESH"))))
+                 ((consp node)
+                  (or (gethash node copies)
+                      (let ((copy (cons nil nil)))
+                        (setf (gethash node copies) copy
+                              (car copy) (freshen (car node))
+                              (cdr copy) (freshen (cdr node)))
+                        copy)))
+                 (t node))))
+      (freshen term))))
 
 (defun %term-has-variables-p (term)
   "True when TERM contains at least one logic variable."
-  (cond
-    ((logic-var-p term) t)
-    ((consp term)
-     (or (%term-has-variables-p (car term))
-         (%term-has-variables-p (cdr term))))
-    (t nil)))
+  (let ((seen (make-hash-table :test #'eq)))
+    (labels ((has-variables-p (node)
+               (cond
+                 ((logic-var-p node) t)
+                 ((not (consp node)) nil)
+                 ((gethash node seen) nil)
+                 (t
+                  (setf (gethash node seen) t)
+                  (or (has-variables-p (car node))
+                      (has-variables-p (cdr node)))))))
+      (has-variables-p term))))
 
 (defun %freshen-clause (clause)
   "Return CLAUSE with all logic variables consistently renamed to fresh ones."

@@ -23,8 +23,17 @@
     (%raise-type-error "INTEGER" value nil (%iso-atom "ARITHMETIC")
                        "integer operand required")))
 
+(defun %prolog-number-p (value)
+  "Return true for numeric types representable by ISO Prolog arithmetic."
+  (or (integerp value) (floatp value)))
+
+(defun %require-prolog-number (value environment)
+  (unless (%prolog-number-p value)
+    (%raise-type-error "EVALUABLE" value environment (%iso-atom "ARITHMETIC")
+                       "integer or float operand required")))
+
 (defun %require-real (value)
-  (unless (realp value)
+  (unless (and (%prolog-number-p value) (realp value))
     (%raise-type-error "NUMBER" value nil (%iso-atom "ARITHMETIC")
                        "real operand required")))
 
@@ -93,8 +102,9 @@
   (:- (left right expression) (- left right))
   (:* (left right expression) (* left right))
   (:/ (left right expression)
+    (%require-real left) (%require-real right)
     (%check-nonzero-divisor expression right)
-    (/ left right))
+    (/ (float left 1.0d0) (float right 1.0d0)))
   (:// (left right expression)
     (%require-integer left) (%require-integer right)
     (%check-nonzero-divisor expression right)
@@ -138,29 +148,46 @@
   (list (cons :pi pi))
   "Data table for zero-argument arithmetic constants.")
 
-(defun %call-arithmetic-function (table operator arguments expression)
-  (let ((entry (assoc (%arithmetic-operator-key operator) table)))
+(defun %arithmetic-function-table (arity)
+  (case arity
+    (1 *unary-arithmetic-functions*)
+    (2 *binary-arithmetic-functions*)))
+
+(defun %require-arithmetic-function (operator arity expression environment)
+  (let* ((table (%arithmetic-function-table arity))
+         (entry (and table (assoc (%arithmetic-operator-key operator) table))))
     (unless entry
-      (%arithmetic-error expression "unknown arithmetic operator ~S" operator))
-    (handler-case
-        (apply (cdr entry) (append arguments (list expression)))
-      (cl:arithmetic-error (condition)
-        (%arithmetic-error expression "host arithmetic failure: ~A" condition)))))
+      (%raise-type-error
+       "EVALUABLE" (%iso-term "/" operator arity) environment
+       (%iso-atom "ARITHMETIC")
+       (format nil "~S is not an evaluable arithmetic function" expression)))
+    (values table entry)))
 
-(defun %evaluate-binary-arithmetic (operator left right expression)
-  (%call-arithmetic-function *binary-arithmetic-functions*
-                             operator (list left right) expression))
+(defun %call-arithmetic-function (entry arguments expression)
+  (handler-case
+      (let ((result (apply (cdr entry) (append arguments (list expression)))))
+        (unless (%prolog-number-p result)
+          (%arithmetic-error expression
+                             "arithmetic result is not an integer or float: ~S"
+                             result))
+        result)
+    (cl:arithmetic-error (condition)
+      (%arithmetic-error expression "host arithmetic failure: ~A" condition))))
 
-(defun %evaluate-unary-arithmetic (operator argument expression)
-  (%call-arithmetic-function *unary-arithmetic-functions*
-                             operator (list argument) expression))
+(defun %evaluate-binary-arithmetic (entry left right expression)
+  (%call-arithmetic-function entry (list left right) expression))
+
+(defun %evaluate-unary-arithmetic (entry argument expression)
+  (%call-arithmetic-function entry (list argument) expression))
 
 (defun %evaluate-arithmetic-expression (expression environment)
   "Evaluate a ground arithmetic EXPRESSION after applying ENVIRONMENT."
   (let ((resolved (logic-substitute expression environment)))
     (labels ((evaluate (term)
-               (cond
-                 ((numberp term) term)
+             (cond
+                 ((numberp term)
+                  (%require-prolog-number term environment)
+                  term)
                  ((assoc (%arithmetic-operator-key term) *arithmetic-constants*)
                   (cdr (assoc (%arithmetic-operator-key term)
                               *arithmetic-constants*)))
@@ -171,25 +198,25 @@
                    (%raise-type-error "EVALUABLE" term environment
                                       (%iso-atom "ARITHMETIC")
                                       "number or arithmetic expression required"))
-                  ((not (%proper-list-p term))
+                 ((not (%proper-list-p term))
                    (%raise-type-error "EVALUABLE" term environment
                                       (%iso-atom "ARITHMETIC")
                                       "proper arithmetic expression required"))
                  (t
                   (let ((operator (first term))
                         (arguments (rest term)))
-                    (case (length arguments)
-                      (1 (%evaluate-unary-arithmetic
-                          operator (evaluate (first arguments)) term))
-                      (2 (%evaluate-binary-arithmetic
-                          operator
-                          (evaluate (first arguments))
-                          (evaluate (second arguments))
-                          term))
-                      (otherwise
-                       (%arithmetic-error term
-                                          "operator ~S expects one or two arguments, got ~D"
-                                          operator (length arguments)))))))))
+                    (multiple-value-bind (table entry)
+                        (%require-arithmetic-function
+                         operator (length arguments) term environment)
+                      (declare (cl:ignore table))
+                      (case (length arguments)
+                        (1 (%evaluate-unary-arithmetic
+                            entry (evaluate (first arguments)) term))
+                        (2 (%evaluate-binary-arithmetic
+                            entry
+                            (evaluate (first arguments))
+                            (evaluate (second arguments))
+                            term)))))))))
       (evaluate resolved))))
 
 (define-builtin (is result expression) (rulebase environment depth emit)
@@ -226,3 +253,45 @@
   (when (>= (%evaluate-arithmetic-expression left environment)
             (%evaluate-arithmetic-expression right environment))
     (funcall emit environment)))
+
+(define-builtin (between low high value) (rulebase environment depth emit)
+  (declare (cl:ignore rulebase depth))
+  (let* ((operation (%iso-atom "BETWEEN"))
+         (resolved-low (%term-resolve low environment))
+         (resolved-high (%term-resolve high environment))
+         (resolved-value (%term-resolve value environment)))
+    (when (or (logic-var-p resolved-low) (logic-var-p resolved-high))
+      (%raise-instantiation-error environment operation
+                                  "lower and upper bounds must be instantiated"))
+    (dolist (argument (list resolved-low resolved-high resolved-value))
+      (unless (or (logic-var-p argument) (integerp argument))
+        (%raise-type-error "INTEGER" argument environment operation
+                           "arguments must be integers")))
+    (if (logic-var-p resolved-value)
+        (loop for candidate from resolved-low to resolved-high
+              do (%unify-emit value candidate environment emit))
+        (when (<= resolved-low resolved-value resolved-high)
+          (funcall emit environment)))))
+
+(define-builtin (succ predecessor successor) (rulebase environment depth emit)
+  (declare (cl:ignore rulebase depth))
+  (let* ((operation (%iso-atom "SUCC"))
+         (resolved-predecessor (%term-resolve predecessor environment))
+         (resolved-successor (%term-resolve successor environment)))
+    (when (and (logic-var-p resolved-predecessor)
+               (logic-var-p resolved-successor))
+      (%raise-instantiation-error environment operation
+                                  "one argument must be instantiated"))
+    (dolist (argument (list resolved-predecessor resolved-successor))
+      (unless (logic-var-p argument)
+        (unless (integerp argument)
+          (%raise-type-error "INTEGER" argument environment operation
+                             "arguments must be integers"))
+        (when (minusp argument)
+          (%raise-domain-error "NOT_LESS_THAN_ZERO" argument environment operation
+                               "arguments must not be negative"))))
+    (cond
+      ((not (logic-var-p resolved-predecessor))
+       (%unify-emit successor (1+ resolved-predecessor) environment emit))
+      ((plusp resolved-successor)
+       (%unify-emit predecessor (1- resolved-successor) environment emit)))))

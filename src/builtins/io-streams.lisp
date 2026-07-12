@@ -5,17 +5,21 @@
 (defun %io-read-term-values (entry operator-table mode environment operation)
   (let ((input (prolog-stream-stream entry)))
     (if (eq (peek-char t input nil :eof) :eof)
-        (values (%iso-atom "end_of_file") '() '() t)
+        (progn
+          (setf (prolog-stream-end-of-stream entry) :past)
+          (values (%iso-atom "end_of_file") '() '() '() t))
         (handler-case
-            (multiple-value-bind (term variables names)
+            (multiple-value-bind (term variables names singletons)
                 (%io-parse-term-with-variables input operator-table)
-              (values term variables names t))
+              (setf (prolog-stream-end-of-stream entry) :not)
+              (values term variables names singletons t))
           (prolog-parse-error (condition)
             (if (%io-option-name-p mode "error")
                 (%raise-syntax-error condition environment operation)
-                (values nil nil nil nil)))))))
+                (values nil nil nil nil nil)))))))
 
-(defun %io-unify-read-results (term value options variables names environment emit)
+(defun %io-unify-read-results (term value options variables names singletons
+                               environment emit)
   (multiple-value-bind (term-environment term-ok)
       (unify term value environment)
     (when term-ok
@@ -26,18 +30,23 @@
           (multiple-value-bind (names-environment names-ok)
               (unify (%io-option "variable_names" options names)
                      names variables-environment)
-            (when names-ok (funcall emit names-environment))))))))
+            (when names-ok
+              (multiple-value-bind (singletons-environment singletons-ok)
+                  (unify (%io-option "singletons" options singletons)
+                         singletons names-environment)
+                (when singletons-ok (funcall emit singletons-environment))))))))))
 
 (defun %io-read-term-goal (rulebase entry term options environment emit
                            &optional (operation (%io-operation "READ_TERM")))
   (let* ((parsed (%io-read-options options environment operation))
          (mode (%io-syntax-errors-mode parsed environment operation))
          (*active-char-conversions* (%rulebase-active-char-conversions rulebase)))
-    (multiple-value-bind (value variables names readablep)
+    (multiple-value-bind (value variables names singletons readablep)
         (%io-read-term-values entry (rulebase-operator-table rulebase) mode
                               environment operation)
       (when readablep
-        (%io-unify-read-results term value parsed variables names environment emit)))))
+        (%io-unify-read-results term value parsed variables names singletons
+                                environment emit)))))
 
 (%define-io-dual-builtin (read_term (term options) (term options) "READ_TERM")
     (rulebase environment depth emit)
@@ -195,6 +204,10 @@
   (let ((character (if peek
                        (peek-char nil (prolog-stream-stream entry) nil nil)
                        (read-char (prolog-stream-stream entry) nil nil))))
+    (setf (prolog-stream-end-of-stream entry)
+          (cond (character :not)
+                (peek :at)
+                (t :past)))
     (if character (%io-character-atom character) (%iso-atom "end_of_file"))))
 
 (%define-io-dual-builtin (get_char (character) (character) "GET_CHAR")
@@ -248,6 +261,10 @@
           (%raise-permission-error
            "INPUT" "BINARY_STREAM" (%io-public-designator entry)
            environment operation "Binary stream position could not be restored")))
+      (setf (prolog-stream-end-of-stream entry)
+            (cond (byte :not)
+                  (peek :at)
+                  (t :past)))
       (or byte -1))))
 
 (defun %io-byte (term environment operation)
@@ -318,11 +335,17 @@
    byte environment emit operation))
 
 (defun %io-at-end-p (entry environment operation)
-  (ecase (prolog-stream-type entry)
-    (:text
-     (eq (peek-char nil (prolog-stream-stream entry) nil :eof) :eof))
-    (:binary
-     (= -1 (%io-read-byte entry environment operation :peek t)))))
+  (if (eq (prolog-stream-end-of-stream entry) :past)
+      t
+      (let ((at-end-p
+              (ecase (prolog-stream-type entry)
+                (:text
+                 (eq (peek-char nil (prolog-stream-stream entry) nil :eof) :eof))
+                (:binary
+                 (= -1 (%io-read-byte entry environment operation :peek t))))))
+        (setf (prolog-stream-end-of-stream entry)
+              (if at-end-p :at :not))
+        at-end-p)))
 
 (%define-io-dual-builtin (at_end_of_stream () () "AT_END_OF_STREAM")
     (rulebase environment depth emit)

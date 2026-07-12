@@ -4,38 +4,70 @@
   (let ((*fd-store* store))
     (funcall emit environment)))
 
-(defun %fd-variable-terms (term environment)
+(defun %fd-variable-terms (term environment &optional (context (%iso-atom "CLPFD")))
   (let ((resolved (logic-substitute term environment)))
     (cond ((logic-var-p resolved) (list resolved))
           ((and (%proper-list-p resolved)
                 (every (lambda (item) (logic-var-p (logic-substitute item environment))) resolved))
            (mapcar (lambda (item) (logic-substitute item environment)) resolved))
           (t (%raise-type-error "VARIABLE_OR_VARIABLE_LIST" resolved environment
-                                (%iso-atom "CLPFD") "unbound variable(s) required")))))
+                                context "unbound variable(s) required")))))
+
+(defun %fd-domain-terms (term environment context)
+  "Return the variables and integers accepted by IN/2 and INS/2."
+  (let ((resolved (logic-substitute term environment)))
+    (cond ((or (logic-var-p resolved) (integerp resolved)) (list resolved))
+          ((and (%proper-list-p resolved)
+                (every (lambda (item)
+                         (let ((value (logic-substitute item environment)))
+                           (or (logic-var-p value) (integerp value))))
+                       resolved))
+           (mapcar (lambda (item) (logic-substitute item environment)) resolved))
+          (t (%raise-type-error "VARIABLE_INTEGER_OR_LIST" resolved environment
+                                context "variable(s) and integer(s) required")))))
 
 (defun %fd-post (operator arguments environment emit)
-  (multiple-value-bind (store successp)
-      (%fd-propagate (%fd-add-constraint *fd-store* operator arguments) environment)
-    (when successp (%fd-emit store environment emit))))
+  (let ((left (logic-substitute (first arguments) environment))
+        (right (logic-substitute (second arguments) environment)))
+    (cond
+      ((and (eq operator '|#=|)
+            (or (and (logic-var-p left) (integerp right))
+                (and (integerp left) (logic-var-p right))))
+       (%constraint-unify-emit left right environment emit))
+      (t
+       (multiple-value-bind (store successp)
+           (%fd-propagate (%fd-add-constraint *fd-store* operator arguments) environment)
+         (when successp (%fd-emit store environment emit)))))))
 
 (defmacro define-fd-relation (name)
   `(define-builtin (,name left right) (rulebase environment depth emit)
      (%fd-post ',name (list left right) environment emit)))
 
-(define-builtin (in variables domain-spec) (rulebase environment depth emit)
-  (let ((domain (%fd-domain-spec domain-spec environment))
+(defun %fd-constrain-domain (variables domain-spec environment emit context)
+  (let ((domain (%fd-domain-spec domain-spec environment context))
         (store *fd-store*)
         (successp t))
     (when domain
-      (dolist (variable (%fd-variable-terms variables environment))
-        (multiple-value-bind (next restrictedp) (%fd-restrict-domain store variable domain)
-          (unless restrictedp
-            (setf successp nil)
-            (return))
-          (setf store next)))
+      (dolist (term (%fd-domain-terms variables environment context))
+        (if (integerp term)
+            (unless (member term domain)
+              (setf successp nil)
+              (return))
+            (multiple-value-bind (next restrictedp)
+                (%fd-restrict-domain store term domain)
+              (unless restrictedp
+                (setf successp nil)
+                (return))
+              (setf store next))))
       (when successp
         (multiple-value-bind (propagated propagatedp) (%fd-propagate store environment)
           (when propagatedp (%fd-emit propagated environment emit)))))))
+
+(define-builtin (in variables domain-spec) (rulebase environment depth emit)
+  (%fd-constrain-domain variables domain-spec environment emit (%iso-atom "IN")))
+
+(define-builtin (ins variables domain-spec) (rulebase environment depth emit)
+  (%fd-constrain-domain variables domain-spec environment emit (%iso-atom "INS")))
 
 (define-fd-relation |#=|)
 (define-fd-relation |#\\=|)
@@ -45,7 +77,9 @@
 (define-fd-relation |#>=|)
 
 (define-builtin (all_different variables) (rulebase environment depth emit)
-  (%fd-post 'all_different (%fd-variable-terms variables environment) environment emit))
+  (%fd-post 'all_different
+            (%fd-domain-terms variables environment (%iso-atom "ALL_DIFFERENT"))
+            environment emit))
 
 (defun %fd-label-options (options environment)
   (let ((resolved (logic-substitute options environment)))
@@ -68,7 +102,8 @@
                  :key (lambda (variable) (length (%fd-domain-of store variable)))))
       (first variables)))
 
-(defun %fd-label (variables store environment options emit)
+(defun %fd-label (variables store environment options emit
+                  &optional (context (%iso-atom "LABELING")))
   (let ((pending (remove-if-not #'logic-var-p
                                 (mapcar (lambda (term) (logic-substitute term environment)) variables))))
     (if (null pending)
@@ -76,7 +111,7 @@
         (let* ((variable (%fd-select-variable pending store options))
                (domain (%fd-domain-of store variable)))
           (unless domain
-            (%raise-instantiation-error environment (%iso-atom "LABELING")
+            (%raise-instantiation-error environment context
                                         "every labeling variable needs a finite domain"))
           (dolist (value (if (%fd-option-p "DOWN" options) (reverse domain) domain))
             (let ((next-environment (unify variable value environment)))
@@ -85,8 +120,13 @@
                     (%fd-propagate store next-environment)
                   (when successp
                     (let ((*fd-store* next-store))
-                      (%fd-label pending next-store next-environment options emit)))))))))))
+                      (%fd-label pending next-store next-environment options emit context)))))))))))
 
 (define-builtin (labeling options variables) (rulebase environment depth emit)
   (%fd-label (%fd-variable-terms variables environment)
              *fd-store* environment (%fd-label-options options environment) emit))
+
+(define-builtin (indomain variable) (rulebase environment depth emit)
+  (let ((context (%iso-atom "INDOMAIN")))
+    (%fd-label (%fd-variable-terms variable environment context)
+               *fd-store* environment nil emit context)))

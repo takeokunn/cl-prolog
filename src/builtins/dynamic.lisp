@@ -1,23 +1,30 @@
 (in-package #:cl-prolog)
 
+(defun %prepare-dynamic-assertion! (rulebase entry)
+  "Validate and register the predicate targeted by a dynamic assertion."
+  (multiple-value-bind (predicate arity) (%entry-predicate-arity entry)
+    (module-registry-ensure-definition-allowed
+     (rulebase-module-registry rulebase)
+     *current-prolog-module* predicate arity)
+    (unless (%rulebase-predicate-property
+             rulebase predicate arity *current-prolog-module*)
+      (%set-rulebase-predicate-property!
+       rulebase predicate arity :dynamic *current-prolog-module*))))
+
 (define-builtin (asserta clause) (rulebase environment depth emit)
   (let* ((goal (list 'asserta clause))
          (entry (%clause-term-entry (logic-substitute clause environment)
                                     rulebase goal environment)))
-    (multiple-value-bind (predicate arity) (%entry-predicate-arity entry)
-      (%set-rulebase-predicate-property!
-       rulebase predicate arity :dynamic *current-prolog-module*))
+    (%prepare-dynamic-assertion! rulebase entry)
     (rulebase-insert-clause! rulebase entry :position :first
                              :module *current-prolog-module*)
     (funcall emit environment)))
 
-(define-builtin (assertz clause) (rulebase environment depth emit)
+(define-builtin ((assert assertz) clause) (rulebase environment depth emit)
   (let* ((goal (list 'assertz clause))
          (entry (%clause-term-entry (logic-substitute clause environment)
                                     rulebase goal environment)))
-    (multiple-value-bind (predicate arity) (%entry-predicate-arity entry)
-      (%set-rulebase-predicate-property!
-       rulebase predicate arity :dynamic *current-prolog-module*))
+    (%prepare-dynamic-assertion! rulebase entry)
     (rulebase-insert-clause! rulebase entry :position :last
                              :module *current-prolog-module*)
     (funcall emit environment)))
@@ -87,7 +94,16 @@
       (dolist (candidate (%builtin-predicate-indicators))
         (remember (second candidate) (third candidate)))
       (dolist (candidate (%foreign-predicate-indicators))
-        (remember (second candidate) (third candidate))))
+        (remember (second candidate) (third candidate)))
+      (let ((namespace
+              (gethash *current-prolog-module*
+                       (module-registry-modules
+                        (rulebase-module-registry rulebase)))))
+        (when namespace
+          (maphash (lambda (key origin)
+                     (declare (ignore origin))
+                     (remember (car key) (cdr key)))
+                   (prolog-module-imports namespace)))))
     (unless (logic-var-p resolved)
       (unless (and (%proper-list-p resolved)
                    (= (length resolved) 3)
@@ -117,6 +133,84 @@
           (when (or (gethash resolved seen)
                     (%builtin-predicate-p (second resolved) (third resolved)))
             (funcall emit environment))))))
+
+(defun %predicate-clause-count (rulebase predicate arity module)
+  (count-if
+   (lambda (stored)
+     (multiple-value-bind (entry-predicate entry-arity)
+         (%entry-predicate-arity (%stored-clause-clause stored))
+       (and (eq predicate entry-predicate)
+            (= arity entry-arity))))
+   (%rulebase-module-entries rulebase module)))
+
+(defun %predicate-properties (rulebase predicate arity module)
+  "Return the supported reflection properties for PREDICATE/ARITY."
+  (cond
+    ((%builtin-predicate-p predicate arity)
+     '(built_in defined))
+    (t
+     (let ((declared (%rulebase-predicate-property
+                      rulebase predicate arity module))
+           (defined (%rulebase-defines-predicate-p
+                     rulebase predicate arity module)))
+       (when (or declared defined)
+         (list (if (eq declared :dynamic) 'dynamic 'static)
+               'user
+               'defined
+               (list 'number_of_clauses
+                     (%predicate-clause-count rulebase predicate arity
+                                              module))))))))
+
+(define-builtin (predicate_property head property)
+    (rulebase environment depth emit)
+  (let* ((resolved-head (logic-substitute head environment))
+         (resolved-property (logic-substitute property environment))
+         (callable (%ensure-callable resolved-head environment
+                                     'predicate_property))
+         (predicate (first callable))
+         (arity (length (rest callable))))
+    (unless (or (logic-var-p resolved-property)
+                (symbolp resolved-property)
+                (and (%proper-list-p resolved-property)
+                     (symbolp (first resolved-property))))
+      (%raise-type-error "CALLABLE" resolved-property environment
+                         'predicate_property
+                         "predicate property must be an atom or compound term"))
+    (dolist (candidate
+             (%predicate-properties rulebase predicate arity
+                                    *current-prolog-module*))
+      (%unify-emit property candidate environment emit))))
+
+(defun %current-module-names (rulebase)
+  "Return registered module names in a deterministic reflection order."
+  (let ((names '()))
+    (maphash (lambda (name module)
+               (declare (ignore module))
+               (unless (eq name +default-prolog-module+)
+                 (push name names)))
+             (module-registry-modules
+              (rulebase-module-registry rulebase)))
+    (cons +default-prolog-module+
+          (sort names #'string<
+                :key (lambda (name)
+                       (format nil "~A/~A"
+                               (or (and (symbol-package name)
+                                        (package-name (symbol-package name)))
+                                   "")
+                               (symbol-name name)))))))
+
+(define-builtin (current_module module) (rulebase environment depth emit)
+  (let ((resolved (logic-substitute module environment)))
+    (unless (or (logic-var-p resolved) (symbolp resolved))
+      (%raise-type-error "ATOM" resolved environment 'current_module
+                         "module name must be an atom"))
+    (if (logic-var-p resolved)
+        (dolist (candidate (%current-module-names rulebase))
+          (%unify-emit module candidate environment emit))
+        (when (gethash resolved
+                       (module-registry-modules
+                        (rulebase-module-registry rulebase)))
+          (funcall emit environment)))))
 
 (define-builtin (abolish indicator) (rulebase environment depth emit)
   (let* ((goal (list 'abolish indicator))
@@ -152,6 +246,8 @@
                    (eq predicate entry-predicate) (= arity entry-arity))))
           entries)))
       (%remove-rulebase-predicate-property!
+       rulebase predicate arity *current-prolog-module*)
+      (%remove-rulebase-table-declarations!
        rulebase predicate arity *current-prolog-module*))
     (funcall emit environment)))
 

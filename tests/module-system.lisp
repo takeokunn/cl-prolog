@@ -65,7 +65,21 @@
       (cl-prolog::module-registry-resolve-qualified
        registry 'new-module 'anything 0
        (lambda (module predicate arity)
-         (declare (ignore module predicate arity)) t)))))
+                 (declare (ignore module predicate arity)) t)))))
+
+(deftest current-module-reflects-module-registry ()
+  (let ((rulebase (make-rulebase)))
+    (cl-prolog::module-registry-declare!
+     (cl-prolog::rulebase-module-registry rulebase) 'zeta '())
+    (cl-prolog::module-registry-declare!
+     (cl-prolog::rulebase-module-registry rulebase) 'alpha '())
+    (assert-query rulebase (cl-prolog::current_module ?module)
+      => (((?module . cl-prolog::user))
+          ((?module . alpha))
+          ((?module . zeta))))
+    (assert-query rulebase (cl-prolog::current_module alpha) :succeeds)
+    (assert-query rulebase (cl-prolog::current_module missing) :fails)
+    (assert-query rulebase (cl-prolog::current_module 42) :signals)))
 
 (deftest module-consult-isolates-colliding-predicates ()
   (let ((rulebase (make-rulebase)))
@@ -91,6 +105,64 @@
     (is (not (prolog-succeeds-p rulebase
                                 (read-prolog-term "selected(beta)."))))))
 
+(deftest qualified-builtins-use-explicit-module ()
+  (let ((rulebase (make-rulebase)))
+    (consult-prolog ":- module(alpha, [value/1]). value(alpha)." rulebase)
+    (is (prolog-succeeds-p rulebase
+                           (read-prolog-term "alpha:call(value(alpha)).")))
+    (is (prolog-succeeds-p rulebase
+                           (read-prolog-term "alpha:assertz(stored(alpha)).")))
+    (is (prolog-succeeds-p rulebase
+                           (read-prolog-term "alpha:stored(alpha).")))
+    (signals-error
+      (prolog-succeeds-p rulebase
+                         (read-prolog-term "stored(alpha).")))
+    (is (not (prolog-succeeds-p rulebase
+                                (read-prolog-term "alpha:not(value(alpha))."))))
+    (is (prolog-succeeds-p rulebase
+                           (read-prolog-term "alpha:not(value(beta)).")))))
+
+(deftest qualified-builtin-rejects-unknown-module ()
+  (signals-error
+    (query-prolog (make-rulebase)
+                  (read-prolog-term "ghost:true."))))
+
+(deftest qualified-module-variable-resolves-through-bindings ()
+  (let ((rulebase (make-rulebase)))
+    (consult-prolog
+     ":- module(alpha, [value/1]). value(alpha)."
+     rulebase)
+    (is (prolog-succeeds-p
+         rulebase
+         (read-prolog-term "Module = alpha, Module:value(alpha).")))))
+
+(deftest qualified-module-errors-are-catchable ()
+  (let ((rulebase (make-rulebase)))
+    (is (prolog-succeeds-p
+         rulebase
+         (read-prolog-term
+          "catch(Module:true, error(instantiation_error, _), true).")))
+    (is (prolog-succeeds-p
+         rulebase
+         (read-prolog-term
+          "catch(42:true, error(type_error(atom, 42), _), true).")))
+    (is (prolog-succeeds-p
+         rulebase
+         (read-prolog-term
+          "catch(unknown_module:true, error(existence_error(module, unknown_module), _), true).")))))
+
+(deftest current-predicate-includes-imported-predicates ()
+  (let ((rulebase (make-rulebase)))
+    (consult-prolog
+     ":- module(alpha, [value/1]). value(alpha)."
+     rulebase)
+    (consult-prolog
+     ":- module(client, []). :- use_module(alpha)."
+     rulebase)
+    (is (prolog-succeeds-p
+         rulebase
+         (read-prolog-term "client:current_predicate(value/1).")))))
+
 (deftest module-consult-rolls-back-import-redefinition ()
   (let ((rulebase (make-rulebase)))
     (consult-prolog ":- module(alpha, [value/1]). value(alpha)." rulebase)
@@ -103,3 +175,13 @@
     (signals-error
       (prolog-succeeds-p rulebase
                          (read-prolog-term "value(local).")))))
+
+(deftest dynamic-assertion-rejects-import-redefinition ()
+  (let ((rulebase (make-rulebase)))
+    (consult-prolog ":- module(alpha, [value/1]). value(alpha)." rulebase)
+    (consult-prolog ":- use_module(alpha)." rulebase)
+    (signals-error
+      (query-prolog rulebase (read-prolog-term "assertz(value(local)).")))
+    (is (prolog-succeeds-p rulebase (read-prolog-term "value(alpha).")))
+    (is (not (prolog-succeeds-p rulebase
+                                (read-prolog-term "value(local)."))))))

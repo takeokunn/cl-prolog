@@ -9,7 +9,7 @@
   (declare (cl:ignore rulebase environment depth emit)))
 
 (define-builtin (= left right) (rulebase environment depth emit)
-  (%unify-emit left right environment emit))
+  (%constraint-unify-emit left right environment emit))
 
 (define-builtin (unify_with_occurs_check left right)
     (rulebase environment depth emit)
@@ -20,23 +20,30 @@
   (unless (nth-value 1 (unify left right environment))
     (funcall emit environment)))
 
+(defun %resolve-callable-goal (goal environment operation)
+  "Resolve GOAL in ENVIRONMENT and validate it as an ISO callable term."
+  (%ensure-callable (logic-substitute goal environment)
+                    environment operation))
+
 (define-builtin ((not |\\+|) goal) (rulebase environment depth emit)
-  (unless (%provable-p (logic-substitute goal environment)
-                       rulebase environment depth)
+  (unless (%provable-p (%resolve-callable-goal goal environment
+                                               (%iso-atom "NOT"))
+                       rulebase environment depth *current-prolog-module*)
     (funcall emit environment)))
 
-(defun %extend-callable-goal (closure arguments environment)
+(defun %extend-callable-goal (closure arguments environment
+                              &optional (operation (%iso-atom "CALL")))
   "Append ARGUMENTS to CLOSURE, returning an engine-level goal form."
   (cond
     ((logic-var-p closure)
-     (%raise-instantiation-error environment (%iso-atom "CALL")
+     (%raise-instantiation-error environment operation
                                  "CALL/N requires an instantiated callable term"))
     ((symbolp closure)
      (cons closure arguments))
     ((and (consp closure) (symbolp (first closure)))
      (append closure arguments))
     (t
-     (%raise-type-error "CALLABLE" closure environment (%iso-atom "CALL")
+     (%raise-type-error "CALLABLE" closure environment operation
                         "CALL/N requires a callable atom or compound term"))))
 
 (define-builtin (call closure &rest arguments) (rulebase environment depth emit)
@@ -52,11 +59,85 @@
 (define-builtin (once goal) (rulebase environment depth emit)
   (block first-proof
     (%prove-bindings/k
-     (logic-substitute goal environment)
+     (%resolve-callable-goal goal environment (%iso-atom "ONCE"))
      rulebase environment depth
      (lambda (extended)
        (funcall emit extended)
        (return-from first-proof nil)))))
+
+(define-builtin (call_nth goal n) (rulebase environment depth emit)
+  (let* ((resolved-goal
+           (%extend-callable-goal (logic-substitute goal environment)
+                                  '() environment))
+         (resolved-n (logic-substitute n environment)))
+    (unless (or (logic-var-p resolved-n) (integerp resolved-n))
+      (%raise-type-error "INTEGER" resolved-n environment
+                         (%iso-atom "CALL_NTH")
+                         "call_nth/2 requires an integer solution number"))
+    (when (and (integerp resolved-n) (< resolved-n 1))
+      (%raise-domain-error "NOT_LESS_THAN_ONE" resolved-n environment
+                           (%iso-atom "CALL_NTH")
+                           "call_nth/2 requires a positive solution number"))
+    (let ((count 0))
+      (block requested-proof
+        (%prove-bindings/k
+         resolved-goal rulebase environment depth
+         (lambda (extended)
+           (incf count)
+           (if (logic-var-p resolved-n)
+               (%unify-emit n count extended emit)
+               (when (= count resolved-n)
+                 (funcall emit extended)
+                 (return-from requested-proof nil)))))))))
+
+(define-builtin (call_with_depth_limit goal limit result)
+    (rulebase environment depth emit)
+  (let* ((operation (%iso-atom "CALL_WITH_DEPTH_LIMIT"))
+         (resolved-goal
+           (%extend-callable-goal (logic-substitute goal environment)
+                                  '() environment operation))
+         (resolved-limit (logic-substitute limit environment)))
+    (when (logic-var-p resolved-limit)
+      (%raise-instantiation-error
+       environment operation
+       "call_with_depth_limit/3 requires an instantiated depth limit"))
+    (unless (integerp resolved-limit)
+      (%raise-type-error "INTEGER" resolved-limit environment operation
+                         "call_with_depth_limit/3 requires an integer depth limit"))
+    (when (minusp resolved-limit)
+      (%raise-domain-error
+       "NOT_LESS_THAN_ZERO" resolved-limit environment operation
+       "call_with_depth_limit/3 requires a non-negative depth limit"))
+    (if (zerop resolved-limit)
+        (%unify-emit result (%iso-atom "DEPTH_LIMIT_EXCEEDED")
+                     environment emit)
+        (let ((token (list '%call-depth-limit))
+          (outer-token *call-depth-limit-token*)
+          (outer-remaining *call-depth-limit-remaining*)
+          (outer-used *call-depth-limit-used*)
+          (outer-depth-limited-p *depth-limited-search-p*))
+      (let ((*call-depth-limit-token* token)
+            (*call-depth-limit-remaining* resolved-limit)
+            (*call-depth-limit-used* 0)
+            (*depth-limited-search-p* t))
+        (when (eq token
+                  (cl:catch token
+                    (%prove-bindings/k
+                     resolved-goal rulebase environment depth
+                     (lambda (extended)
+                       (let ((used *call-depth-limit-used*)
+                             (*call-depth-limit-token* outer-token)
+                             (*call-depth-limit-remaining* outer-remaining)
+                             (*call-depth-limit-used* outer-used)
+                             (*depth-limited-search-p* outer-depth-limited-p))
+                         (%unify-emit result used extended emit))))
+                    nil))
+          (let ((*call-depth-limit-token* outer-token)
+                (*call-depth-limit-remaining* outer-remaining)
+                (*call-depth-limit-used* outer-used)
+                (*depth-limited-search-p* outer-depth-limited-p))
+            (%unify-emit result (%iso-atom "DEPTH_LIMIT_EXCEEDED")
+                         environment emit))))))))
 
 (defun %first-proof-environment (goal rulebase environment depth)
   "Return the first proof environment for GOAL and whether one exists."
@@ -72,50 +153,72 @@
          (return-from first-proof))))
     (values result matched-p)))
 
-(defun %call-cleanup/k (setup goal cleanup rulebase environment depth emit)
-  "Commit to SETUP's first proof, then run CLEANUP exactly once after GOAL."
+(defun %cleanup-goal-deterministic-p (goal)
+  "Return true when GOAL is a builtin that cannot yield multiple proofs."
+  (let ((name (and (consp goal)
+                   (symbolp (first goal))
+                   (symbol-name (first goal)))))
+    (or (and (symbolp goal)
+             (string= (symbol-name goal) "TRUE"))
+        (member name '("TRUE" "=" "UNIFY_WITH_OCCURS_CHECK" "==" "\\==")
+                :test #'string=))))
+
+(defun %call-cleanup/k (setup goal cleanup rulebase environment depth emit
+                        operation)
+  "Commit to SETUP, stream GOAL's proofs, then run CLEANUP exactly once.
+
+CLEANUP failure is ignored, while a condition raised by CLEANUP propagates."
   (multiple-value-bind (setup-environment setup-succeeded-p)
-      (%first-proof-environment setup rulebase environment depth)
+      (%first-proof-environment
+       (%resolve-callable-goal setup environment operation)
+       rulebase environment depth)
     (when setup-succeeded-p
       (let ((cleanup-environment setup-environment)
-            (cleanup-ran-p nil))
+            (cleanup-ran-p nil)
+            (deterministic-goal-p (%cleanup-goal-deterministic-p goal)))
         (labels ((run-cleanup ()
                    (unless cleanup-ran-p
                      (setf cleanup-ran-p t)
-                     (%first-proof-environment cleanup
-                                               rulebase cleanup-environment
-                                               depth))))
+                     (%first-proof-environment
+                      (%resolve-callable-goal cleanup cleanup-environment
+                                              operation)
+                      rulebase cleanup-environment depth))))
           (unwind-protect
                (%prove-bindings/k
-                (logic-substitute goal setup-environment)
+                (%resolve-callable-goal goal setup-environment operation)
                 rulebase setup-environment depth
                 (lambda (goal-environment)
                   (setf cleanup-environment goal-environment)
-                  (run-cleanup)
+                  (when deterministic-goal-p
+                    (run-cleanup))
                   (funcall emit goal-environment)))
             (run-cleanup)))))))
 
 (define-builtin (setup_call_cleanup setup goal cleanup)
     (rulebase environment depth emit)
   (%call-cleanup/k setup goal cleanup
-                   rulebase environment depth emit))
+                   rulebase environment depth emit
+                   (%iso-atom "SETUP_CALL_CLEANUP")))
 
 (define-builtin (call_cleanup goal cleanup)
     (rulebase environment depth emit)
   (%call-cleanup/k 'true goal cleanup
-                   rulebase environment depth emit))
+                   rulebase environment depth emit
+                   (%iso-atom "CALL_CLEANUP")))
 
 (define-builtin (forall condition action) (rulebase environment depth emit)
   (let ((succeeded-p t))
     (block failed-action
       (%prove-bindings/k
-       (logic-substitute condition environment)
+       (%resolve-callable-goal condition environment (%iso-atom "FORALL"))
        rulebase environment depth
        (lambda (condition-environment)
          (unless (nth-value 1
-                            (%first-proof-environment action rulebase
-                                                      condition-environment
-                                                      depth))
+                            (%first-proof-environment
+                             (%resolve-callable-goal
+                              action condition-environment
+                              (%iso-atom "FORALL"))
+                             rulebase condition-environment depth))
            (setf succeeded-p nil)
            (return-from failed-action)))))
     (when succeeded-p
@@ -124,7 +227,9 @@
 (define-builtin (cl-prolog.user-atoms::ignore goal)
     (rulebase environment depth emit)
   (multiple-value-bind (goal-environment succeeded-p)
-      (%first-proof-environment goal rulebase environment depth)
+      (%first-proof-environment
+       (%resolve-callable-goal goal environment (%iso-atom "IGNORE"))
+       rulebase environment depth)
     (funcall emit (if succeeded-p goal-environment environment))))
 
 (define-builtin (if-then-else condition then else)
@@ -133,11 +238,16 @@
   ;; shares the caller's cut barrier, as ISO requires.
   (let ((caller-cut-tag *caller-cut-tag*))
     (multiple-value-bind (condition-environment matched-p)
-        (%first-proof-environment condition rulebase environment depth)
+        (%first-proof-environment
+         (%resolve-callable-goal condition environment
+                                 (%iso-atom "IF_THEN_ELSE"))
+         rulebase environment depth)
       (let ((branch-environment
               (if matched-p condition-environment environment)))
         (%prove-with-cut-tag/k
-         (logic-substitute (if matched-p then else) branch-environment)
+         (%resolve-callable-goal (if matched-p then else)
+                                 branch-environment
+                                 (%iso-atom "IF_THEN_ELSE"))
          rulebase branch-environment depth caller-cut-tag emit)))))
 
 (define-builtin (soft-if-then-else condition then else)
@@ -147,16 +257,19 @@
   (let ((caller-cut-tag *caller-cut-tag*)
         (matched-p nil))
     (%prove-bindings/k
-     (logic-substitute condition environment)
+     (%resolve-callable-goal condition environment
+                             (%iso-atom "SOFT_IF_THEN_ELSE"))
      rulebase environment depth
      (lambda (condition-environment)
        (setf matched-p t)
        (%prove-with-cut-tag/k
-        (logic-substitute then condition-environment)
+        (%resolve-callable-goal then condition-environment
+                                (%iso-atom "SOFT_IF_THEN_ELSE"))
         rulebase condition-environment depth caller-cut-tag emit)))
     (unless matched-p
       (%prove-with-cut-tag/k
-       (logic-substitute else environment)
+       (%resolve-callable-goal else environment
+                               (%iso-atom "SOFT_IF_THEN_ELSE"))
        rulebase environment depth caller-cut-tag emit))))
 
 (define-builtin (throw ball) (rulebase environment depth emit)
@@ -168,20 +281,30 @@
     (%raise-prolog-exception resolved-ball environment)))
 
 (define-builtin (catch goal catcher recover) (rulebase environment depth emit)
-  (handler-case
-      (%prove-bindings/k
-       (logic-substitute goal environment)
-       rulebase environment depth emit)
-    (prolog-exception (condition)
-      (multiple-value-bind (recovery-environment matched-p)
-          (unify (prolog-exception-term condition)
-                 (logic-substitute catcher environment)
-                 environment)
-        (if matched-p
-            (%prove-bindings/k
-             (logic-substitute recover recovery-environment)
-             rulebase recovery-environment depth emit)
-            (error condition))))))
+  (let ((continuation-condition nil))
+    (handler-case
+        (%prove-bindings/k
+         (%resolve-callable-goal goal environment (%iso-atom "CATCH"))
+         rulebase environment depth
+         (lambda (goal-environment)
+           (handler-case
+               (funcall emit goal-environment)
+             (prolog-exception (condition)
+               (setf continuation-condition condition)
+               (error condition)))))
+      (prolog-exception (condition)
+        (when (eq condition continuation-condition)
+          (error condition))
+        (multiple-value-bind (recovery-environment matched-p)
+            (unify (prolog-exception-term condition)
+                   (logic-substitute catcher environment)
+                   environment)
+          (if matched-p
+              (%prove-bindings/k
+               (%resolve-callable-goal recover recovery-environment
+                                       (%iso-atom "CATCH"))
+               rulebase recovery-environment depth emit)
+              (error condition)))))))
 
 (define-builtin (repeat) (rulebase environment depth emit)
   (declare (cl:ignore rulebase depth))

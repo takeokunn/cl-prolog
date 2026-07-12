@@ -49,7 +49,7 @@ Logic variables are `?`-prefixed symbols.
 ## Install
 
 ```sh
-nix run github:takeokunn/cl-prolog   # cl-weave regression suite, via Nix
+nix run github:takeokunn/cl-prolog   # cl-weave regression suite, Linux-only Nix runner
 ```
 
 ```lisp

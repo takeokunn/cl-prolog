@@ -16,7 +16,7 @@
 (defun %fd-interval (lower upper)
   (and (<= lower upper) (loop for value from lower to upper collect value)))
 
-(defun %fd-domain-spec (term environment)
+(defun %fd-domain-spec (term environment &optional (context (%iso-atom "IN")))
   (let ((resolved (logic-substitute term environment)))
     (cond
       ((and (%proper-list-p resolved)
@@ -30,7 +30,7 @@
        (%fd-domain resolved))
       (t
        (%raise-type-error "FINITE_DOMAIN" resolved environment
-                          (%iso-atom "IN") "integer list or (Lower .. Upper) required")))))
+                          context "integer list or (Lower .. Upper) required")))))
 
 (defun %fd-domain-of (store variable)
   (cdr (assoc variable (fd-store-domains store) :test #'eq)))
@@ -98,6 +98,32 @@
                         domain))
         (values store t))))
 
+(defun %fd-filter-variable-pair (store left right operator)
+  (let ((left-domain (%fd-domain-of store left))
+        (right-domain (%fd-domain-of store right)))
+    (if (and left-domain right-domain)
+        (let ((supported-left
+                (remove-if-not
+                 (lambda (left-value)
+                   (some (lambda (right-value)
+                           (%fd-relation-true-p operator left-value right-value))
+                         right-domain))
+                 left-domain)))
+          (multiple-value-bind (left-store left-success-p)
+              (%fd-restrict-domain store left supported-left)
+            (if (not left-success-p)
+                (values left-store nil)
+                (let ((restricted-left (%fd-domain-of left-store left)))
+                  (%fd-restrict-domain
+                   left-store right
+                   (remove-if-not
+                    (lambda (right-value)
+                      (some (lambda (left-value)
+                              (%fd-relation-true-p operator left-value right-value))
+                            restricted-left))
+                    right-domain))))))
+        (values store t))))
+
 (defun %fd-propagate-relation (store constraint environment)
   (destructuring-bind (left right) (fd-constraint-arguments constraint)
     (multiple-value-bind (left-value left-ground-p)
@@ -110,10 +136,16 @@
           (cond
             ((and left-ground-p right-ground-p)
              (values store (%fd-relation-true-p operator left-value right-value)))
+            ((and (logic-var-p resolved-left)
+                  (eq resolved-left resolved-right))
+             (values store
+                     (member operator '(|#=| |#=<| |#>=|) :test #'eq)))
             ((and (logic-var-p resolved-left) right-ground-p)
              (%fd-filter-variable store resolved-left operator right-value t))
             ((and left-ground-p (logic-var-p resolved-right))
              (%fd-filter-variable store resolved-right operator left-value nil))
+            ((and (logic-var-p resolved-left) (logic-var-p resolved-right))
+             (%fd-filter-variable-pair store resolved-left resolved-right operator))
             (t (values store t))))))))
 
 (defun %fd-distinct-assignment-p (variables store used)
@@ -129,12 +161,14 @@
 (defun %fd-propagate-all-different (store constraint environment)
   (let* ((terms (mapcar (lambda (term) (logic-substitute term environment))
                         (fd-constraint-arguments constraint)))
-         (ground (remove-if-not #'integerp terms)))
-    (if (/= (length ground) (length (remove-duplicates ground)))
+         (ground (remove-if-not #'integerp terms))
+         (variables (remove-if-not #'logic-var-p terms)))
+    (if (or (/= (length ground) (length (remove-duplicates ground)))
+            (/= (length variables) (length (remove-duplicates variables :test #'eq))))
         (values store nil)
         (loop with current = store
               for term in terms
-              when (logic-var-p term)
+              when (and (logic-var-p term) (%fd-domain-of current term))
                 do (multiple-value-bind (next successp)
                        (%fd-restrict-domain current term
                                             (set-difference (%fd-domain-of current term) ground))
@@ -144,10 +178,20 @@
                  (return
                    (values current
                            (%fd-distinct-assignment-p
-                            (remove-if-not #'logic-var-p terms)
+                            (remove-if-not
+                             (lambda (variable)
+                               (%fd-domain-of current variable))
+                             variables)
                             current ground)))))))
 
 (defun %fd-propagate (store environment)
+  (dolist (entry (fd-store-domains store))
+    (let ((resolved (logic-substitute (car entry) environment)))
+      (when (or (and (integerp resolved)
+                     (not (member resolved (cdr entry))))
+                (and (not (logic-var-p resolved))
+                     (not (integerp resolved))))
+        (return-from %fd-propagate (values store nil)))))
   (loop with current = store
         repeat (1+ (length (fd-store-constraints store)))
         do (let ((before (fd-store-domains current)))
@@ -161,3 +205,21 @@
              (when (equal before (fd-store-domains current))
                (return (values current t))))
         finally (return (values current t))))
+
+(defun %fd-store-active-p (&optional (store *fd-store*))
+  "Return true when STORE contains finite-domain state."
+  (or (fd-store-domains store)
+      (fd-store-constraints store)))
+
+(defun %fd-after-unify (environment emit)
+  "Propagate the active FD store after unification and emit consistent states."
+  (if (%fd-store-active-p)
+      (multiple-value-bind (store successp)
+          (%fd-propagate *fd-store* environment)
+        (when successp
+          (let ((*fd-store* store))
+            (funcall emit environment))))
+      (funcall emit environment)))
+
+(setf *constraint-post-unify-hook* #'%fd-after-unify
+      *constraints-active-p-hook* #'%fd-store-active-p)

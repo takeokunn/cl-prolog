@@ -76,6 +76,15 @@
                                        ((?goal choice right) (?x . right))))
   ((once (choice ?x))            => (((?x . left))))
   ((once (parent nobody ?x))     :fails)
+  ((call_nth (choice ?x) 2)      => (((?x . right))))
+  ((call_nth (choice ?x) 3)      :fails)
+  ((call_nth (choice ?x) ?n)     => (((?x . left) (?n . 1))
+                                      ((?x . right) (?n . 2))))
+  ((call_nth fail ?n)            :fails)
+  ((call_nth (and (or (= ?x left) (= ?x right)) !) ?n)
+                                   => (((?x . left) (?n . 1))))
+  ((or (call_nth (and ! fail) 1) (= ?side fallback))
+                                   => (((?side . fallback))))
   ((cl-prolog.user-atoms::ignore (choice ?x)) => (((?x . left))))
   ((cl-prolog.user-atoms::ignore fail) => (nil))
   ((forall (choice ?x) (or (= ?x left) (= ?x right))) => (nil))
@@ -84,7 +93,7 @@
   ((and (setup_call_cleanup (assertz (cleanup-marker))
                             true
                             (retractall (cleanup-marker)))
-        (not (cleanup-marker)))  => (nil))
+        (not (cleanup-marker))) => (nil))
   ((and (call_cleanup true (assertz (cleanup-marker)))
         (cleanup-marker))        => (nil))
   ((setup_call_cleanup true true fail) => (nil))
@@ -107,6 +116,47 @@
   ((catch (throw mismatch) expected true) :signals)
   ((throw ?unbound)              :signals)
   ((repeat)                      => (nil nil nil) :limit 3))
+
+(deftest call-nth-validates-arguments ()
+  (let ((rulebase (make-rulebase)))
+    (dolist (goal '((call_nth ?goal 1)))
+      (signals-condition prolog-instantiation-error
+        (query-prolog rulebase goal)))
+    (dolist (goal '((call_nth 42 1)
+                    (call_nth true atom)
+                    (call_nth true 1.5)))
+      (signals-condition prolog-type-error
+        (query-prolog rulebase goal)))
+    (dolist (goal '((call_nth true 0)
+                    (call_nth true -1)))
+      (signals-condition prolog-domain-error
+        (query-prolog rulebase goal)))))
+
+(deftest call-with-depth-limit-validates-arguments ()
+  (let ((rulebase (make-rulebase)))
+    (signals-condition prolog-instantiation-error
+      (query-prolog rulebase '(call_with_depth_limit true ?limit ?result)))
+    (signals-condition prolog-instantiation-error
+      (query-prolog rulebase '(call_with_depth_limit ?goal 0 ?result)))
+    (dolist (goal '((call_with_depth_limit true atom ?result)
+                    (call_with_depth_limit true 1.5 ?result)
+                    (call_with_depth_limit 42 0 ?result)))
+      (signals-condition prolog-type-error
+        (query-prolog rulebase goal)))
+    (signals-condition prolog-domain-error
+      (query-prolog rulebase '(call_with_depth_limit true -1 ?result)))))
+
+(deftest call-nth-ground-index-stops-inner-search ()
+  (let ((rulebase (make-rulebase)))
+    (assert-query rulebase
+                  (call_nth (or (= ?value first)
+                                (and (assertz (visited-later-solution))
+                                     (= ?value second)))
+                            1)
+                  =>
+                  (((?value . first))))
+    (assert-query rulebase
+                  (current_predicate (/ visited-later-solution 0)) :fails)))
 
 (deftest cleanup-runs-on-exception-and-early-query-exit ()
   (let ((rulebase (make-family-rulebase)))
@@ -156,30 +206,129 @@
               (cl:length
                (query-prolog rulebase '(cleanup-observed ?value))))))
 
+(deftest cleanup-runs-when-goal-is-not-callable ()
+  (let ((rulebase (make-rulebase)))
+    (signals-condition prolog-type-error
+      (query-prolog
+       rulebase
+       '(setup_call_cleanup true 42 (assertz invalid-goal-cleanup))))
+    (assert-query rulebase (invalid-goal-cleanup) :succeeds)))
+
+(deftest cleanup-runs-after-streamed-solution-delivery ()
+  (let ((rulebase (make-family-rulebase))
+        (observed-values '()))
+    (assert-query rulebase (assertz (enumeration-cleanup marker)) :succeeds)
+    (assert-query rulebase (retractall (enumeration-cleanup marker)) :succeeds)
+    (map-prolog-solutions
+     (lambda (solution)
+       (push (solution-binding '?value solution) observed-values)
+       (assert-query rulebase (enumeration-cleanup right) :fails))
+     rulebase
+     '(call_cleanup (choice ?value)
+                    (assertz (enumeration-cleanup ?value))))
+    (is-equal '(left right) (nreverse observed-values))
+    (assert-query rulebase (enumeration-cleanup right) :succeeds)
+    (is-equal 1
+              (cl:length
+               (query-prolog rulebase '(enumeration-cleanup ?value))))))
+
+(deftest cleanup-failure-is-ignored-and-exceptions-propagate ()
+  (let ((rulebase (make-family-rulebase))
+        (failure-notifications 0)
+        (exception-notifications 0)
+        (limited-values '()))
+    (assert-query rulebase (assertz limited-cleanup) :succeeds)
+    (assert-query rulebase (retractall limited-cleanup) :succeeds)
+    (map-prolog-solutions
+     (lambda (solution)
+       (declare (cl:ignore solution))
+       (incf failure-notifications))
+     rulebase
+     '(call_cleanup (choice ?value) fail))
+    (is-equal 2 failure-notifications)
+    (signals-condition prolog-exception
+      (map-prolog-solutions
+       (lambda (solution)
+         (declare (cl:ignore solution))
+         (incf exception-notifications))
+       rulebase
+       '(call_cleanup (choice ?value) (throw cleanup-failed))))
+    (is-equal 2 exception-notifications)
+    (map-prolog-solutions
+     (lambda (solution)
+       (push (solution-binding '?value solution) limited-values)
+       (assert-query rulebase (limited-cleanup) :fails))
+     rulebase
+     '(call_cleanup (choice ?value) (assertz (limited-cleanup)))
+     :limit 1)
+    (is-equal '(left) (nreverse limited-values))
+    (is-equal 1
+              (cl:length (query-prolog rulebase '(limited-cleanup))))))
+
+(deftest nested-catch-does-not-catch-continuation-exceptions ()
+  (let ((rulebase (make-rulebase)))
+    (assert-query
+     rulebase
+     (catch (and (catch true escaped (= ?handler inner))
+                 (throw escaped))
+            escaped
+            (= ?handler outer))
+     => (((?handler . outer))))))
+
 (deftest-queries solution-collection-builtins
     ((make-rulebase
       :clauses (list (make-clause '(edge a 2))
                      (make-clause '(edge a 1))
                      (make-clause '(edge a 2))
-                     (make-clause '(edge b 3)))))
+                     (make-clause '(edge b 3))
+                     (make-clause '(edge3 a left 1))
+                     (make-clause '(edge3 a right 2))
+                     (make-clause '(edge3 b left 3)))))
   ((findall ?value (edge a ?value) ?bag)
                                    => (((?value . ?value) (?bag 2 1 2))))
   ((findall ?value (edge missing ?value) ?bag)
                                    => (((?value . ?value) (?bag))))
+  ((findall ?value (edge missing ?value) ?bag ?tail)
+                                   => (((?value . ?value) (?bag . ?tail)
+                                        (?tail . ?tail))))
   ((bagof ?value (edge ?key ?value) ?bag)
                                    => (((?value . ?value) (?key . a) (?bag 2 1 2))
                                        ((?value . ?value) (?key . b) (?bag 3))))
   ((bagof ?value (^ ?key (edge ?key ?value)) ?bag)
                                    => (((?value . ?value) (?key . ?key)
                                         (?bag 2 1 2 3))))
+  ((bagof ?value (^ (pair ?key ?side) (edge3 ?key ?side ?value)) ?bag)
+                                   => (((?value . ?value) (?key . ?key)
+                                        (?side . ?side) (?bag 1 2 3))))
+  ((bagof ?value (^ ?key (^ ?side (edge3 ?key ?side ?value))) ?bag)
+                                   => (((?value . ?value) (?key . ?key)
+                                        (?side . ?side) (?bag 1 2 3))))
   ((bagof ?value (edge missing ?value) ?bag) :fails)
   ((setof ?value (edge ?key ?value) ?bag)
                                    => (((?value . ?value) (?key . a) (?bag 1 2))
                                        ((?value . ?value) (?key . b) (?bag 3))))
   ((setof ?value (edge missing ?value) ?bag) :fails))
 
+(deftest findall-difference-list-preserves-ground-tail ()
+  (let ((rulebase
+          (make-rulebase
+           :clauses (list (make-clause '(edge a 2))
+                          (make-clause '(edge a 1))
+                          (make-clause '(edge a 2))))))
+    (is-equal '(2 1 2 . tail)
+              (solution-binding
+               '?bag
+               (query-prolog-first
+                rulebase '(findall ?value (edge a ?value) ?bag tail)))
+    (is-equal 'tail
+              (solution-binding
+               '?bag
+               (query-prolog-first
+                rulebase '(findall ?value (edge missing ?value) ?bag tail)))))))
+
 (deftest-queries sorting-builtins ((make-rulebase))
   ((sort (3 1 2 1) ?sorted) => (((?sorted 1 2 3))))
+  ((msort (3 1 2 1) ?sorted) => (((?sorted 1 1 2 3))))
   ((sort () ?sorted) => (((?sorted))))
   ((sort (z 2 a 1) ?sorted) => (((?sorted 1 2 a z))))
   ((sort ((a first second) (z item)) ?sorted)
@@ -192,7 +341,41 @@
 (deftest-queries sorting-builtins-report-iso-errors ((make-rulebase))
   ((sort ?input ?sorted) :signals)
   ((sort improper ?sorted) :signals)
+  ((msort ?input ?sorted) :signals)
+  ((msort improper ?sorted) :signals)
   ((keysort ((not-a-pair)) ?sorted) :signals))
+
+(deftest collection-builtins-use-standard-variable-order-and-variants ()
+  (let ((rulebase
+          (make-rulebase
+           :clauses (list (make-clause '(variant-key (pair ?left ?left) first))
+                          (make-clause '(variant-key (pair ?right ?right) second))
+                          (make-clause '(ordered-key z last))
+                          (make-clause '(ordered-key a first))))))
+    (let* ((solutions
+             (query-prolog
+              rulebase '(bagof ?value (variant-key ?key ?value) ?bag)))
+           (solution (first solutions))
+           (key (solution-binding '?key solution)))
+      (is (= 1 (length solutions)))
+      (is-equal '(first second) (solution-binding '?bag solution))
+      (is (eq (second key) (third key))))
+    (assert-query rulebase
+                  (bagof ?value (ordered-key ?key ?value) ?bag)
+                  =>
+                  (((?value . ?value) (?key . a) (?bag first))
+                   ((?value . ?value) (?key . z) (?bag last))))
+    (with-single-query-solution
+        (solution solutions rulebase
+         (list 'sort
+               (list (list 'pair '?left '?left)
+                     (list 'pair '?right '?right))
+               '?sorted))
+      (declare (ignore solutions))
+      (let ((sorted (solution-binding '?sorted solution)))
+        (is (= 2 (length sorted)))
+        (is (not (eq (second (first sorted))
+                     (second (second sorted)))))))))
 
 (deftest dynamic-database-builtins ()
   (let ((rulebase (make-rulebase)))
@@ -202,6 +385,7 @@
                   => (((?value . first)) ((?value . second))))
     (assert-query rulebase (assertz (color apple red)) :succeeds)
     (assert-query rulebase (assertz (color apple blue)) :succeeds)
+    (assert-query rulebase (assert (color banana yellow)) :succeeds)
     (assert-query rulebase (asserta (color apple green)) :succeeds)
     (assert-query rulebase (color apple ?shade)
                   => (((?shade . green)) ((?shade . red)) ((?shade . blue))))
@@ -219,6 +403,37 @@
     (assert-query rulebase (current_predicate (/ color 2)) :succeeds)
     (assert-query rulebase (current_predicate (/ warm 1)) :succeeds)
     (assert-query rulebase (current_predicate (/ = 2)) :succeeds)
+    (assert-query rulebase (predicate_property (color ?fruit ?shade) dynamic)
+                  :succeeds)
+    (assert-query rulebase (predicate_property (color ?fruit ?shade) user)
+                  :succeeds)
+    (assert-query rulebase (predicate_property (color ?fruit ?shade) defined)
+                  :succeeds)
+    (assert-query rulebase
+                  (predicate_property (color ?fruit ?shade)
+                                      (number_of_clauses 3))
+                  :succeeds)
+    (assert-query rulebase (predicate_property (ordered ?value) static)
+                  :succeeds)
+    (assert-query rulebase (predicate_property (ordered ?value) user)
+                  :succeeds)
+    (assert-query rulebase (predicate_property (= ?left ?right) built_in)
+                  :succeeds)
+    (assert-query rulebase (predicate_property (= ?left ?right) user)
+                  :fails)
+    (assert-query rulebase (predicate_property (missing ?value) ?property)
+                  :fails)
+    (is-equal
+     '(((?fruit . ?fruit) (?shade . ?shade)
+        (?property . cl-prolog::dynamic))
+       ((?fruit . ?fruit) (?shade . ?shade)
+        (?property . cl-prolog::user))
+       ((?fruit . ?fruit) (?shade . ?shade)
+        (?property . cl-prolog::defined))
+       ((?fruit . ?fruit) (?shade . ?shade)
+        (?property cl-prolog::number_of_clauses 3)))
+     (query-prolog
+      rulebase '(predicate_property (color ?fruit ?shade) ?property)))
     (assert-query rulebase (retractall (color apple ?shade)) :succeeds)
     (assert-query rulebase (color apple ?shade) :fails)
     (assert-query rulebase (retractall (color apple ?shade)) :succeeds)
@@ -233,6 +448,12 @@
     (assert-query rulebase (assertz (= left left)) :signals)
     (assert-query rulebase (clause (= left left) ?body) :signals)
     (assert-query rulebase (abolish (/ = 2)) :signals)))
+
+(deftest predicate-property-validates-arguments ()
+  (let ((rulebase (make-rulebase)))
+    (assert-query rulebase (predicate_property ?head ?property) :signals)
+    (assert-query rulebase (predicate_property 42 ?property) :signals)
+    (assert-query rulebase (predicate_property (missing ?value) 42) :signals)))
 
 (deftest dynamic-database-accepts-zero-arity-atoms ()
   (let ((rulebase (make-rulebase)))
@@ -287,6 +508,15 @@
             (is-equal "PERMISSION_ERROR" (symbol-name (first formal)))
             (is-equal "MODIFY" (symbol-name (second formal)))
             (is-equal "STATIC_PROCEDURE" (symbol-name (third formal)))))))))
+
+(deftest rejected-static-assertion-preserves-predicate-property ()
+  (let ((rulebase (make-rulebase
+                   :clauses (list (make-clause '(fixed original))))))
+    (signals-error (query-prolog rulebase '(assertz (fixed replacement))))
+    (assert-query rulebase (fixed original) :succeeds)
+    (assert-query rulebase (fixed replacement) :fails)
+    (assert-query rulebase (predicate_property (fixed ?value) static)
+                  :succeeds)))
 
 (deftest dynamic-database-validates-callable-arguments ()
   (let ((rulebase (make-rulebase)))
@@ -347,6 +577,16 @@
     (assert-query rulebase (assertz (temporary second)) :succeeds)
     (assert-query rulebase (temporary ?value) => (((?value . second))))))
 
+(deftest abolish-removes-table-declarations ()
+  (let ((rulebase (make-rulebase)))
+    (assert-query rulebase (assertz (tabled-dynamic value)) :succeeds)
+    (cl-prolog::%add-rulebase-table-declaration!
+     rulebase 'tabled-dynamic 1 :runtime)
+    (is (cl-prolog::%rulebase-tabled-p rulebase 'tabled-dynamic 1))
+    (assert-query rulebase (abolish (/ tabled-dynamic 1)) :succeeds)
+    (is (not (cl-prolog::%rulebase-tabled-p
+              rulebase 'tabled-dynamic 1)))))
+
 (deftest current-predicate-includes-empty-dynamic-procedures ()
   (let ((rulebase (make-rulebase)))
     (assert-query rulebase (assertz (empty-after-retract value)) :succeeds)
@@ -388,6 +628,41 @@
                                        ((?x . b) (?tail . end))) :limit 2)
   ((and (member wanted ?unbound) (= ?unbound (wanted tail)))
                                    => (((?unbound wanted tail))) :limit 1)
+  ((cl-prolog::memberchk ?x (a b a)) => (((?x . a))))
+  ((cl-prolog::memberchk z (a b)) :fails)
+  ((cl-prolog::memberchk wanted ?xs) :succeeds)
+  ((cl-prolog::select ?x (a b a) ?rest)
+                                   => (((?x . a) (?rest b a))
+                                       ((?x . b) (?rest a a))
+                                       ((?x . a) (?rest a b))))
+  ((cl-prolog::select b ?list (a c))
+                                   => (((?list . (b a c)))
+                                       ((?list . (a b c)))
+                                       ((?list . (a c b)))) :limit 3)
+  ((and (cl-prolog::select b (a b . ?tail) ?rest)
+        (= ?tail (c)))           => (((?tail . (c)) (?rest a c))) :limit 1)
+  ((cl-prolog::select z (a b . improper) ?rest) :fails)
+  ((cl-prolog::nth0 1 (a b c) ?x) => (((?x . b))))
+  ((cl-prolog::nth0 ?n (a b c) ?x)
+                                   => (((?n . 0) (?x . a))
+                                       ((?n . 1) (?x . b))
+                                       ((?n . 2) (?x . c))))
+  ((cl-prolog::nth1 ?n (a b c) b) => (((?n . 2))))
+  ((and (cl-prolog::nth0 2 (a . ?tail) c)
+        (= ?tail (b c d)))       => (((?tail b c d))))
+  ((cl-prolog::nth0 3 (a b . improper) ?x) :fails)
+  ((cl-prolog::nth0 -1 (a b) ?x) :signals)
+  ((cl-prolog::nth0 not-an-integer (a b) ?x) :signals)
+  ((cl-prolog::nth1 0 (a b) ?x) :signals)
+  ((cl-prolog::last (a b c) ?x) => (((?x . c))))
+  ((cl-prolog::last (singleton) singleton) :succeeds)
+  ((cl-prolog::last (a b . improper) ?x) :fails)
+  ((and (cl-prolog::last (a b . ?tail) c) (= ?tail (c)))
+                                   => (((?tail . (c)))) :limit 1)
+  ((cl-prolog::is_list ())       :succeeds)
+  ((cl-prolog::is_list (a b c))  :succeeds)
+  ((cl-prolog::is_list (a b . improper)) :fails)
+  ((cl-prolog::is_list ?unbound) :fails)
   ((append (a b) (c) ?xs)        => (((?xs . (a b c)))))
   ((append (a b) ?tail (a b c))  => (((?tail . (c)))))
   ((append ?left ?right (a b c)) => (((?left . ()) (?right . (a b c)))
@@ -402,18 +677,76 @@
                                        ((?left . (a b)) (?right . ()) (?any a b))) :limit 3)
   ((reverse (a b c) ?x)          => (((?x . (c b a)))))
   ((reverse ?x (c b a))          => (((?x . (a b c)))))
+  ((reverse (a . ?tail) (c b a)) => (((?tail . (b c)))))
   ((reverse atom other)          :fails)
   ((length (a b c) ?n)           => (((?n . 3))))
   ((length ?xs 0)                => (((?xs))))
   ((length ?xs 2)                :succeeds)
-  ((length ?xs -1)               :fails)
-  ((length ?xs not-a-number)     :fails))
+  ((and (length ?xs ?n) (= ?n 2)):succeeds)
+  ((length (a b . ?tail) 4)      :succeeds)
+  ((length ?xs -1)               :signals)
+  ((length ?xs not-a-number)     :signals))
+
+(deftest cyclic-list-builtins-terminate ()
+  (let ((circular (list 'a))
+        (rulebase (make-rulebase)))
+    (setf (cdr circular) circular)
+    (flet ((fails-without-looping (predicate &rest arguments)
+             (let ((emitted nil))
+               (funcall (cl-prolog::%goal-solver predicate (length arguments))
+                        (cons predicate arguments) rulebase nil nil
+                        (lambda (environment)
+                          (declare (ignore environment))
+                          (setf emitted t)))
+               (is (not emitted)))))
+      (fails-without-looping 'cl-prolog::is_list circular)
+      (fails-without-looping 'cl-prolog::memberchk 'missing circular)
+      (fails-without-looping 'cl-prolog::select 'missing circular '?rest)
+      (fails-without-looping 'cl-prolog::nth0 8 circular '?item)
+      (fails-without-looping 'cl-prolog::nth1 8 circular '?item)
+      (fails-without-looping 'cl-prolog::last circular '?item)
+      (fails-without-looping 'cl-prolog::length circular '?length))))
+
+(deftest cyclic-copy-helpers-preserve-cycles-and-sharing ()
+  (cl-prolog::%with-logic-variable-order
+    (let* ((variable (cl-prolog:fresh-logic-variable "?SOURCE"))
+           (cycle (cons variable nil))
+           (shared (list 'shared))
+           (root (cons shared shared)))
+      (setf (cdr cycle) cycle)
+      (let ((freshened (cl-prolog::%freshen-term
+                        cycle (make-hash-table :test #'eq))))
+        (is (not (eq freshened cycle)))
+        (is (eq freshened (cdr freshened)))
+        (is (cl-prolog:logic-var-p (car freshened)))
+        (is (not (eq variable (car freshened)))))
+      (let ((freshened (cl-prolog::%freshen-term
+                        root (make-hash-table :test #'eq))))
+        (is (eq (car freshened) (cdr freshened))))
+      (let ((canonical (cl-prolog::%canonicalize-variant cycle)))
+        (is (eq canonical (cdr canonical))))
+      (let ((canonical (cl-prolog::%canonicalize-variant root)))
+        (is (eq (car canonical) (cdr canonical)))))))
+
+(deftest findall-with-cyclic-tail-terminates ()
+  (cl-prolog::%with-logic-variable-order
+    (let ((tail (list 'tail))
+          (bag (cl-prolog:fresh-logic-variable "?BAG"))
+          (resolved nil))
+      (setf (cdr tail) tail)
+      (funcall (cl-prolog::%goal-solver 'cl-prolog::findall 4)
+               (list 'cl-prolog::findall 'template 'cl-prolog::fail bag tail)
+               (make-rulebase) nil nil
+               (lambda (environment)
+                 (setf resolved (cl-prolog::%walk-term bag environment))))
+      (is (eq tail resolved)))))
 
 (deftest-queries arithmetic-builtins ((make-rulebase))
   ((is ?x (+ 2 (* 3 4)))         => (((?x . 14))))
   ((is ?x (- 5))                 => (((?x . -5))))
   ((is ?x (- 10 3))              => (((?x . 7))))
-  ((is ?x (/ 7 2))               => (((?x . 7/2))))
+  ((is ?x (/ 7 2))               => (((?x . 3.5d0))))
+  ((is ?x (/ 1 2))               => (((?x . 0.5d0))))
   ((is ?x (mod 17 5))            => (((?x . 2))))
   ((is ?x (abs -9))              => (((?x . 9))))
   ((is ?x (// -7 3))             => (((?x . -2))))
@@ -423,10 +756,10 @@
   ((is ?x (sign -7))             => (((?x . -1))))
   ((is ?x (min 7 3))             => (((?x . 3))))
   ((is ?x (max 7 3))             => (((?x . 7))))
-  ((is ?x (floor 7/3))           => (((?x . 2))))
-  ((is ?x (ceiling 7/3))         => (((?x . 3))))
-  ((is ?x (truncate -7/3))       => (((?x . -2))))
-  ((is ?x (round 5/2))           => (((?x . 2))))
+  ((is ?x (floor (/ 7 3)))       => (((?x . 2))))
+  ((is ?x (ceiling (/ 7 3)))     => (((?x . 3))))
+  ((is ?x (truncate (/ -7 3)))   => (((?x . -2))))
+  ((is ?x (round (/ 5 2)))       => (((?x . 2))))
   ((is ?x (** 2 8))              => (((?x . 256))))
   ((is ?x (^ 3 3))               => (((?x . 27))))
   ((is ?x (+ 3))                 => (((?x . 3))))
@@ -463,6 +796,23 @@
   ((=< 3 3)                      :succeeds)
   ((> 4 3)                       :succeeds)
   ((>= 4 4)                      :succeeds)
+  ((cl-prolog::between 2 4 ?x)   => (((?x . 2)) ((?x . 3)) ((?x . 4))))
+  ((cl-prolog::between -2 0 ?x)  => (((?x . -2)) ((?x . -1)) ((?x . 0))))
+  ((cl-prolog::between 2 4 3)    :succeeds)
+  ((cl-prolog::between 2 4 5)    :fails)
+  ((cl-prolog::between 4 2 ?x)   :fails)
+  ((cl-prolog::succ 2 ?x)        => (((?x . 3))))
+  ((cl-prolog::succ ?x 3)        => (((?x . 2))))
+  ((cl-prolog::succ 2 3)         :succeeds)
+  ((cl-prolog::succ 2 4)         :fails)
+  ((cl-prolog::succ ?x 0)        :fails)
+  ((cl-prolog::between ?low 4 ?x) :signals)
+  ((cl-prolog::between 1 4.0 ?x) :signals)
+  ((cl-prolog::between 1 4 atom) :signals)
+  ((cl-prolog::succ ?x ?y)       :signals)
+  ((cl-prolog::succ -1 ?x)       :signals)
+  ((cl-prolog::succ ?x -1)       :signals)
+  ((cl-prolog::succ 1.0 ?x)      :signals)
   ((and (= ?x 4) (is ?y (+ ?x 1))) => (((?x . 4) (?y . 5))))
   ((is ?x (+ ?unbound 1))        :signals)
   ((is ?x (+ atom 1))            :signals)
@@ -471,9 +821,39 @@
   ((is ?x (rem 1.0 2))           :signals)
   ((is ?x (mod 1 0))             :signals)
   ((is ?x (sqrt -1))             :signals)
+  ((is ?x (** -1 0.5d0))        :signals)
   ((is ?x (log 0))               :signals)
   ((is ?x (|/\\| 1.0 1))        :signals)
   ((is ?x (|<<| 1 1.5))         :signals))
+
+(deftest arithmetic-rejects-host-only-ratio-input ()
+  (signals-error
+    (query-prolog (make-rulebase) (list 'is '?result 1/2))))
+
+(defun arithmetic-type-error-formal (expression)
+  (handler-case
+      (progn
+        (query-prolog (make-rulebase) (list 'is '?result expression))
+        (error "Expected an arithmetic type error for ~S" expression))
+    (prolog-type-error (condition)
+      (second (prolog-exception-term condition)))))
+
+(deftest-table arithmetic-functions-validate-indicators-before-arguments ()
+  (:equal
+   (list (cl-prolog::%iso-atom "TYPE_ERROR")
+         (cl-prolog::%iso-atom "EVALUABLE")
+         (cl-prolog::%iso-term "/" 'unknown 1))
+   (arithmetic-type-error-formal '(unknown 1)))
+  (:equal
+   (list (cl-prolog::%iso-atom "TYPE_ERROR")
+         (cl-prolog::%iso-atom "EVALUABLE")
+         (cl-prolog::%iso-term "/" '+ 3))
+   (arithmetic-type-error-formal '(+ 1 2 3)))
+  (:equal
+   (list (cl-prolog::%iso-atom "TYPE_ERROR")
+         (cl-prolog::%iso-atom "EVALUABLE")
+         (cl-prolog::%iso-term "/" 'unknown 1))
+   (arithmetic-type-error-formal '(unknown ?unbound))))
 
 (deftest-queries prolog-flag-builtins ((make-rulebase))
   ((cl-prolog::current_prolog_flag bounded ?value) => (((?value . cl-prolog:false))))
@@ -539,4 +919,55 @@
 
 (deftest-table control-builtins-report-iso-errors ()
   (:equal '(prolog-instantiation-error "INSTANTIATION_ERROR")
-          (term-builtin-error-summary '(throw ?ball))))
+          (term-builtin-error-summary '(throw ?ball)))
+  (:equal '(prolog-instantiation-error "INSTANTIATION_ERROR")
+          (term-builtin-error-summary '(once ?goal)))
+  (:equal '(prolog-type-error ("TYPE_ERROR" "CALLABLE" 42))
+          (term-builtin-error-summary '(once 42)))
+  (:equal '(prolog-instantiation-error "INSTANTIATION_ERROR")
+          (term-builtin-error-summary '(not ?goal)))
+  (:equal '(prolog-type-error ("TYPE_ERROR" "CALLABLE" 42))
+          (term-builtin-error-summary '(cl-prolog::|\\+| 42)))
+  (:equal '(prolog-instantiation-error "INSTANTIATION_ERROR")
+          (term-builtin-error-summary
+           '(cl-prolog.user-atoms::ignore ?goal)))
+  (:equal '(prolog-type-error ("TYPE_ERROR" "CALLABLE" 42))
+          (term-builtin-error-summary
+           '(cl-prolog.user-atoms::ignore 42)))
+  (:equal '(prolog-instantiation-error "INSTANTIATION_ERROR")
+          (term-builtin-error-summary '(forall ?condition true)))
+  (:equal '(prolog-type-error ("TYPE_ERROR" "CALLABLE" 42))
+          (term-builtin-error-summary '(forall true 42)))
+  (:equal nil
+          (term-builtin-error-summary '(forall fail 42)))
+  (:equal '(prolog-instantiation-error "INSTANTIATION_ERROR")
+          (term-builtin-error-summary
+           '(setup_call_cleanup ?setup true true)))
+  (:equal '(prolog-type-error ("TYPE_ERROR" "CALLABLE" 42))
+          (term-builtin-error-summary '(call_cleanup 42 true)))
+  (:equal nil
+          (term-builtin-error-summary
+           '(setup_call_cleanup fail 42 43)))
+  (:equal '(prolog-type-error ("TYPE_ERROR" "CALLABLE" 43))
+          (term-builtin-error-summary
+           '(setup_call_cleanup true true 43)))
+  (:equal '(prolog-instantiation-error "INSTANTIATION_ERROR")
+          (term-builtin-error-summary
+           '(if-then-else ?condition true true)))
+  (:equal nil
+          (term-builtin-error-summary
+           '(if-then-else true true 42)))
+  (:equal '(prolog-type-error ("TYPE_ERROR" "CALLABLE" 42))
+          (term-builtin-error-summary
+           '(if-then-else fail true 42)))
+  (:equal '(prolog-type-error ("TYPE_ERROR" "CALLABLE" 42))
+          (term-builtin-error-summary
+           '(soft-if-then-else true 42 true)))
+  (:equal nil
+          (term-builtin-error-summary
+           '(soft-if-then-else true true 42)))
+  (:equal '(prolog-instantiation-error "INSTANTIATION_ERROR")
+          (term-builtin-error-summary '(catch ?goal mismatch true)))
+  (:equal '(prolog-type-error ("TYPE_ERROR" "CALLABLE" 42))
+          (term-builtin-error-summary
+           '(catch (throw ball) ball 42))))

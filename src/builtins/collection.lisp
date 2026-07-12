@@ -1,14 +1,14 @@
 (in-package #:cl-prolog)
 
 (defun %strip-existential-quantifiers (goal)
-  "Return GOAL without leading (^ VARIABLE GOAL) forms and their variables."
+  "Return GOAL without leading (^ QUANTIFIED GOAL) forms and their variables."
   (let ((variables '()))
     (loop while (and (%proper-list-p goal)
                      (= (length goal) 3)
                      (and (symbolp (first goal))
-                          (string= (symbol-name (first goal)) "^"))
-                     (logic-var-p (second goal)))
-          do (pushnew (second goal) variables :test #'eq)
+                          (string= (symbol-name (first goal)) "^")))
+          do (dolist (variable (%collect-variables (second goal)))
+               (pushnew variable variables :test #'eq))
              (setf goal (third goal)))
     (values goal (nreverse variables))))
 
@@ -51,10 +51,16 @@
     (nreverse solutions)))
 
 (defun %partition-solution-groups (solutions)
-  "Partition (KEY . TEMPLATE) SOLUTIONS by structurally equal keys."
+  "Partition SOLUTIONS by variant-equivalent keys in standard term order."
   (let ((groups '()))
-    (dolist (solution solutions (nreverse groups))
-      (let ((group (find (car solution) groups :key #'car :test #'equal)))
+    (dolist (solution solutions
+             (stable-sort groups #'%prolog-term< :key #'car))
+      (let* ((key (%canonicalize-variant (car solution)))
+             (group (find key groups
+                          :key (lambda (candidate)
+                                 (%canonicalize-variant (car candidate)))
+                          :test (lambda (left right)
+                                  (zerop (%compare-terms left right))))))
         (if group
             (setf (cdr group) (nconc (cdr group) (list (cdr solution))))
             (push (list (car solution) (cdr solution)) groups))))))
@@ -75,6 +81,18 @@
   "Compare terms using the standard Prolog order."
   (minusp (%compare-terms left right)))
 
+(defun %standard-term-sort (values)
+  "Return a stable standard-order copy of VALUES."
+  (stable-sort (copy-list values) #'%prolog-term<))
+
+(defun %standard-term-sort-unique (values)
+  "Sort VALUES and remove adjacent terms whose standard comparison is zero."
+  (let ((ordered (%standard-term-sort values))
+        (result '()))
+    (dolist (value ordered (nreverse result))
+      (unless (and result (zerop (%compare-terms (car result) value)))
+        (push value result)))))
+
 (defun %emit-bagof-solutions (template quantified-goal bag setp
                               rulebase environment depth emit)
   (multiple-value-bind (goal existential-variables)
@@ -87,8 +105,7 @@
       (dolist (group (%partition-solution-groups solutions))
         (let ((values (cdr group)))
           (when setp
-            (setf values (sort (remove-duplicates values :test #'equal)
-                               #'%prolog-term<)))
+            (setf values (%standard-term-sort-unique values)))
           (%emit-solution-group free-variables (car group) values bag
                                 environment emit))))))
 
@@ -96,6 +113,14 @@
   (%unify-emit bag
                (%collect-template-solutions template goal rulebase environment depth)
                environment emit))
+
+(define-builtin (findall template goal bag tail)
+    (rulebase environment depth emit)
+  (let ((solutions
+          (%collect-template-solutions template goal rulebase environment depth)))
+    (%unify-emit bag
+                 (append solutions tail)
+                 environment emit)))
 
 (define-builtin (bagof template goal bag) (rulebase environment depth emit)
   (%emit-bagof-solutions template goal bag nil rulebase environment depth emit))
@@ -129,8 +154,13 @@
 (define-builtin (sort input sorted) (rulebase environment depth emit)
   (declare (cl:ignore rulebase depth))
   (let* ((values (%resolved-collection-list input environment (%iso-atom "SORT")))
-         (ordered (stable-sort (remove-duplicates values :test #'equal)
-                               #'%prolog-term<)))
+         (ordered (%standard-term-sort-unique values)))
+    (%unify-emit sorted ordered environment emit)))
+
+(define-builtin (msort input sorted) (rulebase environment depth emit)
+  (declare (cl:ignore rulebase depth))
+  (let* ((values (%resolved-collection-list input environment (%iso-atom "MSORT")))
+         (ordered (%standard-term-sort values)))
     (%unify-emit sorted ordered environment emit)))
 
 (define-builtin (keysort input sorted) (rulebase environment depth emit)

@@ -40,7 +40,7 @@ is available at <https://takeokunn.github.io/cl-prolog/>.
 ```
 
 ```sh
-nix run github:takeokunn/cl-prolog    # cl-weave regression suite, via Nix
+nix run github:takeokunn/cl-prolog    # cl-weave regression suite, Linux-only Nix runner
 ```
 
 See [Development](docs/src/development.md) for building from a local
@@ -50,7 +50,7 @@ checkout, running the test suite, and previewing the documentation site.
 
 ```sh
 nix develop
-nix run .          # cl-weave-backed ASDF regression suite
+nix run .          # cl-weave-backed ASDF regression suite (Linux only)
 nix flake check    # full verification suite
 ```
 
