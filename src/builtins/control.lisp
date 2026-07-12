@@ -109,6 +109,7 @@
        "NOT_LESS_THAN_ZERO" resolved-limit environment operation
        "call_with_depth_limit/3 requires a non-negative depth limit"))
     (let ((token (list '%call-depth-limit))
+          (continuation-condition nil)
           (outer-token *call-depth-limit-token*)
           (outer-remaining *call-depth-limit-remaining*)
           (outer-used *call-depth-limit-used*)
@@ -126,8 +127,14 @@
                      (*call-depth-limit-remaining* outer-remaining)
                      (*call-depth-limit-used* outer-used)
                      (*depth-limited-search-p* outer-depth-limited-p))
-                 (%unify-emit result used extended emit))))
+                 (handler-case
+                     (%unify-emit result used extended emit)
+                   (%call-depth-limit-exceeded (condition)
+                     (setf continuation-condition condition)
+                     (error condition))))))
           (%call-depth-limit-exceeded (condition)
+            (when (eq condition continuation-condition)
+              (error condition))
             (if (eq token (%call-depth-limit-exceeded-token condition))
                 (let ((*call-depth-limit-token* outer-token)
                       (*call-depth-limit-remaining* outer-remaining)

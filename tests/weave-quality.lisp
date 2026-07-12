@@ -33,11 +33,14 @@
   (cl-weave:it "repeated ancestor queries complete within the latency budget"
       (:timeout-ms 5000)
     (cl-weave:expect-has-assertions)
-    (let ((result (cl-weave:benchmark (:warmup 1 :samples 5 :iterations 40)
-                    (cl-weave:expect
-                     (query-prolog-first *weave-family-rulebase*
-                                         '(ancestor tom ?who))
-                     :to-equal '((?who . bob))))))
+    (let ((result
+            (cl-weave:measure
+             (lambda ()
+               (cl-weave:expect
+                (query-prolog-first *weave-family-rulebase*
+                                    '(ancestor tom ?who))
+                :to-equal '((?who . bob))))
+             :warmup 1 :samples 5 :iterations 40)))
       (cl-weave:expect (length (cl-weave:benchmark-result-samples result))
                        :to-be 5)
       (cl-weave:expect (cl-weave:median-ms result)

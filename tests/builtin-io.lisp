@@ -76,15 +76,20 @@
 
 (deftest io-read-term-reports-named-singletons-only ()
   (with-io-rulebase (rulebase input output) "tuple(X, Y, X, _, Z)."
-    (assert-query
-     rulebase
-     (cl-prolog::read_term
-      ?term ((cl-prolog::singletons ?singletons)))
-     => ((?term . (cl-prolog::tuple cl-prolog::?x cl-prolog::?y
-                                   cl-prolog::?x cl-prolog::?anon
-                                   cl-prolog::?z))
-         (?singletons . ((cl-prolog::= cl-prolog::|Y| cl-prolog::?y)
-                         (cl-prolog::= cl-prolog::|Z| cl-prolog::?z)))))))
+    (with-single-query-solution
+        (solution solutions rulebase
+         (list 'cl-prolog::read_term '?term
+               (list (list 'cl-prolog::singletons '?singletons))))
+      (let ((term (logic-substitute '?term solution))
+            (singletons (logic-substitute '?singletons solution)))
+        (destructuring-bind (functor x y repeated-x anonymous z) term
+          (is (eq 'cl-prolog::tuple functor))
+          (is (eq x repeated-x))
+          (is (logic-var-p anonymous))
+          (is-equal
+           (list (list 'cl-prolog::= 'cl-prolog::|Y| y)
+                 (list 'cl-prolog::= 'cl-prolog::|Z| z))
+           singletons))))))
 
 (deftest io-read-term-validates-syntax-error-policy ()
   (with-io-rulebase (rulebase input output) "broken( ."
