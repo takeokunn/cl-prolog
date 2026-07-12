@@ -794,6 +794,31 @@
   ((is ?x (|/\\| 1.0 1))        :signals)
   ((is ?x (|<<| 1 1.5))         :signals))
 
+(defun arithmetic-type-error-formal (expression)
+  (handler-case
+      (progn
+        (query-prolog (make-rulebase) (list 'is '?result expression))
+        (error "Expected an arithmetic type error for ~S" expression))
+    (prolog-type-error (condition)
+      (second (prolog-error-term condition)))))
+
+(deftest-table arithmetic-functions-validate-indicators-before-arguments ()
+  (:is-equal
+   (list (cl-prolog::%iso-atom "TYPE_ERROR")
+         (cl-prolog::%iso-atom "EVALUABLE")
+         (cl-prolog::%iso-term "/" 'unknown 1))
+   (arithmetic-type-error-formal '(unknown 1)))
+  (:is-equal
+   (list (cl-prolog::%iso-atom "TYPE_ERROR")
+         (cl-prolog::%iso-atom "EVALUABLE")
+         (cl-prolog::%iso-term "/" '+ 3))
+   (arithmetic-type-error-formal '(+ 1 2 3)))
+  (:is-equal
+   (list (cl-prolog::%iso-atom "TYPE_ERROR")
+         (cl-prolog::%iso-atom "EVALUABLE")
+         (cl-prolog::%iso-term "/" 'unknown 1))
+   (arithmetic-type-error-formal '(unknown ?unbound))))
+
 (deftest-queries prolog-flag-builtins ((make-rulebase))
   ((cl-prolog::current_prolog_flag bounded ?value) => (((?value . cl-prolog:false))))
   ((cl-prolog::current_prolog_flag max_arity ?value) => (((?value . cl-prolog::unbounded))))

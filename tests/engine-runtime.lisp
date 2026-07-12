@@ -330,15 +330,18 @@
       (query-prolog rb '(call_with_depth_limit (one-deep) 5 ?result)
                     :max-depth 0))))
 
-(deftest call-with-depth-limit-is-cut-opaque-and-uncatchable-by-goal ()
-  (let ((rb (prolog
-              ((looping) (looping)))))
+(deftest call-with-depth-limit-is-cut-opaque ()
+  (let ((rb (make-rulebase)))
     (is-equal
      '(((?depth . cl-prolog::depth_limit_exceeded) (?side . ?side))
        ((?depth . ?depth) (?side . fallback)))
      (query-prolog
       rb '(or (call_with_depth_limit (and ! fail) 0 ?depth)
-              (= ?side fallback))))
+              (= ?side fallback))))))
+
+(deftest call-with-depth-limit-is-uncatchable-by-goal ()
+  (let ((rb (prolog
+              ((looping) (looping)))))
     (let* ((solutions
              (query-prolog
               rb
@@ -358,7 +361,15 @@
      (call_with_depth_limit
       (call_with_depth_limit (one-deep) 2 ?inner-depth)
       1 ?outer-depth)
-     => (((?inner-depth . 2) (?outer-depth . 2))))))
+     => (((?inner-depth . 2) (?outer-depth . 1))))))
+
+(deftest call-with-depth-limit-does-not-scope-over-the-caller-continuation ()
+  (let ((rb (make-rulebase)))
+    (assert-query
+     rb
+     (and (call_with_depth_limit true 1 ?depth)
+          (= ?side ok))
+     => (((?depth . 1) (?side . ok))))))
 
 (deftest finite-proofs-are-unbounded-by-default ()
   (let ((rb (make-rulebase))

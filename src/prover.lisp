@@ -243,16 +243,20 @@ into the caller's remaining goals."
               (solver (or builtin-solver foreign-solver)))
          (cond
            (solver
-             (let ((*current-prolog-module* (proof-state-module state))
-                   (*caller-cut-tag* (proof-state-cut-tag state)))
+             (let* ((solver-state
+                      (if explicit-module
+                          (%state-in-module state explicit-module)
+                          state))
+                    (*current-prolog-module* (proof-state-module solver-state))
+                    (*caller-cut-tag* (proof-state-cut-tag solver-state)))
                (funcall solver
                         normalized-goal
-                        (proof-state-rulebase state)
-                        (proof-state-bindings state)
-                        (proof-state-remaining-depth state)
+                        (proof-state-rulebase solver-state)
+                        (proof-state-bindings solver-state)
+                        (proof-state-remaining-depth solver-state)
                         (lambda (bindings)
                           (funcall succeed
-                                   (%state-with-bindings state bindings))))))
+                                   (%state-with-bindings solver-state bindings))))))
            (t
             (multiple-value-bind (resolved-goal defining-module)
                 (%resolve-user-goal normalized-goal state explicit-module)
@@ -440,7 +444,8 @@ body throws here, abandoning the remaining clause alternatives."
                        #'prove-with-propagated-bindings)
               (prove-with-propagated-bindings extended)))))))
 
-(defun %provable-p (query rulebase environment depth)
+(defun %provable-p (query rulebase environment depth
+                    &optional (module +default-prolog-module+))
   "Return true when QUERY has at least one proof."
   (%with-logic-variable-order
     (block provable
@@ -448,7 +453,7 @@ body throws here, abandoning the remaining clause alternatives."
         (cl:catch cut-tag
           (%prove-goals/k (%normalize-query query)
                           (%make-proof-state rulebase environment depth
-                                             +default-prolog-module+
+                                             module
                                              (%make-rulebase-table-session rulebase)
                                              cut-tag)
                           (lambda (state)

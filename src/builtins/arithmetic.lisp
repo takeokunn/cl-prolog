@@ -138,22 +138,32 @@
   (list (cons :pi pi))
   "Data table for zero-argument arithmetic constants.")
 
-(defun %call-arithmetic-function (table operator arguments expression)
-  (let ((entry (assoc (%arithmetic-operator-key operator) table)))
+(defun %arithmetic-function-table (arity)
+  (case arity
+    (1 *unary-arithmetic-functions*)
+    (2 *binary-arithmetic-functions*)))
+
+(defun %require-arithmetic-function (operator arity expression environment)
+  (let* ((table (%arithmetic-function-table arity))
+         (entry (and table (assoc (%arithmetic-operator-key operator) table))))
     (unless entry
-      (%arithmetic-error expression "unknown arithmetic operator ~S" operator))
-    (handler-case
-        (apply (cdr entry) (append arguments (list expression)))
-      (cl:arithmetic-error (condition)
-        (%arithmetic-error expression "host arithmetic failure: ~A" condition)))))
+      (%raise-type-error
+       "EVALUABLE" (%iso-term "/" operator arity) environment
+       (%iso-atom "ARITHMETIC")
+       (format nil "~S is not an evaluable arithmetic function" expression)))
+    (values table entry)))
 
-(defun %evaluate-binary-arithmetic (operator left right expression)
-  (%call-arithmetic-function *binary-arithmetic-functions*
-                             operator (list left right) expression))
+(defun %call-arithmetic-function (entry arguments expression)
+  (handler-case
+      (apply (cdr entry) (append arguments (list expression)))
+    (cl:arithmetic-error (condition)
+      (%arithmetic-error expression "host arithmetic failure: ~A" condition))))
 
-(defun %evaluate-unary-arithmetic (operator argument expression)
-  (%call-arithmetic-function *unary-arithmetic-functions*
-                             operator (list argument) expression))
+(defun %evaluate-binary-arithmetic (entry left right expression)
+  (%call-arithmetic-function entry (list left right) expression))
+
+(defun %evaluate-unary-arithmetic (entry argument expression)
+  (%call-arithmetic-function entry (list argument) expression))
 
 (defun %evaluate-arithmetic-expression (expression environment)
   "Evaluate a ground arithmetic EXPRESSION after applying ENVIRONMENT."
@@ -171,25 +181,25 @@
                    (%raise-type-error "EVALUABLE" term environment
                                       (%iso-atom "ARITHMETIC")
                                       "number or arithmetic expression required"))
-                  ((not (%proper-list-p term))
+                 ((not (%proper-list-p term))
                    (%raise-type-error "EVALUABLE" term environment
                                       (%iso-atom "ARITHMETIC")
                                       "proper arithmetic expression required"))
                  (t
                   (let ((operator (first term))
                         (arguments (rest term)))
-                    (case (length arguments)
-                      (1 (%evaluate-unary-arithmetic
-                          operator (evaluate (first arguments)) term))
-                      (2 (%evaluate-binary-arithmetic
-                          operator
-                          (evaluate (first arguments))
-                          (evaluate (second arguments))
-                          term))
-                      (otherwise
-                       (%arithmetic-error term
-                                          "operator ~S expects one or two arguments, got ~D"
-                                          operator (length arguments)))))))))
+                    (multiple-value-bind (table entry)
+                        (%require-arithmetic-function
+                         operator (length arguments) term environment)
+                      (declare (cl:ignore table))
+                      (case (length arguments)
+                        (1 (%evaluate-unary-arithmetic
+                            entry (evaluate (first arguments)) term))
+                        (2 (%evaluate-binary-arithmetic
+                            entry
+                            (evaluate (first arguments))
+                            (evaluate (second arguments))
+                            term)))))))))
       (evaluate resolved))))
 
 (define-builtin (is result expression) (rulebase environment depth emit)

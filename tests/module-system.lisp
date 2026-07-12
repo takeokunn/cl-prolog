@@ -105,6 +105,22 @@
     (is (not (prolog-succeeds-p rulebase
                                 (read-prolog-term "selected(beta)."))))))
 
+(deftest qualified-builtins-use-explicit-module ()
+  (let ((rulebase (make-rulebase)))
+    (consult-prolog ":- module(alpha, [value/1]). value(alpha)." rulebase)
+    (is (prolog-succeeds-p rulebase
+                           (read-prolog-term "alpha:call(value(alpha)).")))
+    (is (prolog-succeeds-p rulebase
+                           (read-prolog-term "alpha:assertz(stored(alpha)).")))
+    (is (prolog-succeeds-p rulebase
+                           (read-prolog-term "alpha:stored(alpha).")))
+    (is (not (prolog-succeeds-p rulebase
+                                (read-prolog-term "stored(alpha)."))))
+    (is (not (prolog-succeeds-p rulebase
+                                (read-prolog-term "alpha:not(value(alpha))."))))
+    (is (prolog-succeeds-p rulebase
+                           (read-prolog-term "alpha:not(value(beta)).")))))
+
 (deftest module-consult-rolls-back-import-redefinition ()
   (let ((rulebase (make-rulebase)))
     (consult-prolog ":- module(alpha, [value/1]). value(alpha)." rulebase)
