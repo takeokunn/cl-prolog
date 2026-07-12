@@ -8,20 +8,7 @@
 
 (asdf:defsystem #:cl-prolog/tests
   :depends-on (#:cl-prolog/weave)
-  :pathname (:components
-             ((:file "support")
-              (:module "support-files" :pathname "support" :serial t
-               :components ((:file "core") (:file "query") (:file "fixtures")))
-              (:file "unification") (:file "operator-table") (:file "parser")
-              (:file "term-writer") (:file "io-context")
-              (:file "source-loader-support") (:file "source-loader") (:file "source-loader-errors")
-              (:file "engine-surface") (:file "engine-queries") (:file "engine-queries-collections") (:file "engine-queries-arithmetic") (:file "engine-queries-flags")
-              (:file "engine-control") (:file "engine-runtime-support")
-              (:file "engine-runtime-tabling") (:file "engine-runtime-depth") (:file "engine-runtime-foreign") (:file "engine-runtime") (:file "engine-runtime-errors") (:file "builtin-term")
-              (:file "builtin-atom") (:file "builtin-operator") (:file "builtin-io") (:file "builtin-io-variants") (:file "builtin-io-read-write")
-              (:file "builtin-io-code") (:file "builtin-fd") (:file "module-system")
-              (:file "dcg") (:file "weave-public") (:file "weave-quality")
-              (:file "engine-dynamic")))
+  :pathname "tests"
   :serial t
   :components ((:file "support")
                (:module "support-files" :pathname "support" :serial t
