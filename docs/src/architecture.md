@@ -19,16 +19,27 @@ library.
 Sources live under `src/`, in dependency (and load) order:
 
 - `package.lisp` — public package and export boundary
-- `data.lisp` — facts, rules, rulebase structs (data only, no logic)
+- `operator-table.lisp` and `module-system.lisp` — parser operator state and
+  module metadata
+- `data-types.lisp` and `data.lisp` — clauses, rulebases, constructors, and
+  immutable rulebase operations
 - `unification.lisp` — unification, substitution, variable renaming
-- `engine.lisp` — CPS provers, cut, depth bound, and exact-indicator builtin
-  and foreign predicate dispatch
-- `builtin-term.lisp` — ISO-style term inspection and ordering builtins
-- `builtins/` — control, collection, database, arithmetic, and list builtins
+- `parser.lisp` and `parser-source.lisp` — term parsing and source boundaries
+- `term-writer.lisp` and `io-context.lisp` — term rendering and explicit I/O
+  context
+- `engine.lisp`, `prover-state.lisp`, and `prover.lisp` — CPS proof state,
+  dispatch, cut, depth bounds, and clause search
+- `builtins/` — control, collection, database, arithmetic, list, atom,
+  operator, and split stream/I/O builtins
+- `fd-store.lisp` and `builtins/fd.lisp` — finite-domain state and predicates
+- `term-order.lisp` and `builtin-term.lisp` — term ordering and ISO-style term
+  inspection builtins
 - `dcg-runtime.lisp` — DCG combinator builtins
 - `query.lisp` — public query API over the engine
-- `dsl.lisp` — `prolog`, `def-rule`, and friends; compiles `(:when EXPR)`
-  guards to closures
+- `source-loader.lisp`, `source-directives.lisp`, and
+  `source-loader-builtins.lisp` — source loading and directive processing
+- `dsl-compiler.lisp` and `dsl.lisp` — `prolog`, `def-rule`, and friends;
+  compile `(:when EXPR)` guards to closures
 - `dcg.lisp` — `def-dcg-rule` expansion, `phrase`
 - `tests/` — split regression suite plus a table-driven expectation DSL
 
@@ -60,17 +71,14 @@ foreign predicates are keyed by exact name and arity.
 
 ### Cut
 
-Cut is implemented with the condition system, the idiomatic Lisp tool for
-dynamically scoped control flow:
+Cut uses a dynamically scoped tag stored in the proof state:
 
-- `!` emits its solution, then signals the internal `%cut` condition
-- conjunction barriers propagate the signal through earlier choice points
-  in the same invocation
-- each user-defined predicate invocation owns the boundary that consumes the
-  signal, so a rule-body cut prunes remaining clauses without escaping into
-  its caller
-- opaque meta-calls consume their nested cut, while transparent control
-  branches explicitly re-signal it into the containing invocation
+- each user-defined predicate invocation establishes a fresh `catch` tag
+- `!` emits its solution, then `throw`s to the current tag
+- the invocation boundary consumes that transfer, pruning remaining clauses
+  without escaping into the caller
+- opaque meta-calls establish their own boundary, while transparent control
+  branches retain the containing proof state's tag
 
 ### Guards
 
@@ -112,6 +120,8 @@ state ownership visible at the call site.
 ## Verification Layers
 
 1. `nix run .` — cl-weave-backed ASDF regression behavior on Linux
-2. `nix flake check` — packaging and clean-source verification
+2. `nix flake check` — regression tests, Paredit structural checks, and mdBook
+   documentation verification
+3. `nix build .#cl-prolog` — release package artifact construction
 
 When architecture changes land, update the narrowest affected layer first.

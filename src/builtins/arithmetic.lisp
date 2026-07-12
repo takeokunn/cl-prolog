@@ -257,9 +257,9 @@
 (define-builtin (between low high value) (rulebase environment depth emit)
   (declare (cl:ignore rulebase depth))
   (let* ((operation (%iso-atom "BETWEEN"))
-         (resolved-low (%term-resolve low environment))
-         (resolved-high (%term-resolve high environment))
-         (resolved-value (%term-resolve value environment)))
+         (resolved-low (logic-substitute low environment))
+         (resolved-high (logic-substitute high environment))
+         (resolved-value (logic-substitute value environment)))
     (when (or (logic-var-p resolved-low) (logic-var-p resolved-high))
       (%raise-instantiation-error environment operation
                                   "lower and upper bounds must be instantiated"))
@@ -276,8 +276,8 @@
 (define-builtin (succ predecessor successor) (rulebase environment depth emit)
   (declare (cl:ignore rulebase depth))
   (let* ((operation (%iso-atom "SUCC"))
-         (resolved-predecessor (%term-resolve predecessor environment))
-         (resolved-successor (%term-resolve successor environment)))
+         (resolved-predecessor (logic-substitute predecessor environment))
+         (resolved-successor (logic-substitute successor environment)))
     (when (and (logic-var-p resolved-predecessor)
                (logic-var-p resolved-successor))
       (%raise-instantiation-error environment operation

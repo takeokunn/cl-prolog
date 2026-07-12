@@ -13,6 +13,24 @@
 (defun %fd-domain (values)
   (sort (remove-duplicates (copy-list values)) #'<))
 
+(defun %fd-interval (lower upper) (and (<= lower upper) (loop for value from lower to upper collect value)))
+
+(defun %fd-domain-spec (term environment &optional (context (%iso-atom "IN")))
+  (let ((resolved (logic-substitute term environment)))
+    (cond
+      ((and (%proper-list-p resolved)
+            (= (length resolved) 3)
+            (symbolp (second resolved))
+            (string= (symbol-name (second resolved)) "..")
+            (integerp (first resolved))
+            (integerp (third resolved)))
+       (%fd-interval (first resolved) (third resolved)))
+      ((and (%proper-list-p resolved) (every #'integerp resolved))
+       (%fd-domain resolved))
+      (t
+       (%raise-type-error "FINITE_DOMAIN" resolved environment
+                          context "integer list or (Lower .. Upper) required")))))
+
 (defun %fd-domain-of (store variable)
   (cdr (assoc variable (fd-store-domains store) :test #'eq)))
 

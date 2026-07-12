@@ -49,6 +49,26 @@
      (%fd-constrain-domain variables domain-spec environment emit
                             (%iso-atom ,context))))
 
+(defun %fd-constrain-domain (variables domain-spec environment emit context)
+  (let ((domain (%fd-domain-spec domain-spec environment context))
+        (store *fd-store*)
+        (successp t))
+    (when domain
+      (dolist (term (%fd-domain-terms variables environment context))
+        (if (integerp term)
+            (unless (member term domain)
+              (setf successp nil)
+              (return))
+            (multiple-value-bind (next restrictedp)
+                (%fd-restrict-domain store term domain)
+              (unless restrictedp
+                (setf successp nil)
+                (return))
+              (setf store next))))
+      (when successp
+        (multiple-value-bind (propagated propagatedp) (%fd-propagate store environment)
+          (when propagatedp (%fd-emit propagated environment emit)))))))
+
 (%define-fd-domain-relation in "IN")
 
 (%define-fd-domain-relation ins "INS")

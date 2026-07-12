@@ -1,5 +1,32 @@
 (in-package #:cl-prolog.tests)
 
+(defmacro with-binary-stream-rulebase
+    ((rulebase context input-path output-path) input-bytes &body body)
+  `(let* ((,input-path
+            (merge-pathnames
+             (format nil "cl-prolog-input-~36R.bin" (random (expt 36 8)))
+             #p"/tmp/"))
+          (,output-path
+            (merge-pathnames
+             (format nil "cl-prolog-output-~36R.bin" (random (expt 36 8)))
+             #p"/tmp/")))
+     (unwind-protect
+          (progn
+            (with-open-file (stream ,input-path :direction :output
+                                    :if-exists :supersede
+                                    :element-type '(unsigned-byte 8))
+              (write-sequence ,input-bytes stream))
+            (let* ((,context (cl-prolog::make-prolog-io-context
+                              :input (make-string-input-stream "")
+                              :output (make-string-output-stream)
+                              :error-output (make-string-output-stream)))
+                   (,rulebase (make-rulebase :io-context ,context)))
+              (unwind-protect
+                   (progn ,@body)
+                (cl-prolog::%close-all-owned-prolog-streams! ,context))))
+       (ignore-errors (delete-file ,input-path))
+       (ignore-errors (delete-file ,output-path)))))
+
 (deftest io-open-accepts-three-and-four-argument-forms ()
   (let ((path (merge-pathnames (format nil "cl-prolog-open3-~D.txt"
                                        (sb-unix:unix-getpid))
@@ -104,30 +131,3 @@
                              :element-type '(unsigned-byte 8))
         (is-equal '(128) (loop for byte = (read-byte stream nil nil)
                                while byte collect byte))))))
-
-(defmacro with-binary-stream-rulebase
-    ((rulebase context input-path output-path) input-bytes &body body)
-  `(let* ((,input-path
-            (merge-pathnames
-             (format nil "cl-prolog-input-~36R.bin" (random (expt 36 8)))
-             #p"/tmp/"))
-          (,output-path
-            (merge-pathnames
-             (format nil "cl-prolog-output-~36R.bin" (random (expt 36 8)))
-             #p"/tmp/")))
-     (unwind-protect
-          (progn
-            (with-open-file (stream ,input-path :direction :output
-                                    :if-exists :supersede
-                                    :element-type '(unsigned-byte 8))
-              (write-sequence ,input-bytes stream))
-            (let* ((,context (cl-prolog::make-prolog-io-context
-                              :input (make-string-input-stream "")
-                              :output (make-string-output-stream)
-                              :error-output (make-string-output-stream)))
-                   (,rulebase (make-rulebase :io-context ,context)))
-              (unwind-protect
-                   (progn ,@body)
-                (cl-prolog::%close-all-owned-prolog-streams! ,context))))
-       (ignore-errors (delete-file ,input-path))
-       (ignore-errors (delete-file ,output-path)))))
