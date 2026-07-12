@@ -1,13 +1,8 @@
 (in-package #:cl-prolog)
 
 (defun %io-context-atom (name &key preserve-case)
-  "Intern an I/O protocol atom without depending on the parser layer."
-  (let* ((canonical-name (if preserve-case name (string-upcase name)))
-         (package (find-package '#:cl-prolog)))
-    (multiple-value-bind (symbol status) (find-symbol canonical-name package)
-      (if (eq status :inherited)
-          (intern canonical-name (find-package '#:cl-prolog.user-atoms))
-          (or symbol (intern canonical-name package))))))
+  "Intern an I/O protocol atom through the parser canonicalization layer."
+  (%prolog-atom-symbol name :preserve-case preserve-case))
 
 (defstruct (prolog-stream
              (:constructor %make-prolog-stream
