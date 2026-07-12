@@ -215,6 +215,9 @@
                                    => (((?value . ?value) (?bag 2 1 2))))
   ((findall ?value (edge missing ?value) ?bag)
                                    => (((?value . ?value) (?bag))))
+  ((findall ?value (edge missing ?value) ?bag ?tail)
+                                   => (((?value . ?value) (?bag . ?tail)
+                                        (?tail . ?tail))))
   ((bagof ?value (edge ?key ?value) ?bag)
                                    => (((?value . ?value) (?key . a) (?bag 2 1 2))
                                        ((?value . ?value) (?key . b) (?bag 3))))
@@ -227,8 +230,26 @@
                                        ((?value . ?value) (?key . b) (?bag 3))))
   ((setof ?value (edge missing ?value) ?bag) :fails))
 
+(deftest findall-difference-list-preserves-ground-tail ()
+  (let ((rulebase
+          (make-rulebase
+           :clauses (list (make-clause '(edge a 2))
+                          (make-clause '(edge a 1))
+                          (make-clause '(edge a 2)))))))
+    (is-equal '(2 1 2 . tail)
+              (solution-binding
+               '?bag
+               (query-prolog-first
+                rulebase '(findall ?value (edge a ?value) ?bag tail))))
+    (is-equal 'tail
+              (solution-binding
+               '?bag
+               (query-prolog-first
+                rulebase '(findall ?value (edge missing ?value) ?bag tail))))))
+
 (deftest-queries sorting-builtins ((make-rulebase))
   ((sort (3 1 2 1) ?sorted) => (((?sorted 1 2 3))))
+  ((msort (3 1 2 1) ?sorted) => (((?sorted 1 1 2 3))))
   ((sort () ?sorted) => (((?sorted))))
   ((sort (z 2 a 1) ?sorted) => (((?sorted 1 2 a z))))
   ((sort ((a first second) (z item)) ?sorted)
@@ -241,7 +262,38 @@
 (deftest-queries sorting-builtins-report-iso-errors ((make-rulebase))
   ((sort ?input ?sorted) :signals)
   ((sort improper ?sorted) :signals)
+  ((msort ?input ?sorted) :signals)
+  ((msort improper ?sorted) :signals)
   ((keysort ((not-a-pair)) ?sorted) :signals))
+
+(deftest collection-builtins-use-standard-variable-order-and-variants ()
+  (let ((rulebase
+          (make-rulebase
+           :clauses (list (make-clause '(variant-key (pair ?left ?left) first))
+                          (make-clause '(variant-key (pair ?right ?right) second))
+                          (make-clause '(ordered-key z last))
+                          (make-clause '(ordered-key a first)))))))
+    (let* ((solutions
+             (query-prolog
+              rulebase '(bagof ?value (variant-key ?key ?value) ?bag)))
+           (solution (first solutions))
+           (key (solution-binding '?key solution)))
+      (is (= 1 (length solutions)))
+      (is-equal '(first second) (solution-binding '?bag solution))
+      (is (eq (second key) (third key))))
+    (assert-query rulebase
+                  '(bagof ?value (ordered-key ?key ?value) ?bag)
+                  =>
+                  (((?value . ?value) (?key . a) (?bag first))
+                   ((?value . ?value) (?key . z) (?bag last))))
+    (with-single-query-solution
+        (solution solutions rulebase
+         '(sort ((pair ?left ?left) (pair ?right ?right)) ?sorted))
+      (declare (ignore solutions))
+      (let ((sorted (solution-binding '?sorted solution)))
+        (is (= 2 (length sorted)))
+        (is (not (eq (second (first sorted))
+                     (second (second sorted)))))))))
 
 (deftest dynamic-database-builtins ()
   (let ((rulebase (make-rulebase)))
@@ -459,6 +511,41 @@
                                        ((?x . b) (?tail . end))) :limit 2)
   ((and (member wanted ?unbound) (= ?unbound (wanted tail)))
                                    => (((?unbound wanted tail))) :limit 1)
+  ((cl-prolog::memberchk ?x (a b a)) => (((?x . a))))
+  ((cl-prolog::memberchk z (a b)) :fails)
+  ((cl-prolog::memberchk wanted ?xs) :succeeds)
+  ((cl-prolog::select ?x (a b a) ?rest)
+                                   => (((?x . a) (?rest b a))
+                                       ((?x . b) (?rest a a))
+                                       ((?x . a) (?rest a b))))
+  ((cl-prolog::select b ?list (a c))
+                                   => (((?list . (b a c)))
+                                       ((?list . (a b c)))
+                                       ((?list . (a c b)))) :limit 3)
+  ((and (cl-prolog::select b (a b . ?tail) ?rest)
+        (= ?tail (c)))           => (((?tail . (c)) (?rest a c))) :limit 1)
+  ((cl-prolog::select z (a b . improper) ?rest) :fails)
+  ((cl-prolog::nth0 1 (a b c) ?x) => (((?x . b))))
+  ((cl-prolog::nth0 ?n (a b c) ?x)
+                                   => (((?n . 0) (?x . a))
+                                       ((?n . 1) (?x . b))
+                                       ((?n . 2) (?x . c))))
+  ((cl-prolog::nth1 ?n (a b c) b) => (((?n . 2))))
+  ((and (cl-prolog::nth0 2 (a . ?tail) c)
+        (= ?tail (b c d)))       => (((?tail b c d))))
+  ((cl-prolog::nth0 3 (a b . improper) ?x) :fails)
+  ((cl-prolog::nth0 -1 (a b) ?x) :signals)
+  ((cl-prolog::nth0 not-an-integer (a b) ?x) :signals)
+  ((cl-prolog::nth1 0 (a b) ?x) :signals)
+  ((cl-prolog::last (a b c) ?x) => (((?x . c))))
+  ((cl-prolog::last (singleton) singleton) :succeeds)
+  ((cl-prolog::last (a b . improper) ?x) :fails)
+  ((and (cl-prolog::last (a b . ?tail) c) (= ?tail (c)))
+                                   => (((?tail . (c)))) :limit 1)
+  ((cl-prolog::is_list ())       :succeeds)
+  ((cl-prolog::is_list (a b c))  :succeeds)
+  ((cl-prolog::is_list (a b . improper)) :fails)
+  ((cl-prolog::is_list ?unbound) :fails)
   ((append (a b) (c) ?xs)        => (((?xs . (a b c)))))
   ((append (a b) ?tail (a b c))  => (((?tail . (c)))))
   ((append ?left ?right (a b c)) => (((?left . ()) (?right . (a b c)))
@@ -479,6 +566,59 @@
   ((length ?xs 2)                :succeeds)
   ((length ?xs -1)               :fails)
   ((length ?xs not-a-number)     :fails))
+
+(deftest cyclic-list-builtins-terminate ()
+  (let ((circular (list 'a))
+        (rulebase (make-rulebase)))
+    (setf (cdr circular) circular)
+    (flet ((fails-without-looping (predicate &rest arguments)
+             (let ((emitted nil))
+               (funcall (cl-prolog::%goal-solver predicate (length arguments))
+                        (cons predicate arguments) rulebase nil nil
+                        (lambda (environment)
+                          (declare (ignore environment))
+                          (setf emitted t)))
+               (is (not emitted)))))
+      (fails-without-looping 'cl-prolog::is_list circular)
+      (fails-without-looping 'cl-prolog::memberchk 'missing circular)
+      (fails-without-looping 'cl-prolog::select 'missing circular '?rest)
+      (fails-without-looping 'cl-prolog::nth0 8 circular '?item)
+      (fails-without-looping 'cl-prolog::nth1 8 circular '?item)
+      (fails-without-looping 'cl-prolog::last circular '?item))))
+
+(deftest cyclic-copy-helpers-preserve-cycles-and-sharing ()
+  (cl-prolog::%with-logic-variable-order
+    (let* ((variable (cl-prolog:fresh-logic-variable "?SOURCE"))
+           (cycle (cons variable nil))
+           (shared (list 'shared))
+           (root (cons shared shared)))
+      (setf (cdr cycle) cycle)
+      (let ((freshened (cl-prolog::%freshen-term
+                        cycle (make-hash-table :test #'eq))))
+        (is (not (eq freshened cycle)))
+        (is (eq freshened (cdr freshened)))
+        (is (cl-prolog:logic-var-p (car freshened)))
+        (is (not (eq variable (car freshened)))))
+      (let ((freshened (cl-prolog::%freshen-term
+                        root (make-hash-table :test #'eq))))
+        (is (eq (car freshened) (cdr freshened))))
+      (let ((canonical (cl-prolog::%canonicalize-variant cycle)))
+        (is (eq canonical (cdr canonical))))
+      (let ((canonical (cl-prolog::%canonicalize-variant root)))
+        (is (eq (car canonical) (cdr canonical)))))))
+
+(deftest findall-with-cyclic-tail-terminates ()
+  (cl-prolog::%with-logic-variable-order
+    (let ((tail (list 'tail))
+          (bag (cl-prolog:fresh-logic-variable "?BAG"))
+          (resolved nil))
+      (setf (cdr tail) tail)
+      (funcall (cl-prolog::%goal-solver 'cl-prolog::findall 4)
+               (list 'cl-prolog::findall 'template 'cl-prolog::fail bag tail)
+               (make-rulebase) nil nil
+               (lambda (environment)
+                 (setf resolved (cl-prolog::%walk-term bag environment))))
+      (is (eq tail resolved)))))
 
 (deftest-queries arithmetic-builtins ((make-rulebase))
   ((is ?x (+ 2 (* 3 4)))         => (((?x . 14))))

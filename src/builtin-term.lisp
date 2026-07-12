@@ -3,7 +3,18 @@
 (in-package #:cl-prolog)
 
 (defun %term-resolve (term environment)
-  (logic-substitute term environment))
+  (let ((copies (make-hash-table :test #'eq)))
+    (labels ((resolve (node)
+               (let ((resolved (%walk-term node environment)))
+                 (if (consp resolved)
+                     (or (gethash resolved copies)
+                         (let ((copy (cons nil nil)))
+                           (setf (gethash resolved copies) copy
+                                 (car copy) (resolve (car resolved))
+                                 (cdr copy) (resolve (cdr resolved)))
+                           copy))
+                     resolved))))
+      (resolve term))))
 
 (defun %term-atom-p (term)
   (and (symbolp term) (not (logic-var-p term))))
@@ -43,13 +54,57 @@
                      (unify-next (cdr remaining) extended))))))
     (unify-next pairs environment)))
 
-(defun %term-identical-p (left right)
+(defun %term-identical-p (left right &optional
+                                       (seen (make-hash-table :test #'eq)))
   (cond
-    ((or (logic-var-p left) (logic-var-p right)) (eq left right))
+    ((eq left right) t)
+    ((or (logic-var-p left) (logic-var-p right)) nil)
     ((and (consp left) (consp right))
-     (and (%term-identical-p (car left) (car right))
-          (%term-identical-p (cdr left) (cdr right))))
+     (let ((right-terms (or (gethash left seen)
+                            (setf (gethash left seen)
+                                  (make-hash-table :test #'eq)))))
+       (or (gethash right right-terms)
+           (progn
+             (setf (gethash right right-terms) t)
+             (and (%term-identical-p (car left) (car right) seen)
+                  (%term-identical-p (cdr left) (cdr right) seen))))))
     (t (eql left right))))
+
+(defun %term-variant-p (left right)
+  (let ((left-bindings (make-hash-table :test #'eq))
+        (right-bindings (make-hash-table :test #'eq))
+        (seen (make-hash-table :test #'eq)))
+    (labels ((variants-p (left-term right-term)
+               (cond
+                 ((logic-var-p left-term)
+                  (and (logic-var-p right-term)
+                       (multiple-value-bind (right-binding left-bound-p)
+                           (gethash left-term left-bindings)
+                         (multiple-value-bind (left-binding right-bound-p)
+                             (gethash right-term right-bindings)
+                           (cond
+                             ((or left-bound-p right-bound-p)
+                              (and left-bound-p right-bound-p
+                                   (eq right-binding right-term)
+                                   (eq left-binding left-term)))
+                             (t
+                              (setf (gethash left-term left-bindings) right-term
+                                    (gethash right-term right-bindings) left-term)
+                              t))))))
+                 ((logic-var-p right-term) nil)
+                 ((and (consp left-term) (consp right-term))
+                  (let ((right-terms
+                          (or (gethash left-term seen)
+                              (setf (gethash left-term seen)
+                                    (make-hash-table :test #'eq)))))
+                    (or (gethash right-term right-terms)
+                        (progn
+                          (setf (gethash right-term right-terms) t)
+                          (and (variants-p (car left-term) (car right-term))
+                               (variants-p (cdr left-term) (cdr right-term)))))))
+                 ((or (consp left-term) (consp right-term)) nil)
+                 (t (eql left-term right-term)))))
+      (variants-p left right))))
 
 (defun %term-order-class (term)
   (cond
@@ -77,8 +132,34 @@
     (t (%compare-strings (prin1-to-string left)
                          (prin1-to-string right)))))
 
+(defvar *atom-order-ordinals* (make-hash-table :test #'eq))
+(defvar *next-atom-order-ordinal* 0)
+
+(defun %atom-order-ordinal (atom)
+  (multiple-value-bind (ordinal presentp)
+      (gethash atom *atom-order-ordinals*)
+    (if presentp
+        ordinal
+        (setf (gethash atom *atom-order-ordinals*)
+              (prog1 *next-atom-order-ordinal*
+                (incf *next-atom-order-ordinal*))))))
+
 (defun %compare-atoms (left right)
-  (%compare-strings (symbol-name left) (symbol-name right)))
+  (let ((name-comparison (%compare-strings (symbol-name left)
+                                           (symbol-name right))))
+    (if (zerop name-comparison)
+        (let ((package-comparison
+                (%compare-strings (if (symbol-package left)
+                                      (package-name (symbol-package left))
+                                      "")
+                                  (if (symbol-package right)
+                                      (package-name (symbol-package right))
+                                      ""))))
+          (if (zerop package-comparison)
+              (%compare-numbers (%atom-order-ordinal left)
+                                (%atom-order-ordinal right))
+              package-comparison))
+        name-comparison)))
 
 (defun %compare-variables (left right)
   (let ((left-ordinal (%logic-variable-ordinal left))
@@ -88,26 +169,41 @@
       ((> left-ordinal right-ordinal) 1)
       (t 0))))
 
-(declaim (ftype (function (t t) integer) %compare-terms))
+(declaim (ftype (function (t t &optional hash-table) integer) %compare-terms))
 
-(defun %compare-term-sequences (left right)
+(defun %compare-term-sequences (left right seen)
   (loop for left-term in left
         for right-term in right
-        for comparison = (%compare-terms left-term right-term)
+        for comparison = (%compare-terms left-term right-term seen)
         unless (zerop comparison) return comparison
         finally (return 0)))
 
-(defun %compare-compound-terms (left right)
+(defun %compare-compound-terms (left right seen)
   (let ((arity-comparison (%compare-numbers (length (rest left))
                                             (length (rest right)))))
     (if (zerop arity-comparison)
-        (let ((functor-comparison (%compare-terms (first left) (first right))))
+        (let ((functor-comparison (%compare-terms (first left) (first right)
+                                                  seen)))
           (if (zerop functor-comparison)
-              (%compare-term-sequences (rest left) (rest right))
+              (%compare-term-sequences (rest left) (rest right) seen)
               functor-comparison))
         arity-comparison)))
 
-(defun %compare-terms (left right)
+(defun %compare-cons-terms (left right seen)
+  (let ((right-terms (or (gethash left seen)
+                         (setf (gethash left seen)
+                               (make-hash-table :test #'eq)))))
+    (if (gethash right right-terms)
+        0
+        (progn
+          (setf (gethash right right-terms) t)
+          (let ((car-comparison (%compare-terms (car left) (car right) seen)))
+            (if (zerop car-comparison)
+                (%compare-terms (cdr left) (cdr right) seen)
+                car-comparison))))))
+
+(defun %compare-terms (left right &optional
+                                    (seen (make-hash-table :test #'eq)))
   (if (%term-identical-p left right)
       0
       (let ((left-class (%term-order-class left))
@@ -118,7 +214,10 @@
           ((= left-class 0) (%compare-variables left right))
           ((= left-class 1) (%compare-numbers left right))
           ((= left-class 2) (%compare-atoms left right))
-          ((= left-class 3) (%compare-compound-terms left right))
+          ((= left-class 3)
+           (if (and (%proper-list-p left) (%proper-list-p right))
+               (%compare-compound-terms left right seen)
+               (%compare-cons-terms left right seen)))
           (t (error "Not a Prolog term: ~S" left))))))
 
 (defun %emit-term-comparison (predicate left right environment emit)
@@ -173,6 +272,18 @@
   (declare (cl:ignore rulebase depth))
   (unless (%term-identical-p (%term-resolve left environment)
                              (%term-resolve right environment))
+    (funcall emit environment)))
+
+(define-builtin (|=@=| left right) (rulebase environment depth emit)
+  (declare (cl:ignore rulebase depth))
+  (when (%term-variant-p (%term-resolve left environment)
+                         (%term-resolve right environment))
+    (funcall emit environment)))
+
+(define-builtin (|\\=@=| left right) (rulebase environment depth emit)
+  (declare (cl:ignore rulebase depth))
+  (unless (%term-variant-p (%term-resolve left environment)
+                           (%term-resolve right environment))
     (funcall emit environment)))
 
 (define-builtin (@< left right) (rulebase environment depth emit)
@@ -237,6 +348,14 @@
   (declare (cl:ignore rulebase depth))
   (%unify-emit variables
                (%collect-variables (%term-resolve term environment))
+               environment emit))
+
+(define-builtin (term_variables term variables tail)
+    (rulebase environment depth emit)
+  (declare (cl:ignore rulebase depth))
+  (%unify-emit variables
+               (append (%collect-variables (%term-resolve term environment))
+                       tail)
                environment emit))
 
 (define-builtin (compound term) (rulebase environment depth emit)

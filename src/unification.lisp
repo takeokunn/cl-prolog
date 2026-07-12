@@ -107,6 +107,7 @@ Returns (VALUES EXTENDED-ENV T) on success and (VALUES NIL NIL) on failure."
 (defun %collect-variables (term)
   "Return the logic variables of TERM in first-appearance order."
   (let ((seen (make-hash-table :test #'eq))
+        (seen-conses (make-hash-table :test #'eq))
         (variables '()))
     (labels ((walk (node)
                (cond
@@ -117,21 +118,31 @@ Returns (VALUES EXTENDED-ENV T) on success and (VALUES NIL NIL) on failure."
                     (setf (gethash node seen) t)
                     (push node variables)))
                  ((consp node)
-                  (walk (car node))
-                  (walk (cdr node))))))
+                  (unless (gethash node seen-conses)
+                    (setf (gethash node seen-conses) t)
+                    (walk (car node))
+                    (walk (cdr node)))))))
       (walk term))
     (nreverse variables)))
 
 (defun %freshen-term (term table)
   "Copy TERM, replacing each logic variable via TABLE with a fresh one."
-  (cond
-    ((logic-var-p term)
-     (or (gethash term table)
-         (setf (gethash term table) (fresh-logic-variable "?FRESH"))))
-    ((consp term)
-     (cons (%freshen-term (car term) table)
-           (%freshen-term (cdr term) table)))
-    (t term)))
+  (let ((copies (make-hash-table :test #'eq)))
+    (labels ((freshen (node)
+               (cond
+                 ((logic-var-p node)
+                  (or (gethash node table)
+                      (setf (gethash node table)
+                            (fresh-logic-variable "?FRESH"))))
+                 ((consp node)
+                  (or (gethash node copies)
+                      (let ((copy (cons nil nil)))
+                        (setf (gethash node copies) copy
+                              (car copy) (freshen (car node))
+                              (cdr copy) (freshen (cdr node)))
+                        copy)))
+                 (t node))))
+      (freshen term))))
 
 (defun %term-has-variables-p (term)
   "True when TERM contains at least one logic variable."

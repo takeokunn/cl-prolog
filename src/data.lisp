@@ -56,6 +56,7 @@
 (defun %canonicalize-variant (term)
   "Rename TERM's variables by first occurrence, preserving sharing."
   (let ((variables (make-hash-table :test #'eq))
+        (copies (make-hash-table :test #'eq))
         (next-index 0))
     (labels ((canonicalize (node)
                (cond
@@ -65,8 +66,12 @@
                             (list +variant-variable-marker+
                                   (prog1 next-index (incf next-index))))))
                  ((consp node)
-                  (cons (canonicalize (car node))
-                        (canonicalize (cdr node))))
+                  (or (gethash node copies)
+                      (let ((copy (cons nil nil)))
+                        (setf (gethash node copies) copy
+                              (car copy) (canonicalize (car node))
+                              (cdr copy) (canonicalize (cdr node)))
+                        copy)))
                  (t node))))
       (canonicalize term))))
 
