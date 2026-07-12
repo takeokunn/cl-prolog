@@ -52,6 +52,7 @@
     (error "MAP-PROLOG-SOLUTIONS: :LIMIT must be NIL or a positive integer, got ~S."
            limit))
   (%with-logic-variable-order
+    (%collect-variables query)
     (let ((remaining limit)
           (cut-tag (%make-cut-tag)))
       (block search

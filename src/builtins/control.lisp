@@ -102,7 +102,8 @@
       (%raise-domain-error
        "NOT_LESS_THAN_ZERO" resolved-limit environment operation
        "call_with_depth_limit/3 requires a non-negative depth limit"))
-    (let ((token (list '%call-depth-limit)))
+    (let ((token (list '%call-depth-limit))
+          (continuation-condition nil))
       (let ((*call-depth-limit-token* token)
             (*call-depth-limit-remaining* resolved-limit)
             (*call-depth-limit-used* 0)
@@ -111,8 +112,14 @@
             (%prove-bindings/k
              resolved-goal rulebase environment depth
              (lambda (extended)
-               (%unify-emit result *call-depth-limit-used* extended emit)))
+               (handler-case
+                   (%unify-emit result *call-depth-limit-used* extended emit)
+                 (%call-depth-limit-exceeded (condition)
+                   (setf continuation-condition condition)
+                   (error condition)))))
           (%call-depth-limit-exceeded (condition)
+            (when (eq condition continuation-condition)
+              (error condition))
             (if (eq token (%call-depth-limit-exceeded-token condition))
                 (%unify-emit result (%iso-atom "DEPTH_LIMIT_EXCEEDED")
                              environment emit)

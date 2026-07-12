@@ -333,11 +333,12 @@
 (deftest call-with-depth-limit-is-cut-opaque-and-uncatchable-by-goal ()
   (let ((rb (prolog
               ((looping) (looping)))))
-    (assert-query rb
-                  (or (call_with_depth_limit (and ! fail) 0 ?depth)
-                      (= ?side fallback))
-                  => (((?depth . depth_limit_exceeded) (?side . ?side))
-                      ((?depth . ?depth) (?side . fallback))))
+    (is-equal
+     '(((?depth . cl-prolog::depth_limit_exceeded) (?side . ?side))
+       ((?depth . ?depth) (?side . fallback)))
+     (query-prolog
+      rb '(or (call_with_depth_limit (and ! fail) 0 ?depth)
+              (= ?side fallback))))
     (let* ((solutions
              (query-prolog
               rb

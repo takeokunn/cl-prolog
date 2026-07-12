@@ -176,6 +176,11 @@
                             current ground)))))))
 
 (defun %fd-propagate (store environment)
+  (dolist (entry (fd-store-domains store))
+    (let ((resolved (logic-substitute (car entry) environment)))
+      (when (and (integerp resolved)
+                 (not (member resolved (cdr entry))))
+        (return-from %fd-propagate (values store nil)))))
   (loop with current = store
         repeat (1+ (length (fd-store-constraints store)))
         do (let ((before (fd-store-domains current)))

@@ -93,7 +93,7 @@
   ((and (setup_call_cleanup (assertz (cleanup-marker))
                             true
                             (retractall (cleanup-marker)))
-        (not (current_predicate (/ cleanup-marker 0)))) => (nil))
+        (not (cleanup-marker))) => (nil))
   ((and (call_cleanup true (assertz (cleanup-marker)))
         (cleanup-marker))        => (nil))
   ((setup_call_cleanup true true fail) => (nil))
@@ -344,7 +344,7 @@
       (is-equal '(first second) (solution-binding '?bag solution))
       (is (eq (second key) (third key))))
     (assert-query rulebase
-                  '(bagof ?value (ordered-key ?key ?value) ?bag)
+                  (bagof ?value (ordered-key ?key ?value) ?bag)
                   =>
                   (((?value . ?value) (?key . a) (?bag first))
                    ((?value . ?value) (?key . z) (?bag last))))
@@ -406,11 +406,17 @@
                   :fails)
     (assert-query rulebase (predicate_property (missing ?value) ?property)
                   :fails)
-    (assert-query rulebase (predicate_property (color ?fruit ?shade) ?property)
-                  => (((?property . dynamic))
-                      ((?property . user))
-                      ((?property . defined))
-                      ((?property number_of_clauses 3))))
+    (is-equal
+     '(((?fruit . ?fruit) (?shade . ?shade)
+        (?property . cl-prolog::dynamic))
+       ((?fruit . ?fruit) (?shade . ?shade)
+        (?property . cl-prolog::user))
+       ((?fruit . ?fruit) (?shade . ?shade)
+        (?property . cl-prolog::defined))
+       ((?fruit . ?fruit) (?shade . ?shade)
+        (?property cl-prolog::number_of_clauses 3)))
+     (query-prolog
+      rulebase '(predicate_property (color ?fruit ?shade) ?property)))
     (assert-query rulebase (retractall (color apple ?shade)) :succeeds)
     (assert-query rulebase (color apple ?shade) :fails)
     (assert-query rulebase (retractall (color apple ?shade)) :succeeds)
