@@ -19,8 +19,6 @@
   (declare (cl:ignore rulebase environment depth emit))
   (error "test-only Common Lisp programmer error"))
 
-(defvar *observed-table-session* nil)
-
 (cl-prolog::define-builtin (test-nested-table-session)
     (rulebase environment depth emit)
   (let ((outer cl-prolog::*current-table-session*))
@@ -31,14 +29,6 @@
              (and outer
                   (eq outer cl-prolog::*current-table-session*)))
        (funcall emit bindings)))))
-
-(defun capture-prolog-condition (thunk)
-  (handler-case
-      (progn
-        (funcall thunk)
-        (error "Expected a PROLOG-EXCEPTION"))
-    (prolog-exception (condition)
-      condition)))
 
 (deftest-queries cut-prunes-clause-alternatives
     ((prolog
