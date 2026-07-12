@@ -27,8 +27,6 @@ jobs:
         include:
           - os: ubuntu-latest
             system: x86_64-linux
-          - os: macos-14
-            system: aarch64-darwin
     steps:
       - uses: actions/checkout@v4
 
