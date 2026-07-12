@@ -114,8 +114,9 @@
                            (read-prolog-term "alpha:assertz(stored(alpha)).")))
     (is (prolog-succeeds-p rulebase
                            (read-prolog-term "alpha:stored(alpha).")))
-    (is (not (prolog-succeeds-p rulebase
-                                (read-prolog-term "stored(alpha)."))))
+    (signals-error
+      (prolog-succeeds-p rulebase
+                         (read-prolog-term "stored(alpha).")))
     (is (not (prolog-succeeds-p rulebase
                                 (read-prolog-term "alpha:not(value(alpha))."))))
     (is (prolog-succeeds-p rulebase
