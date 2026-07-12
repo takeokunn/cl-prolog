@@ -7,6 +7,36 @@ section at the top of the file.
 
 ## Unreleased
 
+## 0.5.0 - 2026-07-13
+
+### Added
+
+- predicate indexing for faster clause selection, with behavior preserved for
+  variables, cyclic terms, dynamic predicates, and module-qualified calls
+- explicit tabling, depth-limited calls, cyclic-term predicates, finite-domain
+  helpers, and additional control and collection predicates
+- broader ISO conformance coverage for arithmetic, meta-calls, modules,
+  streams, term reading, exceptions, and relational list operations
+
+### Changed
+
+- CI and supported Nix flake systems now target Linux only; GitHub Actions runs
+  the complete checks on Ubuntu
+- module, query, depth-limit, constraint, dynamic-predicate, and stream state
+  handling now preserve their execution context consistently
+- documentation now covers the expanded runtime surface, Linux-only CI, and
+  current release verification workflow
+
+### Fixed
+
+- unification, substitution, and query projection terminate safely for cyclic
+  terms
+- qualified and meta-callable goals now validate bindings, visibility, arity,
+  and error terms consistently
+- `length/2`, finite-domain equality, Prolog number recognition,
+  `read_term/3` singleton reporting, and end-of-stream transitions now follow
+  their intended relational or ISO semantics
+
 ## 0.4.1 - 2026-07-12
 
 ### Changed

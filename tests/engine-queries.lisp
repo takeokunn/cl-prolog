@@ -836,7 +836,7 @@
         (query-prolog (make-rulebase) (list 'is '?result expression))
         (error "Expected an arithmetic type error for ~S" expression))
     (prolog-type-error (condition)
-      (second (cl-prolog::prolog-error-term condition)))))
+      (second (prolog-exception-term condition)))))
 
 (deftest-table arithmetic-functions-validate-indicators-before-arguments ()
   (:equal

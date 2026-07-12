@@ -80,11 +80,11 @@
      rulebase
      (cl-prolog::read_term
       ?term ((cl-prolog::singletons ?singletons)))
-     => (((?term . (cl-prolog::tuple cl-prolog::?x cl-prolog::?y
-                                    cl-prolog::?x cl-prolog::?anon
-                                    cl-prolog::?z))
-          (?singletons . ((cl-prolog::= cl-prolog::|Y| cl-prolog::?y)
-                          (cl-prolog::= cl-prolog::|Z| cl-prolog::?z))))))))
+     => ((?term . (cl-prolog::tuple cl-prolog::?x cl-prolog::?y
+                                   cl-prolog::?x cl-prolog::?anon
+                                   cl-prolog::?z))
+         (?singletons . ((cl-prolog::= cl-prolog::|Y| cl-prolog::?y)
+                         (cl-prolog::= cl-prolog::|Z| cl-prolog::?z)))))))
 
 (deftest io-read-term-validates-syntax-error-policy ()
   (with-io-rulebase (rulebase input output) "broken( ."
