@@ -43,7 +43,11 @@
   `(define-builtin (,name left right) (rulebase environment depth emit)
      (%fd-post ',name (list left right) environment emit)))
 
-(defmacro %define-fd-domain-relation (name context) `(define-builtin (,name variables domain-spec) (rulebase environment depth emit) (%fd-constrain-domain variables domain-spec environment emit (%iso-atom ,context))))
+(defmacro %define-fd-domain-relation (name context)
+  `(define-builtin (,name variables domain-spec)
+     (rulebase environment depth emit)
+     (%fd-constrain-domain variables domain-spec environment emit
+                            (%iso-atom ,context))))
 
 (%define-fd-domain-relation in "IN")
 
