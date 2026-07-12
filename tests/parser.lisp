@@ -120,3 +120,5 @@
   (let ((rulebase (make-rulebase)))
     (signals-error (consult-prolog "kept. ?- kept." rulebase))
     (is-equal '() (rulebase-visible-clauses rulebase))))
+
+(deftest prolog-clause-reader-rejects-query-forms () (signals-error (read-prolog-clause "?- true.")))

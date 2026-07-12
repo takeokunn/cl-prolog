@@ -182,7 +182,7 @@
                   my ($expression_covered, $expression_total) = (0, 0);
                   my ($branch_covered, $branch_total) = (0, 0);
                   while (<>) {
-                    if (m{<tr class=.?(?:odd|even).+?</a></td><td>(\d+)</td><td>(\d+)</td><td>.*?</td><td>(\d+)</td><td>(\d+)</td>}) {
+                    while (m{<tr class=.?(?:odd|even).+?</a></td><td>(\d+)</td><td>(\d+)</td><td>.*?</td><td>(\d+)</td><td>(\d+)</td>}g) {
                       $expression_covered += $1;
                       $expression_total += $2;
                       $branch_covered += $3;
@@ -207,10 +207,10 @@
                     $expression_covered, $expression_total, $expression_percent;
                   printf "Branch coverage: %d/%d (%.2f%%)\n",
                     $branch_covered, $branch_total, $branch_percent;
-                  die "expression coverage regressed below 1115/1196\n"
-                    if $expression_covered * 1196 < 1115 * $expression_total;
-                  die "branch coverage regressed below 161/182\n"
-                    if $branch_covered * 182 < 161 * $branch_total;
+                  die "expression coverage regressed below 13001/13977\n"
+                    if $expression_covered * 13977 < 13001 * $expression_total;
+                  die "branch coverage regressed below 1568/1806\n"
+                    if $branch_covered * 1806 < 1568 * $branch_total;
                 ' "$COVERAGE_OUTPUT/cover-index.html"
               '';
 

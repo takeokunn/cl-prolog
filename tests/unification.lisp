@@ -49,3 +49,5 @@
           (cdr query-cycle) query-cycle)
     (is (not (cl-prolog::%term-has-variables-p ground-cycle)))
     (is-equal '(?x) (cl-prolog::%collect-query-variables query-cycle))))
+
+(deftest unification-accepts-distinct-equal-atomic-values () (let ((left (copy-seq "value")) (right (copy-seq "value"))) (is (not (eq left right))) (is (nth-value 1 (unify left right)))))
