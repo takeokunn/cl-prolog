@@ -25,18 +25,19 @@
                        rulebase environment depth)
     (funcall emit environment)))
 
-(defun %extend-callable-goal (closure arguments environment)
+(defun %extend-callable-goal (closure arguments environment
+                              &optional (operation (%iso-atom "CALL")))
   "Append ARGUMENTS to CLOSURE, returning an engine-level goal form."
   (cond
     ((logic-var-p closure)
-     (%raise-instantiation-error environment (%iso-atom "CALL")
+     (%raise-instantiation-error environment operation
                                  "CALL/N requires an instantiated callable term"))
     ((symbolp closure)
      (cons closure arguments))
     ((and (consp closure) (symbolp (first closure)))
      (append closure arguments))
     (t
-     (%raise-type-error "CALLABLE" closure environment (%iso-atom "CALL")
+     (%raise-type-error "CALLABLE" closure environment operation
                         "CALL/N requires a callable atom or compound term"))))
 
 (define-builtin (call closure &rest arguments) (rulebase environment depth emit)
@@ -82,6 +83,40 @@
                (when (= count resolved-n)
                  (funcall emit extended)
                  (return-from requested-proof nil)))))))))
+
+(define-builtin (call_with_depth_limit goal limit result)
+    (rulebase environment depth emit)
+  (let* ((operation (%iso-atom "CALL_WITH_DEPTH_LIMIT"))
+         (resolved-goal
+           (%extend-callable-goal (logic-substitute goal environment)
+                                  '() environment operation))
+         (resolved-limit (logic-substitute limit environment)))
+    (when (logic-var-p resolved-limit)
+      (%raise-instantiation-error
+       environment operation
+       "call_with_depth_limit/3 requires an instantiated depth limit"))
+    (unless (integerp resolved-limit)
+      (%raise-type-error "INTEGER" resolved-limit environment operation
+                         "call_with_depth_limit/3 requires an integer depth limit"))
+    (when (minusp resolved-limit)
+      (%raise-domain-error
+       "NOT_LESS_THAN_ZERO" resolved-limit environment operation
+       "call_with_depth_limit/3 requires a non-negative depth limit"))
+    (let ((token (list '%call-depth-limit)))
+      (let ((*call-depth-limit-token* token)
+            (*call-depth-limit-remaining* resolved-limit)
+            (*call-depth-limit-used* 0)
+            (*depth-limited-search-p* t))
+        (handler-case
+            (%prove-bindings/k
+             resolved-goal rulebase environment depth
+             (lambda (extended)
+               (%unify-emit result *call-depth-limit-used* extended emit)))
+          (%call-depth-limit-exceeded (condition)
+            (if (eq token (%call-depth-limit-exceeded-token condition))
+                (%unify-emit result (%iso-atom "DEPTH_LIMIT_EXCEEDED")
+                             environment emit)
+                (error condition))))))))
 
 (defun %first-proof-environment (goal rulebase environment depth)
   "Return the first proof environment for GOAL and whether one exists."

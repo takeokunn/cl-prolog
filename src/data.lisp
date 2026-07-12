@@ -22,7 +22,8 @@
   "Artifacts owned by one canonical source file."
   (state :loading :type (member :loading :loaded))
   (operators '() :type list)
-  (predicate-properties '() :type list))
+  (predicate-properties '() :type list)
+  (table-declarations '() :type list))
 
 (defstruct (%table-entry (:copier nil)
                          (:constructor %make-table-entry ()))
@@ -102,7 +103,10 @@
                              (copy-tree (%source-record-operators record))
                              (%source-record-predicate-properties clone)
                              (copy-tree
-                              (%source-record-predicate-properties record)))
+                              (%source-record-predicate-properties record))
+                             (%source-record-table-declarations clone)
+                             (copy-tree
+                              (%source-record-table-declarations record)))
                        clone)))
              registry)
     copy))
@@ -111,7 +115,7 @@
                      (:constructor %make-rulebase
                          (entries predicate-index revision operator-table
                           predicate-properties io-context module-registry source-registry
-                          prolog-flag-values char-conversions)))
+                          prolog-flag-values char-conversions table-declarations)))
   "An ordered logical-update database of clauses."
   (entries '() :type list)
   (predicate-index (make-hash-table :test #'equal) :type hash-table)
@@ -122,7 +126,8 @@
   (module-registry (make-module-registry) :type module-registry)
   (source-registry (%make-source-registry) :type hash-table)
   (prolog-flag-values (make-hash-table :test #'equal) :type hash-table)
-  (char-conversions (make-hash-table :test #'eql) :type hash-table))
+  (char-conversions (make-hash-table :test #'eql) :type hash-table)
+  (table-declarations (make-hash-table :test #'equal) :type hash-table))
 
 (defun %stored-clause-predicate-key (entry)
   "Return ENTRY's (module predicate arity) key, or NIL for a malformed head."
@@ -175,7 +180,8 @@
      (make-module-registry)
      (%make-source-registry)
      (make-hash-table :test #'equal)
-     (make-hash-table :test #'eql))))
+     (make-hash-table :test #'eql)
+     (make-hash-table :test #'equal))))
 
 (defun %copy-rulebase (rulebase)
   "Return a detached mutable copy suitable for transactional updates."
@@ -209,6 +215,11 @@
      (let ((copy (make-hash-table :test #'eql)))
        (maphash (lambda (from to) (setf (gethash from copy) to))
                 (rulebase-char-conversions rulebase))
+       copy)
+     (let ((copy (make-hash-table :test #'equal)))
+       (maphash (lambda (key owners)
+                  (setf (gethash key copy) (copy-list owners)))
+                (rulebase-table-declarations rulebase))
        copy))))
 
 (defun %replace-rulebase! (target source)
@@ -227,8 +238,40 @@
         (rulebase-prolog-flag-values target)
         (rulebase-prolog-flag-values source)
         (rulebase-char-conversions target)
-        (rulebase-char-conversions source))
+        (rulebase-char-conversions source)
+        (rulebase-table-declarations target)
+        (rulebase-table-declarations source))
   target)
+
+(defun %rulebase-tabled-p (rulebase predicate arity
+                           &optional (module +default-prolog-module+))
+  (not (null (gethash (list module predicate arity)
+                      (rulebase-table-declarations rulebase)))))
+
+(defun %add-rulebase-table-declaration! (rulebase predicate arity owner
+                                          &optional (module +default-prolog-module+))
+  "Add OWNER's table declaration, advancing the revision on first ownership."
+  (let* ((key (list module predicate arity))
+         (owners (gethash key (rulebase-table-declarations rulebase))))
+    (unless (member owner owners :test #'equal)
+      (unless owners
+        (%next-rulebase-revision! rulebase))
+      (push owner (gethash key (rulebase-table-declarations rulebase))))
+    rulebase))
+
+(defun %remove-rulebase-table-declaration! (rulebase predicate arity owner
+                                             &optional (module +default-prolog-module+))
+  "Remove OWNER's declaration, advancing the revision when no owner remains."
+  (let* ((key (list module predicate arity))
+         (owners (gethash key (rulebase-table-declarations rulebase)))
+         (remaining (remove owner owners :test #'equal)))
+    (unless (= (length owners) (length remaining))
+      (if remaining
+          (setf (gethash key (rulebase-table-declarations rulebase)) remaining)
+          (progn
+            (remhash key (rulebase-table-declarations rulebase))
+            (%next-rulebase-revision! rulebase))))
+    rulebase))
 
 (defun %rulebase-predicate-property (rulebase predicate arity
                                      &optional (module +default-prolog-module+))

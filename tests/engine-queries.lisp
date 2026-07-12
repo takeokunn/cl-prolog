@@ -132,6 +132,20 @@
       (signals-condition prolog-domain-error
         (query-prolog rulebase goal)))))
 
+(deftest call-with-depth-limit-validates-arguments ()
+  (let ((rulebase (make-rulebase)))
+    (signals-condition prolog-instantiation-error
+      (query-prolog rulebase '(call_with_depth_limit true ?limit ?result)))
+    (signals-condition prolog-instantiation-error
+      (query-prolog rulebase '(call_with_depth_limit ?goal 0 ?result)))
+    (dolist (goal '((call_with_depth_limit true atom ?result)
+                    (call_with_depth_limit true 1.5 ?result)
+                    (call_with_depth_limit 42 0 ?result)))
+      (signals-condition prolog-type-error
+        (query-prolog rulebase goal)))
+    (signals-condition prolog-domain-error
+      (query-prolog rulebase '(call_with_depth_limit true -1 ?result)))))
+
 (deftest call-nth-ground-index-stops-inner-search ()
   (let ((rulebase (make-rulebase)))
     (assert-query rulebase

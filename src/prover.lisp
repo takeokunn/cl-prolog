@@ -11,6 +11,13 @@
 (defvar *current-prolog-module* +default-prolog-module+)
 (defvar *current-table-session* nil
   "Table session inherited by proof searches nested through builtins.")
+(defvar *call-depth-limit-token* nil)
+(defvar *call-depth-limit-remaining* nil)
+(defvar *call-depth-limit-used* 0)
+(defvar *depth-limited-search-p* nil)
+
+(define-condition %call-depth-limit-exceeded (error)
+  ((token :initarg :token :reader %call-depth-limit-exceeded-token)))
 (defvar *caller-cut-tag* nil
   "Cut barrier of the goal invocation currently dispatching a builtin solver.
 
@@ -203,8 +210,8 @@ into the caller's remaining goals."
                                          (%state-with-cut-tag next-state cut-tag)
                                          succeed))))))
 
-(defun %prove-goal/k (goal state succeed)
-  "Prove GOAL from STATE, dispatching each result to SUCCEED."
+(defun %prove-goal-dispatch/k (goal state succeed)
+  "Prove GOAL from STATE after any active depth-limit accounting."
   (let* ((*current-table-session* (proof-state-table-session state))
          (qualified-p (%qualified-goal-p goal))
          (explicit-module (and qualified-p (second goal)))
@@ -247,6 +254,20 @@ into the caller's remaining goals."
                    "PROCEDURE" (%goal-predicate-indicator normalized-goal)
                    (proof-state-bindings state) (%iso-atom "CALL")
                    "the invoked predicate is not defined"))))))))))
+
+(defun %prove-goal/k (goal state succeed)
+  "Prove GOAL, counting every dispatched call for local depth limits."
+  (if (null *call-depth-limit-token*)
+      (%prove-goal-dispatch/k goal state succeed)
+      (progn
+        (when (zerop *call-depth-limit-remaining*)
+          (error '%call-depth-limit-exceeded
+                 :token *call-depth-limit-token*))
+        (let ((*call-depth-limit-remaining*
+                (1- *call-depth-limit-remaining*))
+              (*call-depth-limit-used*
+                (1+ *call-depth-limit-used*)))
+          (%prove-goal-dispatch/k goal state succeed)))))
 
 (defun %prove-with-cut-tag/k (query rulebase bindings remaining-depth cut-tag
                               succeed &optional (module *current-prolog-module*))
@@ -347,12 +368,17 @@ body throws here, abandoning the remaining clause alternatives."
                     (not (null (reaches-target-p target))))))))))
 
 (defun %prove-clauses/k (goal state succeed)
-  "Prove GOAL, tabling only predicates that require a left-recursion fixed point."
-  (if (not (%left-recursive-p goal state))
+  "Prove GOAL, tabling declared predicates and detected left recursion."
+  (if (or *depth-limited-search-p*
+          (not (or (%rulebase-tabled-p
+                    (proof-state-rulebase state) (first goal)
+                    (length (rest goal)) (proof-state-module state))
+                   (%left-recursive-p goal state))))
       (%prove-raw-clauses/k goal state succeed)
       (let* ((session (proof-state-table-session state))
          (resolved-goal (logic-substitute goal (proof-state-bindings state)))
-         (key (list (proof-state-module state)
+         (key (list (rulebase-revision (proof-state-rulebase state))
+                    (proof-state-module state)
                     (%canonicalize-variant resolved-goal)))
          (entries (%table-session-entries session))
          (entry (gethash key entries)))

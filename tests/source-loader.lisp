@@ -501,6 +501,45 @@
                                   "current_prolog_flag(double_quotes, codes)")))
   (signals-error (consult-prolog ":- discontiguous.")))
 
+(deftest source-loader-supports-table-directives-without-changing-update-property ()
+  (let ((rulebase
+          (consult-prolog
+           ":- table(reachable/1). :- dynamic(reachable/1). reachable(origin).")))
+    (is (cl-prolog::%rulebase-tabled-p
+         rulebase 'cl-prolog::reachable 1))
+    (is (eq :dynamic
+            (cl-prolog::%rulebase-predicate-property
+             rulebase 'cl-prolog::reachable 1)))
+    (is (%source-query-succeeds-p rulebase "reachable(origin)")))
+  (signals-error (consult-prolog ":- table(reachable).")))
+
+(deftest source-loader-table-declarations-are-source-owned ()
+  (with-temporary-prolog-files
+      ((first ":- table(shared_table/1). shared_table(first).")
+       (second ":- table(shared_table/1). shared_table(second)."))
+    (let ((rulebase (consult-prolog (list first second))))
+      (is (cl-prolog::%rulebase-tabled-p
+           rulebase 'cl-prolog::shared_table 1))
+      (with-open-file (output first :direction :output :if-exists :supersede)
+        (write-string "replacement(first)." output))
+      (consult-prolog first rulebase)
+      (is (cl-prolog::%rulebase-tabled-p
+           rulebase 'cl-prolog::shared_table 1))
+      (with-open-file (output second :direction :output :if-exists :supersede)
+        (write-string "replacement(second)." output))
+      (consult-prolog second rulebase)
+      (is (not (cl-prolog::%rulebase-tabled-p
+                rulebase 'cl-prolog::shared_table 1))))))
+
+(deftest source-loader-rolls-back-table-declarations ()
+  (let ((rulebase (make-rulebase)))
+    (signals-error
+     (consult-prolog
+      ":- table(transient_table/1). :- initialization(fail)."
+      rulebase))
+    (is (not (cl-prolog::%rulebase-tabled-p
+              rulebase 'cl-prolog::transient_table 1)))))
+
 (deftest source-loader-char-conversion-directive-affects-later-terms ()
   (let ((rulebase
           (consult-prolog

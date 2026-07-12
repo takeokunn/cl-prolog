@@ -142,6 +142,12 @@
           (%source-record-predicate-properties
            *current-prolog-source-record*))))
 
+(defun %record-source-table-declaration! (module predicate arity owner)
+  (when *current-prolog-source-record*
+    (push (list module predicate arity owner)
+          (%source-record-table-declarations
+           *current-prolog-source-record*))))
+
 (defun %apply-source-directive! (goal rulebase initializations module)
   (unless (consp goal)
     (error "Unknown Prolog directive ~S." goal))
@@ -169,8 +175,18 @@
      (multiple-value-bind (predicate arity)
          (%predicate-indicator-values (second goal) 'dynamic)
        (%set-rulebase-predicate-property! rulebase predicate arity :dynamic module)
-       (%record-source-predicate-property!
-        module predicate arity :dynamic)))
+        (%record-source-predicate-property!
+         module predicate arity :dynamic)))
+    (table
+     (unless (= (length goal) 2)
+       (error "TABLE directive requires one predicate indicator."))
+     (multiple-value-bind (predicate arity)
+         (%predicate-indicator-values (second goal) 'table)
+       (let ((owner (or *current-prolog-source* :anonymous-source)))
+         (%add-rulebase-table-declaration!
+          rulebase predicate arity owner module)
+         (%record-source-table-declaration!
+          module predicate arity owner))))
     (use_module
      (unless (member (length goal) '(2 3))
        (error "USE_MODULE directive requires a module and optional imports."))
@@ -329,10 +345,17 @@
         (%remove-rulebase-predicate-property!
          rulebase predicate arity module)))))
 
+(defun %remove-source-table-declarations! (rulebase record)
+  (dolist (effect (%source-record-table-declarations record))
+    (destructuring-bind (module predicate arity owner) effect
+      (%remove-rulebase-table-declaration!
+       rulebase predicate arity owner module))))
+
 (defun %remove-source-artifacts! (rulebase canonical record)
   (%remove-source-clauses! rulebase canonical)
   (%remove-source-operators! rulebase record)
-  (%remove-source-predicate-properties! rulebase record))
+  (%remove-source-predicate-properties! rulebase record)
+  (%remove-source-table-declarations! rulebase record))
 
 (defun %load-prolog-source-transaction (stream rulebase initializations)
   (let ((module +default-prolog-module+)
