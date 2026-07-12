@@ -84,9 +84,14 @@ value and calls the function; it never evaluates user expressions.
 - `(length ?list ?n)` — measure, or generate a fresh-variable list of length
   `?n`
 
-Malformed goals — wrong arity, non-function `:when` guard, a goal that is
-not a symbol or symbol-headed list — signal `invalid-goal-error`
-(`invalid-goal-error-goal` returns the offending goal).
+Structurally unusable goals — a non-function `:when` guard, or a goal that
+is not a symbol or symbol-headed list — signal `invalid-goal-error`
+(`invalid-goal-error-goal` returns the offending goal).  Calling a known
+name at an unsupported arity denotes a different, undefined procedure and
+signals the ISO `existence_error` instead.  `halt/0` and `halt/1` raise the
+`prolog-halt` condition (readers: `prolog-halt-code`); it is deliberately
+not a `prolog-exception`, so `catch/3` never intercepts it and the
+embedding application decides how to exit.
 
 ### Extending the builtin set
 
@@ -98,8 +103,9 @@ not a symbol or symbol-headed list — signal `invalid-goal-error`
         (when ok (funcall emit extended))))))
 ```
 
-- the head lambda list supports required parameters and `&rest`; arity is
-  enforced before the body runs
+- the head lambda list supports required parameters and `&rest`; solver
+  dispatch is keyed on the predicate indicator, so the body only ever sees
+  goals of a matching arity
 - the head name may be a list of symbols sharing one solver
 - EMIT must be called once per solution with the extended environment;
   builtins must not collect result lists
@@ -136,6 +142,8 @@ rules terminate.
 
 - `invalid-goal-error` (`error`) — structurally unusable goal;
   readers: `invalid-goal-error-goal`
+- `prolog-halt` (`serious-condition`) — raised by `halt/0,1`; readers:
+  `prolog-halt-code`
 - errors signalled by `:when` guard functions propagate to the caller
 
 ## Script Entry Points

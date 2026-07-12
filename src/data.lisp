@@ -108,7 +108,7 @@
                      (:constructor %make-rulebase
                          (entries revision operator-table predicate-properties
                           io-context module-registry source-registry
-                          prolog-flag-values)))
+                          prolog-flag-values char-conversions)))
   "An ordered logical-update database of clauses."
   (entries '() :type list)
   (revision 0 :type (integer 0 *))
@@ -117,7 +117,8 @@
   (io-context (make-prolog-io-context) :type prolog-io-context)
   (module-registry (make-module-registry) :type module-registry)
   (source-registry (%make-source-registry) :type hash-table)
-  (prolog-flag-values (make-hash-table :test #'equal) :type hash-table))
+  (prolog-flag-values (make-hash-table :test #'equal) :type hash-table)
+  (char-conversions (make-hash-table :test #'eql) :type hash-table))
 
 (defun %rulebase-source-state (rulebase canonical-pathname)
   "Return CANONICAL-PATHNAME's load state and whether it is registered."
@@ -149,7 +150,8 @@
    io-context
    (make-module-registry)
    (%make-source-registry)
-   (make-hash-table :test #'equal)))
+   (make-hash-table :test #'equal)
+   (make-hash-table :test #'eql)))
 
 (defun %copy-rulebase (rulebase)
   "Return a detached mutable copy suitable for transactional updates."
@@ -176,6 +178,10 @@
    (let ((copy (make-hash-table :test #'equal)))
      (maphash (lambda (name value) (setf (gethash name copy) value))
               (rulebase-prolog-flag-values rulebase))
+     copy)
+   (let ((copy (make-hash-table :test #'eql)))
+     (maphash (lambda (from to) (setf (gethash from copy) to))
+              (rulebase-char-conversions rulebase))
      copy)))
 
 (defun %replace-rulebase! (target source)
@@ -191,7 +197,9 @@
         (rulebase-source-registry target)
         (rulebase-source-registry source)
         (rulebase-prolog-flag-values target)
-        (rulebase-prolog-flag-values source))
+        (rulebase-prolog-flag-values source)
+        (rulebase-char-conversions target)
+        (rulebase-char-conversions source))
   target)
 
 (defun %rulebase-predicate-property (rulebase predicate arity

@@ -158,8 +158,7 @@
             (close stream :abort t)
             (error condition)))))))
 
-(define-builtin (open source mode stream options) (rulebase environment depth emit)
-  (declare (ignore depth))
+(defun %io-open-goal (rulebase source mode stream options environment emit)
   (let* ((operation (%io-operation "OPEN"))
          (mode-value (%io-resolve-term mode environment operation))
          (parsed-options (%io-options options environment operation '("alias" "type")))
@@ -170,6 +169,14 @@
       (if ok
           (funcall emit extended)
           (%close-prolog-stream! (%io-context rulebase) entry environment operation)))))
+
+(define-builtin (open source mode stream) (rulebase environment depth emit)
+  (declare (ignore depth))
+  (%io-open-goal rulebase source mode stream '() environment emit))
+
+(define-builtin (open source mode stream options) (rulebase environment depth emit)
+  (declare (ignore depth))
+  (%io-open-goal rulebase source mode stream options environment emit))
 
 (defun %io-close-goal (rulebase stream options environment emit)
   (let* ((operation (%io-operation "CLOSE"))
@@ -360,9 +367,9 @@
 
 (defun %io-read-term-goal (rulebase entry term options environment emit
                            &optional (operation (%io-operation "READ_TERM")))
-  (let* (
-         (parsed (%io-read-options options environment operation))
-         (mode (%io-syntax-errors-mode parsed environment operation)))
+  (let* ((parsed (%io-read-options options environment operation))
+         (mode (%io-syntax-errors-mode parsed environment operation))
+         (*active-char-conversions* (%rulebase-active-char-conversions rulebase)))
     (multiple-value-bind (value variables names readablep)
         (%io-read-term-values entry (rulebase-operator-table rulebase) mode
                               environment operation)
@@ -461,6 +468,28 @@
     (%io-write-facade-goal
      (%io-stream-entry rulebase stream :output environment operation)
      term t environment emit operation)))
+
+(defun %io-write-canonical-goal (entry term environment emit operation)
+  ;; ISO write_canonical/1,2: quoted, operator-free, no numbervars, so the
+  ;; output reads back as the same term under any operator table.
+  (%io-write-term-goal
+   entry term
+   (list (list (%iso-atom "quoted") (%iso-atom "true"))
+         (list (%iso-atom "ignore_ops") (%iso-atom "true")))
+   environment emit operation))
+
+(define-builtin (write_canonical term) (rulebase environment depth emit)
+  (declare (ignore depth))
+  (%io-write-canonical-goal
+   (prolog-io-context-current-output (%io-context rulebase))
+   term environment emit (%io-operation "WRITE_CANONICAL")))
+
+(define-builtin (write_canonical stream term) (rulebase environment depth emit)
+  (declare (ignore depth))
+  (let ((operation (%io-operation "WRITE_CANONICAL")))
+    (%io-write-canonical-goal
+     (%io-stream-entry rulebase stream :output environment operation)
+     term environment emit operation)))
 
 (defun %io-newline (rulebase entry)
   (terpri (prolog-stream-stream

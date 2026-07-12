@@ -20,6 +20,13 @@
 
 (defvar *parsing-dcg-body-p* nil)
 
+(defvar *active-char-conversions* nil
+  "Hash table of char_conversion/2 mappings applied while tokenizing.
+
+NIL disables conversion.  Callers with a rulebase bind this around parsing
+when the char_conversion flag is on; quoted tokens are never converted, as
+ISO requires.")
+
 (defun %read-prolog-term-source (stream)
   "Read through one top-level term terminator without consuming the next term."
   (let ((depth 0)
@@ -131,10 +138,16 @@
          (operator-lexemes (%operator-table-lexemes operator-table))
          (word-operators (car operator-lexemes))
          (symbolic-tokens (cdr operator-lexemes))
+         (conversions *active-char-conversions*)
+         (raw-mode nil)
          (tokens '()))
     (labels ((peek (&optional (offset 0))
                (let ((index (+ position offset)))
-                 (and (< index length) (char text index))))
+                 (when (< index length)
+                   (let ((character (char text index)))
+                     (if (and conversions (not raw-mode))
+                         (or (gethash character conversions) character)
+                         character)))))
              (take () (prog1 (peek) (incf position)))
              (emit (kind &optional value) (push (%token kind value) tokens))
              (skip-line ()
@@ -147,21 +160,24 @@
                         (take))
                (incf position 2))
              (scan-name ()
-               (let ((start position))
-                 (loop while (and (peek) (%identifier-character-p (peek))) do (take))
-                 (subseq text start position)))
+               (with-output-to-string (out)
+                 (loop while (and (peek) (%identifier-character-p (peek)))
+                       do (write-char (take) out))))
              (scan-quoted ()
                (take)
-               (with-output-to-string (out)
-                 (loop
-                   (unless (peek) (%parse-error "Unterminated quoted Prolog atom."))
-                   (let ((character (take)))
-                     (cond
-                       ((and (char= character #\') (peek) (char= (peek) #\'))
-                        (take) (write-char #\' out))
-                       ((char= character #\') (return))
-                       ((and (char= character #\\) (peek)) (write-char (take) out))
-                       (t (write-char character out)))))))
+               (setf raw-mode t)
+               (unwind-protect
+                    (with-output-to-string (out)
+                      (loop
+                        (unless (peek) (%parse-error "Unterminated quoted Prolog atom."))
+                        (let ((character (take)))
+                          (cond
+                            ((and (char= character #\') (peek) (char= (peek) #\'))
+                             (take) (write-char #\' out))
+                            ((char= character #\') (return))
+                            ((and (char= character #\\) (peek)) (write-char (take) out))
+                            (t (write-char character out))))))
+                 (setf raw-mode nil)))
              (scan-number ()
                (let ((start position))
                  (loop while (and (peek) (digit-char-p (peek))) do (take))
@@ -200,8 +216,9 @@
            (let ((operator
                    (find-if (lambda (candidate)
                               (and (<= (+ position (length candidate)) length)
-                                   (string= candidate text :start2 position
-                                                        :end2 (+ position (length candidate)))))
+                                   (loop for index from 0 below (length candidate)
+                                         always (eql (char candidate index)
+                                                     (peek index)))))
                             symbolic-tokens)))
              (if operator
                  (progn

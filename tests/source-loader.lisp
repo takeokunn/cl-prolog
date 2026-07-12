@@ -452,3 +452,40 @@
            error(existence_error(source_sink, ~A), _), true)"
           (%prolog-path-atom missing)
           (%prolog-path-atom missing)))
+
+(deftest source-loader-supports-iso-declaration-directives ()
+  (let ((rulebase
+          (consult-prolog
+           (format nil
+                   ":- discontiguous(scattered/1).~%~
+                    scattered(one).~%~
+                    other(fact).~%~
+                    scattered(two).~%~
+                    :- multifile(shared/0).~%~
+                    :- set_prolog_flag(double_quotes, codes)."))))
+    (is (%source-query-succeeds-p rulebase "scattered(one)"))
+    (is (%source-query-succeeds-p rulebase "scattered(two)"))
+    (is (%source-query-succeeds-p rulebase
+                                  "current_prolog_flag(double_quotes, codes)")))
+  (signals-error (consult-prolog ":- discontiguous.")))
+
+(deftest source-loader-char-conversion-directive-affects-later-terms ()
+  (let ((rulebase
+          (consult-prolog
+           (format nil
+                   ":- char_conversion('k', 'f').~%~
+                    :- set_prolog_flag(char_conversion, on).~%~
+                    kact(one).~%~
+                    'kwoted'(two)."))))
+    ;; kact reads as fact under the conversion; quoted atoms are exempt.
+    (is (%source-query-succeeds-p rulebase "fact(one)"))
+    (is (%source-query-succeeds-p rulebase "'kwoted'(two)"))))
+
+(deftest source-loader-include-splices-terms-into-the-including-unit ()
+  (with-temporary-prolog-files ((included "included(fact)."))
+    (let ((rulebase
+            (consult-prolog
+             (format nil ":- include(~A).~%outer(fact)."
+                     (%prolog-path-atom included)))))
+      (is (%source-query-succeeds-p rulebase "included(fact)"))
+      (is (%source-query-succeeds-p rulebase "outer(fact)")))))

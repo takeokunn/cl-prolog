@@ -47,6 +47,8 @@ is extensible (see DEFINE-FOREIGN-PREDICATE).")
    #:prolog-existence-error
    #:prolog-evaluation-error
    #:prolog-resource-error
+   #:prolog-halt
+   #:prolog-halt-code
    #:arithmetic-evaluation-error
    #:arithmetic-error-expression
    #:arithmetic-error-reason

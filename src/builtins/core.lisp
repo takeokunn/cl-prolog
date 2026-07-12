@@ -108,12 +108,20 @@
 
 (define-prolog-flags
   (bounded "FALSE" ())
-  (max-arity "UNBOUNDED" ())
-  (integer-rounding-function "DOWN" ())
-  (char-conversion "OFF" ("ON" "OFF"))
+  (max_arity "UNBOUNDED" ())
+  (integer_rounding_function "TOWARD_ZERO" ())
+  (char_conversion "OFF" ("ON" "OFF"))
   (debug "OFF" ("ON" "OFF"))
   (unknown "ERROR" ("ERROR" "FAIL" "WARNING"))
-  (double-quotes "CODES" ("CODES" "CHARS" "ATOM")))
+  (double_quotes "CODES" ("CODES" "CHARS" "ATOM")))
+
+(defun %rulebase-active-char-conversions (rulebase)
+  "Return the conversion table when char_conversion is on and non-empty."
+  (let ((table (rulebase-char-conversions rulebase)))
+    (when (and (plusp (hash-table-count table))
+               (string= "ON" (%prolog-flag-value
+                              rulebase (%find-prolog-flag "CHAR_CONVERSION"))))
+      table)))
 
 (defun %prolog-flag-name (term environment operation)
   (let ((resolved (logic-substitute term environment)))

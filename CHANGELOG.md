@@ -9,6 +9,19 @@ section at the top of the file.
 
 ### Added
 
+- the remaining ISO 13211-1 built-ins: `open/3`, `write_canonical/1,2`,
+  `halt/0,1` (raising the exported `prolog-halt` condition so embedders
+  choose how to exit; `catch/3` does not intercept it), `char_conversion/2`,
+  and `current_char_conversion/2`; conversions are rulebase-local and apply
+  during `read_term` and `consult` when the `char_conversion` flag is `on`,
+  leaving quoted tokens untouched
+- the remaining ISO source directives: `include/1` splices the included
+  file's terms into the including source unit, `set_prolog_flag/2` and
+  `char_conversion/2` execute during loading and affect subsequent terms,
+  and `discontiguous/1` / `multifile/1` declarations are validated and
+  accepted (the engine already resolves clauses independently of textual
+  grouping)
+
 - cl-weave (Vitest-shaped) testing library integration: the new
   `cl-prolog/weave-tests` ASDF system exercises the public engine surface with
   `describe` / `it` / `expect` suites (unification, family relations, list and
@@ -24,6 +37,12 @@ section at the top of the file.
 
 ### Changed
 
+- Prolog flag names use their ISO spellings (`max_arity`,
+  `integer_rounding_function`, `char_conversion`, `double_quotes`), and
+  `integer_rounding_function` reports `toward_zero`, matching the
+  `truncate`-based `//`
+- `define-builtin` no longer emits a per-call arity re-check: solver
+  dispatch already guarantees the arity, so the check was unreachable
 - cut (`!`) is now implemented with `CATCH`/`THROW` tags carried through the
   proof state instead of dynamically-scoped condition handlers, so a cut in a
   clause body correctly prunes both the alternatives of goals to its left and

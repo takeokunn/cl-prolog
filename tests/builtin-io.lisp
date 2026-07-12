@@ -336,3 +336,58 @@
       (assert-query rulebase
                     (cl-prolog::get_byte cl-prolog::user_input ?byte)
                     :signals))))
+
+(deftest io-char-conversion-applies-to-unquoted-read-text ()
+  (with-io-rulebase (rulebase input output) "aaa. 'aaa'. aaa."
+    (assert-query rulebase
+                  (cl-prolog::char_conversion cl-prolog::|a| cl-prolog::|b|)
+                  :succeeds)
+    ;; The conversion table is inert until the flag is switched on.
+    (assert-query rulebase (cl-prolog::read_term ?term ())
+                  => (((?term . cl-prolog::aaa))))
+    (assert-query rulebase
+                  (cl-prolog::set_prolog_flag cl-prolog::char_conversion on)
+                  :succeeds)
+    ;; Quoted atoms are exempt from conversion.
+    (assert-query rulebase (cl-prolog::read_term ?term ())
+                  => (((?term . cl-prolog::|aaa|))))
+    (assert-query rulebase (cl-prolog::read_term ?term ())
+                  => (((?term . cl-prolog::bbb))))))
+
+(deftest io-write-canonical-round-trips-quoted-structure ()
+  (with-io-rulebase (rulebase input output) ""
+    (assert-query rulebase
+                  (cl-prolog::write_canonical
+                   (cl-prolog::foo (cl-prolog::bar 1 2) cl-prolog::|a b|))
+                  :succeeds)
+    (let ((text (get-output-stream-string output)))
+      (is (search "'a b'" text)
+          "write_canonical must quote atoms that need quoting")
+      (is-equal '(cl-prolog::foo (cl-prolog::bar 1 2) cl-prolog::|a b|)
+                (read-prolog-term (concatenate 'string text " ."))))))
+
+(deftest io-open-accepts-three-and-four-argument-forms ()
+  (let ((path (merge-pathnames (format nil "cl-prolog-open3-~D.txt"
+                                       (sb-unix:unix-getpid))
+                               #p"/tmp/")))
+    (unwind-protect
+         (progn
+           (with-open-file (stream path :direction :output
+                                   :if-exists :supersede)
+             (write-string "hello." stream))
+           (with-io-rulebase (rulebase input output) ""
+             (let ((source (cl-prolog::%prolog-atom-symbol (namestring path)
+                                                           :preserve-case t)))
+               (dolist (query (list (list 'cl-prolog::open source
+                                          'cl-prolog.user-atoms::read '?stream)
+                                    (list 'cl-prolog::open source
+                                          'cl-prolog.user-atoms::read '?stream '())))
+                 (let ((solutions (query-prolog rulebase (list query))))
+                   (is (= 1 (length solutions))
+                       "open must bind exactly one stream")
+                   (let ((stream (solution-binding '?stream (first solutions))))
+                     (is (not (null stream)))
+                     (assert-query rulebase (cl-prolog::stream_property
+                                             ?stream (cl-prolog::mode ?mode))
+                                   :succeeds)))))))
+      (ignore-errors (delete-file path)))))

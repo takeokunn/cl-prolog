@@ -43,6 +43,15 @@
                      (invalid-max-depth-error-value condition))))
   (:documentation "Signalled when a query receives an invalid :MAX-DEPTH option."))
 
+(define-condition prolog-halt (serious-condition)
+  ((code :initarg :code :reader prolog-halt-code))
+  (:report (lambda (condition stream)
+             (format stream "Prolog requested halt with exit code ~D."
+                     (prolog-halt-code condition))))
+  (:documentation "Raised by halt/0 and halt/1; embedders decide how to exit.
+
+Deliberately not a PROLOG-EXCEPTION: catch/3 must not intercept it."))
+
 (define-condition prolog-depth-limit-exceeded (prolog-resource-error)
   ((goal :initarg :goal :reader prolog-depth-limit-exceeded-goal))
   (:report (lambda (condition stream)
@@ -182,14 +191,6 @@
   "Return a detached snapshot of builtin predicate indicators."
   (reverse (copy-list *builtin-predicate-indicators*)))
 
-(defun %check-goal-arity (goal minimum maximum)
-  (let ((arity (length (rest goal))))
-    (unless (and (<= minimum arity)
-                 (or (null maximum) (<= arity maximum)))
-      (%invalid-goal goal
-                     "builtin ~S expects ~:[at least ~D~;~D~] argument~:P, got ~D"
-                     (first goal) maximum (or maximum minimum) arity))))
-
 (defun %argument-list-arity (argument-list)
   "Return (VALUES MINIMUM MAXIMUM) arity for ARGUMENT-LIST; MAXIMUM is NIL when variadic."
   (let ((required (position '&rest argument-list)))
@@ -218,7 +219,9 @@ BODY must call EMIT with one extended environment per solution."
                   ',builtin-name ,minimum ,maximum
                   (lambda (,goal ,rulebase ,environment ,depth ,emit)
                     (declare (ignorable ,rulebase ,environment ,depth ,emit))
-                    (%check-goal-arity ,goal ,minimum ,maximum)
+                    ;; Dispatch guarantees the arity matches: fixed builtins
+                    ;; are keyed by their exact indicator, variadic ones only
+                    ;; receive goals at or above their required arity.
                     (destructuring-bind ,argument-list (rest ,goal)
                       ,@body)))))
             names)

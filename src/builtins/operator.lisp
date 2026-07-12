@@ -124,3 +124,42 @@
              definition resolved-priority resolved-specifier resolved-name)
         (%emit-operator-definition
          definition priority specifier name environment emit)))))
+
+(defun %conversion-character (term environment operation)
+  "Resolve TERM to the character of a one-char atom, or signal an ISO error."
+  (let ((resolved (logic-substitute term environment)))
+    (when (logic-var-p resolved)
+      (%raise-instantiation-error environment operation
+                                  "char_conversion requires character atoms"))
+    (unless (and (symbolp resolved) (= 1 (length (symbol-name resolved))))
+      (%raise-type-error "CHARACTER" resolved environment operation
+                         "char_conversion requires one-char atoms"))
+    (char (symbol-name resolved) 0)))
+
+(defun %character-atom (character)
+  (%prolog-atom-symbol (string character) :preserve-case t))
+
+(define-builtin (char_conversion from to) (rulebase environment depth emit)
+  (declare (ignore depth))
+  (let* ((operation (%iso-atom "CHAR_CONVERSION"))
+         (from-character (%conversion-character from environment operation))
+         (to-character (%conversion-character to environment operation))
+         (table (rulebase-char-conversions rulebase)))
+    ;; Mapping a character to itself removes any previous conversion.
+    (if (char= from-character to-character)
+        (remhash from-character table)
+        (setf (gethash from-character table) to-character))
+    (funcall emit environment)))
+
+(define-builtin (current_char_conversion from to) (rulebase environment depth emit)
+  (declare (ignore depth))
+  (let ((pairs '()))
+    (maphash (lambda (from-character to-character)
+               (push (cons from-character to-character) pairs))
+             (rulebase-char-conversions rulebase))
+    (setf pairs (sort pairs #'char< :key #'car))
+    (loop for (from-character . to-character) in pairs
+          do (%unify-emit from (%character-atom from-character) environment
+                          (lambda (from-environment)
+                            (%unify-emit to (%character-atom to-character)
+                                         from-environment emit))))))

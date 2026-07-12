@@ -187,6 +187,21 @@
   (declare (cl:ignore rulebase depth))
   (loop (funcall emit environment)))
 
+(define-builtin (halt) (rulebase environment depth emit)
+  (declare (cl:ignore rulebase environment depth emit))
+  (error 'prolog-halt :code 0))
+
+(define-builtin (halt code) (rulebase environment depth emit)
+  (declare (cl:ignore rulebase depth emit))
+  (let ((resolved (logic-substitute code environment)))
+    (when (logic-var-p resolved)
+      (%raise-instantiation-error environment (%iso-atom "HALT")
+                                  "halt/1 requires an instantiated exit code"))
+    (unless (integerp resolved)
+      (%raise-type-error "INTEGER" resolved environment (%iso-atom "HALT")
+                         "halt/1 requires an integer exit code"))
+    (error 'prolog-halt :code resolved)))
+
 (define-builtin (and &rest goals) (rulebase environment depth emit)
   ;; GOALS is always a list of goals; normalize each element so a leading
   ;; bare atom is not mistaken for a compound goal's functor.

@@ -453,3 +453,17 @@
   (:equal '(!) (cl-prolog::%normalize-query '!))
   (:is-not (eq (cl-prolog::%make-cut-tag) (cl-prolog::%make-cut-tag))
            "Every cut barrier must carry a distinct catch tag"))
+
+(deftest halt-requests-processor-exit ()
+  (let ((rulebase (make-rulebase)))
+    (flet ((halt-code (query)
+             (handler-case
+                 (progn (query-prolog rulebase query) :no-halt)
+               (prolog-halt (condition) (prolog-halt-code condition)))))
+      (is-equal 0 (halt-code '((cl-prolog::halt))))
+      (is-equal 7 (halt-code '((cl-prolog::halt 7))))
+      ;; catch/3 must not intercept a halt request.
+      (is-equal 2 (halt-code '((cl-prolog::catch (cl-prolog::halt 2)
+                                                 ?any cl-prolog:true))))
+      (signals-error (query-prolog rulebase '((cl-prolog::halt ?code))))
+      (signals-error (query-prolog rulebase '((cl-prolog::halt seven)))))))
