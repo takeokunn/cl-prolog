@@ -181,10 +181,18 @@ Deliberately not a PROLOG-EXCEPTION: catch/3 must not intercept it."))
 
 (defun %register-builtin-solver! (predicate minimum maximum solver)
   "Register SOLVER for PREDICATE, replacing a definition loaded previously."
-  (if maximum
-      (setf (gethash (cons predicate maximum) *fixed-builtin-solvers*) solver)
-      (setf (gethash predicate *variadic-builtin-solvers*)
-            (cons minimum solver)))
+  ;; Reader symbols inherited from COMMON-LISP are normalized into USER-ATOMS
+  ;; by the Prolog parser.  Register that canonical spelling as an alias so
+  ;; parsed and Lisp-authored goals dispatch identically.
+  (dolist (alias (remove-duplicates
+                  (list predicate
+                        (%prolog-atom-symbol (symbol-name predicate)
+                                             :preserve-case t))
+                  :test #'eq))
+    (if maximum
+        (setf (gethash (cons alias maximum) *fixed-builtin-solvers*) solver)
+        (setf (gethash alias *variadic-builtin-solvers*)
+              (cons minimum solver))))
   (%register-builtin-predicate! predicate minimum))
 
 (defun %builtin-predicate-indicators ()

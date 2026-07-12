@@ -108,7 +108,10 @@
       (%raise-domain-error
        "NOT_LESS_THAN_ZERO" resolved-limit environment operation
        "call_with_depth_limit/3 requires a non-negative depth limit"))
-    (let ((token (list '%call-depth-limit))
+    (if (zerop resolved-limit)
+        (%unify-emit result (%iso-atom "DEPTH_LIMIT_EXCEEDED")
+                     environment emit)
+        (let ((token (list '%call-depth-limit))
           (outer-token *call-depth-limit-token*)
           (outer-remaining *call-depth-limit-remaining*)
           (outer-used *call-depth-limit-used*)
@@ -134,7 +137,7 @@
                 (*call-depth-limit-used* outer-used)
                 (*depth-limited-search-p* outer-depth-limited-p))
             (%unify-emit result (%iso-atom "DEPTH_LIMIT_EXCEEDED")
-                         environment emit)))))))
+                         environment emit))))))))
 
 (defun %first-proof-environment (goal rulebase environment depth)
   "Return the first proof environment for GOAL and whether one exists."
