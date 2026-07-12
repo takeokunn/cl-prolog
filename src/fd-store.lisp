@@ -157,12 +157,14 @@
 (defun %fd-propagate-all-different (store constraint environment)
   (let* ((terms (mapcar (lambda (term) (logic-substitute term environment))
                         (fd-constraint-arguments constraint)))
-         (ground (remove-if-not #'integerp terms)))
-    (if (/= (length ground) (length (remove-duplicates ground)))
+         (ground (remove-if-not #'integerp terms))
+         (variables (remove-if-not #'logic-var-p terms)))
+    (if (or (/= (length ground) (length (remove-duplicates ground)))
+            (/= (length variables) (length (remove-duplicates variables :test #'eq))))
         (values store nil)
         (loop with current = store
               for term in terms
-              when (logic-var-p term)
+              when (and (logic-var-p term) (%fd-domain-of current term))
                 do (multiple-value-bind (next successp)
                        (%fd-restrict-domain current term
                                             (set-difference (%fd-domain-of current term) ground))
@@ -172,14 +174,19 @@
                  (return
                    (values current
                            (%fd-distinct-assignment-p
-                            (remove-if-not #'logic-var-p terms)
+                            (remove-if-not
+                             (lambda (variable)
+                               (%fd-domain-of current variable))
+                             variables)
                             current ground)))))))
 
 (defun %fd-propagate (store environment)
   (dolist (entry (fd-store-domains store))
     (let ((resolved (logic-substitute (car entry) environment)))
-      (when (and (integerp resolved)
-                 (not (member resolved (cdr entry))))
+      (when (or (and (integerp resolved)
+                     (not (member resolved (cdr entry))))
+                (and (not (logic-var-p resolved))
+                     (not (integerp resolved))))
         (return-from %fd-propagate (values store nil)))))
   (loop with current = store
         repeat (1+ (length (fd-store-constraints store)))

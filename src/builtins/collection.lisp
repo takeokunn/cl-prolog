@@ -1,14 +1,14 @@
 (in-package #:cl-prolog)
 
 (defun %strip-existential-quantifiers (goal)
-  "Return GOAL without leading (^ VARIABLE GOAL) forms and their variables."
+  "Return GOAL without leading (^ QUANTIFIED GOAL) forms and their variables."
   (let ((variables '()))
     (loop while (and (%proper-list-p goal)
                      (= (length goal) 3)
                      (and (symbolp (first goal))
-                          (string= (symbol-name (first goal)) "^"))
-                     (logic-var-p (second goal)))
-          do (pushnew (second goal) variables :test #'eq)
+                          (string= (symbol-name (first goal)) "^")))
+          do (dolist (variable (%collect-variables (second goal)))
+               (pushnew variable variables :test #'eq))
              (setf goal (third goal)))
     (values goal (nreverse variables))))
 

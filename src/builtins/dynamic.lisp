@@ -1,12 +1,21 @@
 (in-package #:cl-prolog)
 
+(defun %prepare-dynamic-assertion! (rulebase entry)
+  "Validate and register the predicate targeted by a dynamic assertion."
+  (multiple-value-bind (predicate arity) (%entry-predicate-arity entry)
+    (module-registry-ensure-definition-allowed
+     (rulebase-module-registry rulebase)
+     *current-prolog-module* predicate arity)
+    (unless (%rulebase-predicate-property
+             rulebase predicate arity *current-prolog-module*)
+      (%set-rulebase-predicate-property!
+       rulebase predicate arity :dynamic *current-prolog-module*))))
+
 (define-builtin (asserta clause) (rulebase environment depth emit)
   (let* ((goal (list 'asserta clause))
          (entry (%clause-term-entry (logic-substitute clause environment)
                                     rulebase goal environment)))
-    (multiple-value-bind (predicate arity) (%entry-predicate-arity entry)
-      (%set-rulebase-predicate-property!
-       rulebase predicate arity :dynamic *current-prolog-module*))
+    (%prepare-dynamic-assertion! rulebase entry)
     (rulebase-insert-clause! rulebase entry :position :first
                              :module *current-prolog-module*)
     (funcall emit environment)))
@@ -15,9 +24,7 @@
   (let* ((goal (list 'assertz clause))
          (entry (%clause-term-entry (logic-substitute clause environment)
                                     rulebase goal environment)))
-    (multiple-value-bind (predicate arity) (%entry-predicate-arity entry)
-      (%set-rulebase-predicate-property!
-       rulebase predicate arity :dynamic *current-prolog-module*))
+    (%prepare-dynamic-assertion! rulebase entry)
     (rulebase-insert-clause! rulebase entry :position :last
                              :module *current-prolog-module*)
     (funcall emit environment)))

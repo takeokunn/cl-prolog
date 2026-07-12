@@ -13,6 +13,19 @@
           (t (%raise-type-error "VARIABLE_OR_VARIABLE_LIST" resolved environment
                                 context "unbound variable(s) required")))))
 
+(defun %fd-domain-terms (term environment context)
+  "Return the variables and integers accepted by IN/2 and INS/2."
+  (let ((resolved (logic-substitute term environment)))
+    (cond ((or (logic-var-p resolved) (integerp resolved)) (list resolved))
+          ((and (%proper-list-p resolved)
+                (every (lambda (item)
+                         (let ((value (logic-substitute item environment)))
+                           (or (logic-var-p value) (integerp value))))
+                       resolved))
+           (mapcar (lambda (item) (logic-substitute item environment)) resolved))
+          (t (%raise-type-error "VARIABLE_INTEGER_OR_LIST" resolved environment
+                                context "variable(s) and integer(s) required")))))
+
 (defun %fd-post (operator arguments environment emit)
   (multiple-value-bind (store successp)
       (%fd-propagate (%fd-add-constraint *fd-store* operator arguments) environment)
@@ -27,12 +40,17 @@
         (store *fd-store*)
         (successp t))
     (when domain
-      (dolist (variable (%fd-variable-terms variables environment context))
-        (multiple-value-bind (next restrictedp) (%fd-restrict-domain store variable domain)
-          (unless restrictedp
-            (setf successp nil)
-            (return))
-          (setf store next)))
+      (dolist (term (%fd-domain-terms variables environment context))
+        (if (integerp term)
+            (unless (member term domain)
+              (setf successp nil)
+              (return))
+            (multiple-value-bind (next restrictedp)
+                (%fd-restrict-domain store term domain)
+              (unless restrictedp
+                (setf successp nil)
+                (return))
+              (setf store next))))
       (when successp
         (multiple-value-bind (propagated propagatedp) (%fd-propagate store environment)
           (when propagatedp (%fd-emit propagated environment emit)))))))
@@ -51,7 +69,9 @@
 (define-fd-relation |#>=|)
 
 (define-builtin (all_different variables) (rulebase environment depth emit)
-  (%fd-post 'all_different (%fd-variable-terms variables environment) environment emit))
+  (%fd-post 'all_different
+            (%fd-domain-terms variables environment (%iso-atom "ALL_DIFFERENT"))
+            environment emit))
 
 (defun %fd-label-options (options environment)
   (let ((resolved (logic-substitute options environment)))

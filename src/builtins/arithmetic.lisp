@@ -23,8 +23,17 @@
     (%raise-type-error "INTEGER" value nil (%iso-atom "ARITHMETIC")
                        "integer operand required")))
 
+(defun %prolog-number-p (value)
+  "Return true for numeric types representable by ISO Prolog arithmetic."
+  (or (integerp value) (floatp value)))
+
+(defun %require-prolog-number (value environment)
+  (unless (%prolog-number-p value)
+    (%raise-type-error "EVALUABLE" value environment (%iso-atom "ARITHMETIC")
+                       "integer or float operand required")))
+
 (defun %require-real (value)
-  (unless (realp value)
+  (unless (and (%prolog-number-p value) (realp value))
     (%raise-type-error "NUMBER" value nil (%iso-atom "ARITHMETIC")
                        "real operand required")))
 
@@ -93,8 +102,9 @@
   (:- (left right expression) (- left right))
   (:* (left right expression) (* left right))
   (:/ (left right expression)
+    (%require-real left) (%require-real right)
     (%check-nonzero-divisor expression right)
-    (/ left right))
+    (/ (float left 1.0d0) (float right 1.0d0)))
   (:// (left right expression)
     (%require-integer left) (%require-integer right)
     (%check-nonzero-divisor expression right)
@@ -155,7 +165,12 @@
 
 (defun %call-arithmetic-function (entry arguments expression)
   (handler-case
-      (apply (cdr entry) (append arguments (list expression)))
+      (let ((result (apply (cdr entry) (append arguments (list expression)))))
+        (unless (%prolog-number-p result)
+          (%arithmetic-error expression
+                             "arithmetic result is not an integer or float: ~S"
+                             result))
+        result)
     (cl:arithmetic-error (condition)
       (%arithmetic-error expression "host arithmetic failure: ~A" condition))))
 
@@ -169,8 +184,10 @@
   "Evaluate a ground arithmetic EXPRESSION after applying ENVIRONMENT."
   (let ((resolved (logic-substitute expression environment)))
     (labels ((evaluate (term)
-               (cond
-                 ((numberp term) term)
+             (cond
+                 ((numberp term)
+                  (%require-prolog-number term environment)
+                  term)
                  ((assoc (%arithmetic-operator-key term) *arithmetic-constants*)
                   (cdr (assoc (%arithmetic-operator-key term)
                               *arithmetic-constants*)))

@@ -230,12 +230,13 @@ into the caller's remaining goals."
     (cond
       ((not (%goal-form-p normalized-goal))
        (%invalid-goal goal "a goal must be a symbol or a list headed by a symbol"))
-      ((and (eq (first normalized-goal) '!) (null (rest normalized-goal)))
-       ;; Deliver the current state, then prune every remaining alternative
-       ;; up to the enclosing predicate invocation once search backtracks.
-       (funcall succeed state)
-       (cl:throw (proof-state-cut-tag state) t))
       (t
+       (when (and (eq (first normalized-goal) '!)
+                  (null (rest normalized-goal)))
+         ;; Deliver the current state, then prune every remaining alternative
+         ;; up to the enclosing predicate invocation once search backtracks.
+         (funcall succeed state)
+         (cl:throw (proof-state-cut-tag state) t))
        (let* ((predicate (first normalized-goal))
               (arity (length (rest normalized-goal)))
               (builtin-solver (%goal-solver predicate arity))
@@ -243,6 +244,10 @@ into the caller's remaining goals."
               (solver (or builtin-solver foreign-solver)))
          (cond
            (solver
+             (when explicit-module
+               (%find-prolog-module
+                (rulebase-module-registry (proof-state-rulebase state))
+                explicit-module "invoke qualified goal"))
              (let* ((solver-state
                       (if explicit-module
                           (%state-in-module state explicit-module)

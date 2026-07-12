@@ -272,7 +272,10 @@
       :clauses (list (make-clause '(edge a 2))
                      (make-clause '(edge a 1))
                      (make-clause '(edge a 2))
-                     (make-clause '(edge b 3)))))
+                     (make-clause '(edge b 3))
+                     (make-clause '(edge3 a left 1))
+                     (make-clause '(edge3 a right 2))
+                     (make-clause '(edge3 b left 3)))))
   ((findall ?value (edge a ?value) ?bag)
                                    => (((?value . ?value) (?bag 2 1 2))))
   ((findall ?value (edge missing ?value) ?bag)
@@ -286,6 +289,12 @@
   ((bagof ?value (^ ?key (edge ?key ?value)) ?bag)
                                    => (((?value . ?value) (?key . ?key)
                                         (?bag 2 1 2 3))))
+  ((bagof ?value (^ (pair ?key ?side) (edge3 ?key ?side ?value)) ?bag)
+                                   => (((?value . ?value) (?key . ?key)
+                                        (?side . ?side) (?bag 1 2 3))))
+  ((bagof ?value (^ ?key (^ ?side (edge3 ?key ?side ?value))) ?bag)
+                                   => (((?value . ?value) (?key . ?key)
+                                        (?side . ?side) (?bag 1 2 3))))
   ((bagof ?value (edge missing ?value) ?bag) :fails)
   ((setof ?value (edge ?key ?value) ?bag)
                                    => (((?value . ?value) (?key . a) (?bag 1 2))
@@ -491,6 +500,15 @@
             (is-equal "PERMISSION_ERROR" (symbol-name (first formal)))
             (is-equal "MODIFY" (symbol-name (second formal)))
             (is-equal "STATIC_PROCEDURE" (symbol-name (third formal)))))))))
+
+(deftest rejected-static-assertion-preserves-predicate-property ()
+  (let ((rulebase (make-rulebase
+                   :clauses (list (make-clause '(fixed original))))))
+    (signals-error (query-prolog rulebase '(assertz (fixed replacement))))
+    (assert-query rulebase (fixed original) :succeeds)
+    (assert-query rulebase (fixed replacement) :fails)
+    (assert-query rulebase (predicate_property (fixed ?value) static)
+                  :succeeds)))
 
 (deftest dynamic-database-validates-callable-arguments ()
   (let ((rulebase (make-rulebase)))
@@ -715,7 +733,8 @@
   ((is ?x (+ 2 (* 3 4)))         => (((?x . 14))))
   ((is ?x (- 5))                 => (((?x . -5))))
   ((is ?x (- 10 3))              => (((?x . 7))))
-  ((is ?x (/ 7 2))               => (((?x . 7/2))))
+  ((is ?x (/ 7 2))               => (((?x . 3.5d0))))
+  ((is ?x (/ 1 2))               => (((?x . 0.5d0))))
   ((is ?x (mod 17 5))            => (((?x . 2))))
   ((is ?x (abs -9))              => (((?x . 9))))
   ((is ?x (// -7 3))             => (((?x . -2))))
@@ -725,10 +744,10 @@
   ((is ?x (sign -7))             => (((?x . -1))))
   ((is ?x (min 7 3))             => (((?x . 3))))
   ((is ?x (max 7 3))             => (((?x . 7))))
-  ((is ?x (floor 7/3))           => (((?x . 2))))
-  ((is ?x (ceiling 7/3))         => (((?x . 3))))
-  ((is ?x (truncate -7/3))       => (((?x . -2))))
-  ((is ?x (round 5/2))           => (((?x . 2))))
+  ((is ?x (floor (/ 7 3)))       => (((?x . 2))))
+  ((is ?x (ceiling (/ 7 3)))     => (((?x . 3))))
+  ((is ?x (truncate (/ -7 3)))   => (((?x . -2))))
+  ((is ?x (round (/ 5 2)))       => (((?x . 2))))
   ((is ?x (** 2 8))              => (((?x . 256))))
   ((is ?x (^ 3 3))               => (((?x . 27))))
   ((is ?x (+ 3))                 => (((?x . 3))))
@@ -790,9 +809,14 @@
   ((is ?x (rem 1.0 2))           :signals)
   ((is ?x (mod 1 0))             :signals)
   ((is ?x (sqrt -1))             :signals)
+  ((is ?x (** -1 0.5d0))        :signals)
   ((is ?x (log 0))               :signals)
   ((is ?x (|/\\| 1.0 1))        :signals)
   ((is ?x (|<<| 1 1.5))         :signals))
+
+(deftest arithmetic-rejects-host-only-ratio-input ()
+  (signals-error
+    (query-prolog (make-rulebase) (list 'is '?result 1/2))))
 
 (defun arithmetic-type-error-formal (expression)
   (handler-case
@@ -800,20 +824,20 @@
         (query-prolog (make-rulebase) (list 'is '?result expression))
         (error "Expected an arithmetic type error for ~S" expression))
     (prolog-type-error (condition)
-      (second (prolog-error-term condition)))))
+      (second (cl-prolog::prolog-error-term condition)))))
 
 (deftest-table arithmetic-functions-validate-indicators-before-arguments ()
-  (:is-equal
+  (:equal
    (list (cl-prolog::%iso-atom "TYPE_ERROR")
          (cl-prolog::%iso-atom "EVALUABLE")
          (cl-prolog::%iso-term "/" 'unknown 1))
    (arithmetic-type-error-formal '(unknown 1)))
-  (:is-equal
+  (:equal
    (list (cl-prolog::%iso-atom "TYPE_ERROR")
          (cl-prolog::%iso-atom "EVALUABLE")
          (cl-prolog::%iso-term "/" '+ 3))
    (arithmetic-type-error-formal '(+ 1 2 3)))
-  (:is-equal
+  (:equal
    (list (cl-prolog::%iso-atom "TYPE_ERROR")
          (cl-prolog::%iso-atom "EVALUABLE")
          (cl-prolog::%iso-term "/" 'unknown 1))

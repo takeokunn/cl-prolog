@@ -121,6 +121,11 @@
     (is (prolog-succeeds-p rulebase
                            (read-prolog-term "alpha:not(value(beta)).")))))
 
+(deftest qualified-builtin-rejects-unknown-module ()
+  (signals-error
+    (query-prolog (make-rulebase)
+                  (read-prolog-term "ghost:true."))))
+
 (deftest module-consult-rolls-back-import-redefinition ()
   (let ((rulebase (make-rulebase)))
     (consult-prolog ":- module(alpha, [value/1]). value(alpha)." rulebase)
@@ -133,3 +138,13 @@
     (signals-error
       (prolog-succeeds-p rulebase
                          (read-prolog-term "value(local).")))))
+
+(deftest dynamic-assertion-rejects-import-redefinition ()
+  (let ((rulebase (make-rulebase)))
+    (consult-prolog ":- module(alpha, [value/1]). value(alpha)." rulebase)
+    (consult-prolog ":- use_module(alpha)." rulebase)
+    (signals-error
+      (query-prolog rulebase (read-prolog-term "assertz(value(local)).")))
+    (is (prolog-succeeds-p rulebase (read-prolog-term "value(alpha).")))
+    (is (not (prolog-succeeds-p rulebase
+                                (read-prolog-term "value(local)."))))))
