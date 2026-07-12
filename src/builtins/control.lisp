@@ -132,18 +132,32 @@
          (return-from first-proof))))
     (values result matched-p)))
 
+(defun %cleanup-goal-deterministic-p (goal)
+  "Return true when GOAL is a builtin that cannot yield multiple proofs."
+  (let ((name (and (consp goal)
+                   (symbolp (first goal))
+                   (symbol-name (first goal)))))
+    (or (and (symbolp goal)
+             (string= (symbol-name goal) "TRUE"))
+        (member name '("TRUE" "=" "UNIFY_WITH_OCCURS_CHECK" "==" "\\==")
+                :test #'string=))))
+
 (defun %call-cleanup/k (setup goal cleanup rulebase environment depth emit)
-  "Commit to SETUP's first proof, then run CLEANUP exactly once after GOAL."
+  "Commit to SETUP, stream GOAL's proofs, then run CLEANUP exactly once.
+
+CLEANUP failure is ignored, while a condition raised by CLEANUP propagates."
   (multiple-value-bind (setup-environment setup-succeeded-p)
       (%first-proof-environment setup rulebase environment depth)
     (when setup-succeeded-p
       (let ((cleanup-environment setup-environment)
-            (cleanup-ran-p nil))
+            (cleanup-ran-p nil)
+            (deterministic-goal-p (%cleanup-goal-deterministic-p goal)))
         (labels ((run-cleanup ()
                    (unless cleanup-ran-p
                      (setf cleanup-ran-p t)
                      (%first-proof-environment cleanup
-                                               rulebase cleanup-environment
+                                               rulebase
+                                               cleanup-environment
                                                depth))))
           (unwind-protect
                (%prove-bindings/k
@@ -151,7 +165,8 @@
                 rulebase setup-environment depth
                 (lambda (goal-environment)
                   (setf cleanup-environment goal-environment)
-                  (run-cleanup)
+                  (when deterministic-goal-p
+                    (run-cleanup))
                   (funcall emit goal-environment)))
             (run-cleanup)))))))
 
@@ -228,20 +243,29 @@
     (%raise-prolog-exception resolved-ball environment)))
 
 (define-builtin (catch goal catcher recover) (rulebase environment depth emit)
-  (handler-case
-      (%prove-bindings/k
-       (logic-substitute goal environment)
-       rulebase environment depth emit)
-    (prolog-exception (condition)
-      (multiple-value-bind (recovery-environment matched-p)
-          (unify (prolog-exception-term condition)
-                 (logic-substitute catcher environment)
-                 environment)
-        (if matched-p
-            (%prove-bindings/k
-             (logic-substitute recover recovery-environment)
-             rulebase recovery-environment depth emit)
-            (error condition))))))
+  (let ((continuation-condition nil))
+    (handler-case
+        (%prove-bindings/k
+         (logic-substitute goal environment)
+         rulebase environment depth
+         (lambda (goal-environment)
+           (handler-case
+               (funcall emit goal-environment)
+             (prolog-exception (condition)
+               (setf continuation-condition condition)
+               (error condition)))))
+      (prolog-exception (condition)
+        (when (eq condition continuation-condition)
+          (error condition))
+        (multiple-value-bind (recovery-environment matched-p)
+            (unify (prolog-exception-term condition)
+                   (logic-substitute catcher environment)
+                   environment)
+          (if matched-p
+              (%prove-bindings/k
+               (logic-substitute recover recovery-environment)
+               rulebase recovery-environment depth emit)
+              (error condition)))))))
 
 (define-builtin (repeat) (rulebase environment depth emit)
   (declare (cl:ignore rulebase depth))

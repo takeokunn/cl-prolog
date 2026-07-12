@@ -314,6 +314,28 @@
                  (1 '>))
                environment emit))
 
+(defun %unifier-equations (left right)
+  "Return the trial unifier for LEFT and RIGHT without changing caller state."
+  (multiple-value-bind (trial-environment unified-p)
+      (unify left right)
+    (when unified-p
+      (values
+       (loop for variable in (%collect-variables (list left right))
+             for binding = (assoc variable trial-environment :test #'eq)
+             when binding
+               collect (list '= variable (cdr binding)))
+       t))))
+
+(define-builtin (unifiable left right unifier)
+    (rulebase environment depth emit)
+  (declare (cl:ignore rulebase depth))
+  (let ((resolved-left (%term-resolve left environment))
+        (resolved-right (%term-resolve right environment)))
+    (multiple-value-bind (equations unifiable-p)
+        (%unifier-equations resolved-left resolved-right)
+      (when unifiable-p
+        (%unify-emit unifier equations environment emit)))))
+
 (defun %term-subsumes-p (general specific)
   "Return true when SPECIFIC is an instance of GENERAL without binding either."
   (let ((bindings (make-hash-table :test #'eq)))

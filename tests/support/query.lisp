@@ -84,7 +84,7 @@ Trailing OPTIONS (e.g. :limit 2) are passed to QUERY-PROLOG."
 
 SOLUTIONS receives the full result list and SOLUTION receives the first solution.
 Trailing OPTIONS are passed to QUERY-PROLOG."
-  `(let ((,solutions (query-prolog ,rulebase (list ,query) ,@options)))
+  `(let ((,solutions (query-prolog ,rulebase ,query ,@options)))
      (is (= 1 (length ,solutions))
          "query must yield exactly one solution")
      (let ((,solution (first ,solutions)))

@@ -336,7 +336,8 @@
     (assert-query rb
                   (or (call_with_depth_limit (and ! fail) 0 ?depth)
                       (= ?side fallback))
-                  => (((?side . fallback))))
+                  => (((?depth . depth_limit_exceeded) (?side . ?side))
+                      ((?depth . ?depth) (?side . fallback))))
     (let* ((solutions
              (query-prolog
               rb
@@ -356,7 +357,7 @@
      (call_with_depth_limit
       (call_with_depth_limit (one-deep) 2 ?inner-depth)
       1 ?outer-depth)
-     => (((?inner-depth . 2) (?outer-depth . 1))))))
+     => (((?inner-depth . 2) (?outer-depth . 2))))))
 
 (deftest finite-proofs-are-unbounded-by-default ()
   (let ((rb (make-rulebase))

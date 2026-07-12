@@ -65,13 +65,18 @@ sub-query) keep the ordinals of variables created by their caller."
 
 (defun %occurs-p (var term env)
   "Return true when VAR occurs inside TERM under ENV (prevents cyclic terms)."
-  (let ((term (%walk-term term env)))
-    (cond
-      ((eq var term) t)
-      ((consp term)
-       (or (%occurs-p var (car term) env)
-           (%occurs-p var (cdr term) env)))
-      (t nil))))
+  (let ((seen (make-hash-table :test #'eq)))
+    (labels ((occurs-p (node)
+               (let ((resolved (%walk-term node env)))
+                 (cond
+                   ((eq var resolved) t)
+                   ((not (consp resolved)) nil)
+                   ((gethash resolved seen) nil)
+                   (t
+                    (setf (gethash resolved seen) t)
+                    (or (occurs-p (car resolved))
+                        (occurs-p (cdr resolved))))))))
+      (occurs-p term))))
 
 (defun unify (left right &optional (env '()))
   "Unify LEFT and RIGHT against ENV.
@@ -93,6 +98,9 @@ Returns (VALUES EXTENDED-ENV T) on success and (VALUES NIL NIL) on failure."
        (if ok
            (unify (cdr left) (cdr right) extended)
            (values nil nil))))
+    ((and (symbolp left) (symbolp right)
+          (string= (symbol-name left) (symbol-name right)))
+     (values env t))
     ((equal left right) (values env t))
     (t (values nil nil))))
 

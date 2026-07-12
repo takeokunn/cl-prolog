@@ -82,6 +82,8 @@ is extensible (see DEFINE-FOREIGN-PREDICATE).")
    ;; builtin goal names
    #:!
    #:call
+   #:call_nth
+   #:call_with_depth_limit
    #:once
    #:setup_call_cleanup
    #:call_cleanup
@@ -96,6 +98,7 @@ is extensible (see DEFINE-FOREIGN-PREDICATE).")
    #:bagof
    #:setof
    #:sort
+   #:msort
    #:keysort
    #:true
    #:fail
@@ -107,11 +110,13 @@ is extensible (see DEFINE-FOREIGN-PREDICATE).")
    #:retract
    #:retractall
    #:current_predicate
+   #:predicate_property
    #:abolish
    #:clause
    #:|\\=|
    #:is
    #:in
+   #:ins
    #:|..|
    #:|#=|
    #:|#\\=|
@@ -121,6 +126,7 @@ is extensible (see DEFINE-FOREIGN-PREDICATE).")
    #:|#>=|
    #:all_different
    #:labeling
+   #:indomain
    #:|=:=|
    #:|=\\=|
    #:<
@@ -141,6 +147,7 @@ is extensible (see DEFINE-FOREIGN-PREDICATE).")
    #:@>
    #:@>=
    #:compare
+   #:unifiable
    #:term_variables
    #:compound
    #:callable

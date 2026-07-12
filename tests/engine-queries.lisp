@@ -93,7 +93,7 @@
   ((and (setup_call_cleanup (assertz (cleanup-marker))
                             true
                             (retractall (cleanup-marker)))
-        (not (cleanup-marker)))  => (nil))
+        (not (current_predicate (/ cleanup-marker 0)))) => (nil))
   ((and (call_cleanup true (assertz (cleanup-marker)))
         (cleanup-marker))        => (nil))
   ((setup_call_cleanup true true fail) => (nil))
@@ -149,13 +149,14 @@
 (deftest call-nth-ground-index-stops-inner-search ()
   (let ((rulebase (make-rulebase)))
     (assert-query rulebase
-                  '(call_nth (or (= ?value first)
-                                 (and (assertz (visited-later-solution))
-                                      (= ?value second)))
-                             1)
+                  (call_nth (or (= ?value first)
+                                (and (assertz (visited-later-solution))
+                                     (= ?value second)))
+                            1)
                   =>
                   (((?value . first))))
-    (assert-query rulebase '(visited-later-solution) :fails)))
+    (assert-query rulebase
+                  (current_predicate (/ visited-later-solution 0)) :fails)))
 
 (deftest cleanup-runs-on-exception-and-early-query-exit ()
   (let ((rulebase (make-family-rulebase)))
@@ -205,6 +206,67 @@
               (cl:length
                (query-prolog rulebase '(cleanup-observed ?value))))))
 
+(deftest cleanup-runs-after-streamed-solution-delivery ()
+  (let ((rulebase (make-family-rulebase))
+        (observed-values '()))
+    (assert-query rulebase (assertz (enumeration-cleanup marker)) :succeeds)
+    (assert-query rulebase (retractall (enumeration-cleanup marker)) :succeeds)
+    (map-prolog-solutions
+     (lambda (solution)
+       (push (solution-binding '?value solution) observed-values)
+       (assert-query rulebase (enumeration-cleanup right) :fails))
+     rulebase
+     '(call_cleanup (choice ?value)
+                    (assertz (enumeration-cleanup ?value))))
+    (is-equal '(left right) (nreverse observed-values))
+    (assert-query rulebase (enumeration-cleanup right) :succeeds)
+    (is-equal 1
+              (cl:length
+               (query-prolog rulebase '(enumeration-cleanup ?value))))))
+
+(deftest cleanup-failure-is-ignored-and-exceptions-propagate ()
+  (let ((rulebase (make-family-rulebase))
+        (failure-notifications 0)
+        (exception-notifications 0)
+        (limited-values '()))
+    (assert-query rulebase (assertz limited-cleanup) :succeeds)
+    (assert-query rulebase (retractall limited-cleanup) :succeeds)
+    (map-prolog-solutions
+     (lambda (solution)
+       (declare (cl:ignore solution))
+       (incf failure-notifications))
+     rulebase
+     '(call_cleanup (choice ?value) fail))
+    (is-equal 2 failure-notifications)
+    (signals-condition prolog-exception
+      (map-prolog-solutions
+       (lambda (solution)
+         (declare (cl:ignore solution))
+         (incf exception-notifications))
+       rulebase
+       '(call_cleanup (choice ?value) (throw cleanup-failed))))
+    (is-equal 2 exception-notifications)
+    (map-prolog-solutions
+     (lambda (solution)
+       (push (solution-binding '?value solution) limited-values)
+       (assert-query rulebase (limited-cleanup) :fails))
+     rulebase
+     '(call_cleanup (choice ?value) (assertz (limited-cleanup)))
+     :limit 1)
+    (is-equal '(left) (nreverse limited-values))
+    (is-equal 1
+              (cl:length (query-prolog rulebase '(limited-cleanup))))))
+
+(deftest nested-catch-does-not-catch-continuation-exceptions ()
+  (let ((rulebase (make-rulebase)))
+    (assert-query
+     rulebase
+     (catch (and (catch true escaped (= ?handler inner))
+                 (throw escaped))
+            escaped
+            (= ?handler outer))
+     => (((?handler . outer))))))
+
 (deftest-queries solution-collection-builtins
     ((make-rulebase
       :clauses (list (make-clause '(edge a 2))
@@ -235,17 +297,17 @@
           (make-rulebase
            :clauses (list (make-clause '(edge a 2))
                           (make-clause '(edge a 1))
-                          (make-clause '(edge a 2)))))))
+                          (make-clause '(edge a 2))))))
     (is-equal '(2 1 2 . tail)
               (solution-binding
                '?bag
                (query-prolog-first
-                rulebase '(findall ?value (edge a ?value) ?bag tail))))
+                rulebase '(findall ?value (edge a ?value) ?bag tail)))
     (is-equal 'tail
               (solution-binding
                '?bag
                (query-prolog-first
-                rulebase '(findall ?value (edge missing ?value) ?bag tail)))))
+                rulebase '(findall ?value (edge missing ?value) ?bag tail)))))))
 
 (deftest-queries sorting-builtins ((make-rulebase))
   ((sort (3 1 2 1) ?sorted) => (((?sorted 1 2 3))))
@@ -272,7 +334,7 @@
            :clauses (list (make-clause '(variant-key (pair ?left ?left) first))
                           (make-clause '(variant-key (pair ?right ?right) second))
                           (make-clause '(ordered-key z last))
-                          (make-clause '(ordered-key a first)))))))
+                          (make-clause '(ordered-key a first))))))
     (let* ((solutions
              (query-prolog
               rulebase '(bagof ?value (variant-key ?key ?value) ?bag)))
@@ -288,12 +350,15 @@
                    ((?value . ?value) (?key . z) (?bag last))))
     (with-single-query-solution
         (solution solutions rulebase
-         '(sort ((pair ?left ?left) (pair ?right ?right)) ?sorted))
+         (list 'sort
+               (list (list 'pair '?left '?left)
+                     (list 'pair '?right '?right))
+               '?sorted))
       (declare (ignore solutions))
       (let ((sorted (solution-binding '?sorted solution)))
         (is (= 2 (length sorted)))
         (is (not (eq (second (first sorted))
-                     (second (second sorted))))))))
+                     (second (second sorted)))))))))
 
 (deftest dynamic-database-builtins ()
   (let ((rulebase (make-rulebase)))
@@ -329,7 +394,7 @@
                   :succeeds)
     (assert-query rulebase
                   (predicate_property (color ?fruit ?shade)
-                                      (number_of_clauses 4))
+                                      (number_of_clauses 3))
                   :succeeds)
     (assert-query rulebase (predicate_property (ordered ?value) static)
                   :succeeds)
@@ -345,7 +410,7 @@
                   => (((?property . dynamic))
                       ((?property . user))
                       ((?property . defined))
-                      ((?property number_of_clauses 4))))
+                      ((?property number_of_clauses 3))))
     (assert-query rulebase (retractall (color apple ?shade)) :succeeds)
     (assert-query rulebase (color apple ?shade) :fails)
     (assert-query rulebase (retractall (color apple ?shade)) :succeeds)

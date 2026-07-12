@@ -192,7 +192,13 @@ caller's clause alternatives, as ISO requires.")
         (unify goal (clause-head (%freshen-clause clause))
                (proof-state-bindings state))
       (when ok
-        (funcall succeed (%state-with-bindings state extended))))))
+        (flet ((continue-with-propagated-bindings (propagated)
+                 (funcall succeed (%state-with-bindings state propagated))))
+          (if *constraint-post-unify-hook*
+              (funcall *constraint-post-unify-hook*
+                       extended
+                       #'continue-with-propagated-bindings)
+              (continue-with-propagated-bindings extended)))))))
 
 (defun %matching-rule-p (goal clause)
   "True when CLAUSE can be considered for GOAL."
@@ -423,9 +429,16 @@ body throws here, abandoning the remaining clause alternatives."
     (multiple-value-bind (extended ok)
         (unify goal (clause-head fresh-rule) (proof-state-bindings state))
       (when ok
-        (%prove-goals/k (clause-body fresh-rule)
-                        (%state-descending-into-rule state extended goal)
-                        succeed)))))
+        (flet ((prove-with-propagated-bindings (propagated)
+                 (%prove-goals/k
+                  (clause-body fresh-rule)
+                  (%state-descending-into-rule state propagated goal)
+                  succeed)))
+          (if *constraint-post-unify-hook*
+              (funcall *constraint-post-unify-hook*
+                       extended
+                       #'prove-with-propagated-bindings)
+              (prove-with-propagated-bindings extended)))))))
 
 (defun %provable-p (query rulebase environment depth)
   "Return true when QUERY has at least one proof."
