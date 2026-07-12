@@ -348,7 +348,9 @@
               '(call_with_depth_limit
                 (catch (looping) ?caught true) 0 ?result)))
            (solution (first solutions)))
-      (is (logic-var-p (logic-substitute '?caught solution)))
+      ;; Unbound query variables are represented by self-bindings in solutions;
+      ;; substituting through one would recurse indefinitely.
+      (is (logic-var-p (cdr (assoc '?caught solution))))
       (is (eq (cl-prolog::%iso-atom "DEPTH_LIMIT_EXCEEDED")
               (logic-substitute '?result solution))))))
 
