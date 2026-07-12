@@ -105,14 +105,16 @@
         let
           pkgs = import nixpkgs { inherit system; };
           src = sourceFor pkgs;
-        in
-        {
-          default = pkgs.sbcl.buildASDFSystem {
+          cl-prolog = pkgs.sbcl.buildASDFSystem {
             pname = "cl-prolog";
             version = "0.5.0";
             src = src;
             systems = [ "cl-prolog" ];
           };
+        in
+        {
+          inherit cl-prolog;
+          default = cl-prolog;
           docs = mkDocs pkgs;
         }
       );
