@@ -57,7 +57,18 @@ The macro expands each case into two DEFTEST-QUERIES specs."
   (cl-prolog::number_codes -17 ?codes
    (((?codes 45 49 55)))
    ?number (45 49 55)
-   (((?number . -17)))))
+   (((?number . -17))))
+  (cl-prolog::atom_number cl-prolog::|42| ?number
+   (((?number . 42)))
+   ?atom 42
+   (((?atom . cl-prolog::|42|)))))
+
+(deftest-queries atom-number-builtins ((make-rulebase))
+  ((cl-prolog::atom_number cl-prolog::|-0.125| ?number)
+   => (((?number . -0.125d0))))
+  ((cl-prolog::atom_number cl-prolog::|42| 42) :succeeds)
+  ((cl-prolog::atom_number cl-prolog::|42| 43) :fails)
+  ((cl-prolog::atom_number cl-prolog::bad ?number) :fails))
 
 (defun parse-number-codes (codes)
   (let ((solutions (query-prolog
@@ -159,4 +170,12 @@ The macro expands each case into two DEFTEST-QUERIES specs."
   (:equal '(prolog-type-error ("TYPE_ERROR" "NUMBER" "ATOM"))
           (atom-builtin-error-summary '(cl-prolog::number_chars atom ?chars)))
   (:equal '(prolog-domain-error ("DOMAIN_ERROR" "NUMBER_TEXT" "bad"))
-          (atom-builtin-error-summary '(cl-prolog::number_codes ?number (98 97 100)))))
+          (atom-builtin-error-summary '(cl-prolog::number_codes ?number (98 97 100))))
+  (:equal '(prolog-instantiation-error "INSTANTIATION_ERROR")
+          (atom-builtin-error-summary '(cl-prolog::atom_number ?atom ?number)))
+  (:equal '(prolog-type-error ("TYPE_ERROR" "ATOM" 1))
+          (atom-builtin-error-summary '(cl-prolog::atom_number 1 ?number)))
+  (:equal '(prolog-type-error ("TYPE_ERROR" "NUMBER" "ATOM"))
+          (atom-builtin-error-summary '(cl-prolog::atom_number ?atom atom)))
+  (:equal '(prolog-domain-error ("DOMAIN_ERROR" "PROLOG_NUMBER" 1/2))
+          (atom-builtin-error-summary '(cl-prolog::atom_number ?atom 1/2))))

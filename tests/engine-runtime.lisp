@@ -203,6 +203,82 @@
                   rulebase cl-prolog::+default-prolog-module+
                   'indexed 1 snapshot))))))
 
+(deftest predicate-index-isolates-modules ()
+  (let ((rulebase (make-rulebase)))
+    (rulebase-insert-clause! rulebase (make-clause '(indexed alpha))
+                             :module 'alpha)
+    (rulebase-insert-clause! rulebase (make-clause '(indexed beta))
+                             :module 'beta)
+    (is-equal '((indexed alpha))
+              (mapcar (lambda (entry)
+                        (clause-head
+                         (cl-prolog::%stored-clause-clause entry)))
+                      (cl-prolog::%rulebase-predicate-entries-at-revision
+                       rulebase 'alpha 'indexed 1
+                       (cl-prolog::rulebase-revision rulebase))))
+    (is-equal '((indexed beta))
+              (mapcar (lambda (entry)
+                        (clause-head
+                         (cl-prolog::%stored-clause-clause entry)))
+                      (cl-prolog::%rulebase-predicate-entries-at-revision
+                       rulebase 'beta 'indexed 1
+                       (cl-prolog::rulebase-revision rulebase))))))
+
+(deftest predicate-index-copy-is-independent ()
+  (let* ((rulebase (prolog ((indexed original))))
+         (copy (cl-prolog::%copy-rulebase rulebase)))
+    (rulebase-insert-clause! copy (make-clause '(indexed copied)))
+    (is-equal '((indexed original))
+              (mapcar (lambda (entry)
+                        (clause-head
+                         (cl-prolog::%stored-clause-clause entry)))
+                      (nth-value
+                       1 (cl-prolog::%rulebase-predicate-entries
+                          rulebase cl-prolog::+default-prolog-module+
+                          'indexed 1))))
+    (is-equal '((indexed original) (indexed copied))
+              (mapcar (lambda (entry)
+                        (clause-head
+                         (cl-prolog::%stored-clause-clause entry)))
+                      (nth-value
+                       1 (cl-prolog::%rulebase-predicate-entries
+                          copy cl-prolog::+default-prolog-module+
+                          'indexed 1))))))
+
+(deftest predicate-index-replace-reflects-transaction ()
+  (let* ((rulebase (prolog ((indexed original))))
+         (transaction (cl-prolog::%copy-rulebase rulebase)))
+    (rulebase-insert-clause! transaction (make-clause '(indexed committed)))
+    (cl-prolog::%replace-rulebase! rulebase transaction)
+    (is-equal '((indexed original) (indexed committed))
+              (mapcar (lambda (entry)
+                        (clause-head
+                         (cl-prolog::%stored-clause-clause entry)))
+                      (nth-value
+                       1 (cl-prolog::%rulebase-predicate-entries
+                          rulebase cl-prolog::+default-prolog-module+
+                          'indexed 1))))))
+
+(deftest predicate-index-proof-cache-follows-rulebase-revisions ()
+  (let* ((rulebase (prolog ((indexed original))))
+         (session (cl-prolog::%make-rulebase-table-session rulebase))
+         (state (cl-prolog::%make-proof-state
+                 rulebase '() nil cl-prolog::+default-prolog-module+ session
+                 (cl-prolog::%make-cut-tag)))
+         (first-snapshot
+           (cl-prolog::%proof-predicate-entries '(indexed ?value) state)))
+    (is (eq first-snapshot
+            (cl-prolog::%proof-predicate-entries '(indexed ?value) state)))
+    (rulebase-insert-clause! rulebase (make-clause '(indexed added)))
+    (let ((next-snapshot
+            (cl-prolog::%proof-predicate-entries '(indexed ?value) state)))
+      (is (not (eq first-snapshot next-snapshot)))
+      (is-equal '((indexed original) (indexed added))
+                (mapcar (lambda (entry)
+                          (clause-head
+                           (cl-prolog::%stored-clause-clause entry)))
+                        next-snapshot)))))
+
 (deftest ordinary-predicates-are-not-replayed-for-tabling ()
   (let ((rulebase (prolog
                     ((run-once) (assertz marker)))))

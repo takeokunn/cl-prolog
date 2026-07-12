@@ -118,6 +118,38 @@
                     (%builtin-predicate-p (second resolved) (third resolved)))
             (funcall emit environment))))))
 
+(defun %predicate-properties (rulebase predicate arity module)
+  "Return the supported reflection properties for PREDICATE/ARITY."
+  (cond
+    ((%builtin-predicate-p predicate arity)
+     '(built_in))
+    (t
+     (let ((declared (%rulebase-predicate-property
+                      rulebase predicate arity module))
+           (defined (%rulebase-defines-predicate-p
+                     rulebase predicate arity module)))
+       (when (or declared defined)
+         (list (if (eq declared :dynamic) 'dynamic 'static)
+               'user))))))
+
+(define-builtin (predicate_property head property)
+    (rulebase environment depth emit)
+  (let* ((resolved-head (logic-substitute head environment))
+         (resolved-property (logic-substitute property environment))
+         (callable (%ensure-callable resolved-head environment
+                                     'predicate_property))
+         (predicate (first callable))
+         (arity (length (rest callable))))
+    (unless (or (logic-var-p resolved-property)
+                (symbolp resolved-property))
+      (%raise-type-error "ATOM" resolved-property environment
+                         'predicate_property
+                         "predicate property must be an atom"))
+    (dolist (candidate
+             (%predicate-properties rulebase predicate arity
+                                    *current-prolog-module*))
+      (%unify-emit property candidate environment emit))))
+
 (define-builtin (abolish indicator) (rulebase environment depth emit)
   (let* ((goal (list 'abolish indicator))
          (resolved (logic-substitute indicator environment)))

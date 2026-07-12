@@ -98,6 +98,32 @@
                         domain))
         (values store t))))
 
+(defun %fd-filter-variable-pair (store left right operator)
+  (let ((left-domain (%fd-domain-of store left))
+        (right-domain (%fd-domain-of store right)))
+    (if (and left-domain right-domain)
+        (let ((supported-left
+                (remove-if-not
+                 (lambda (left-value)
+                   (some (lambda (right-value)
+                           (%fd-relation-true-p operator left-value right-value))
+                         right-domain))
+                 left-domain)))
+          (multiple-value-bind (left-store left-success-p)
+              (%fd-restrict-domain store left supported-left)
+            (if (not left-success-p)
+                (values left-store nil)
+                (let ((restricted-left (%fd-domain-of left-store left)))
+                  (%fd-restrict-domain
+                   left-store right
+                   (remove-if-not
+                    (lambda (right-value)
+                      (some (lambda (left-value)
+                              (%fd-relation-true-p operator left-value right-value))
+                            restricted-left))
+                    right-domain))))))
+        (values store t))))
+
 (defun %fd-propagate-relation (store constraint environment)
   (destructuring-bind (left right) (fd-constraint-arguments constraint)
     (multiple-value-bind (left-value left-ground-p)
@@ -114,6 +140,8 @@
              (%fd-filter-variable store resolved-left operator right-value t))
             ((and left-ground-p (logic-var-p resolved-right))
              (%fd-filter-variable store resolved-right operator left-value nil))
+            ((and (logic-var-p resolved-left) (logic-var-p resolved-right))
+             (%fd-filter-variable-pair store resolved-left resolved-right operator))
             (t (values store t))))))))
 
 (defun %fd-distinct-assignment-p (variables store used)
