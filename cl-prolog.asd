@@ -8,7 +8,7 @@
   :bug-tracker "https://github.com/takeokunn/cl-prolog/issues"
   :source-control (:git "https://github.com/takeokunn/cl-prolog.git")
   :long-name "cl-prolog"
-  :version "0.3.0"
+  :version "0.4.0"
   :pathname "src"
   :serial t
   :components ((:file "package")

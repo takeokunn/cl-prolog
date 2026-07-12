@@ -93,9 +93,7 @@ compatibility aliases were removed rather than deprecated.
   from "full parse"
 - table-driven test DSL (`deftest-queries`) and a broader regression suite
   (goal shapes, cut semantics, clause ordering, streaming, extensibility)
-- `scripts/run-tests-noasdf.lisp`: ASDF-free core test entry point
-- GitHub Actions CI running tests, the public-contract verifier, and the
-  benchmark smoke
+- GitHub Actions CI running tests and the benchmark smoke
 - `.github` community files and CI badge in `README.md`
 
 ### Changed
@@ -131,7 +129,6 @@ compatibility aliases were removed rather than deprecated.
 ## 0.1.0 - 2026-07-09
 
 Initial release: macro-first rulebase DSL, CPS proof search, builtin goals,
-DCG support, examples, benchmark scenarios, public-contract verifier,
-release audit tooling, Nix packaging, and repository policy files
+DCG support, examples, benchmark scenarios, Nix packaging, and repository policy files
 (`SECURITY.md`, `CODE_OF_CONDUCT.md`, `SUPPORT.md`, `CONTRIBUTING.md`,
 release checklist and troubleshooting documentation).
