@@ -13,6 +13,26 @@
        (%proper-list-p term)
        (%term-atom-p (first term))))
 
+(defun %term-acyclic-p (term &optional (environment '()))
+  "Return true when TERM contains no cycle through cons cells."
+  (let ((active (make-hash-table :test #'eq))
+        (complete (make-hash-table :test #'eq)))
+    (labels ((walk (node)
+               (let ((resolved (%walk-term node environment)))
+                 (cond
+                   ((atom resolved) t)
+                   ((gethash resolved complete) t)
+                   ((gethash resolved active) nil)
+                   (t
+                    (setf (gethash resolved active) t)
+                    (let ((acyclic-p (and (walk (car resolved))
+                                          (walk (cdr resolved)))))
+                      (remhash resolved active)
+                      (when acyclic-p
+                        (setf (gethash resolved complete) t))
+                      acyclic-p))))))
+      (walk term))))
+
 (defun %term-unify-sequence (pairs environment emit)
   (labels ((unify-next (remaining current)
              (if (null remaining)
@@ -234,6 +254,16 @@
 (define-builtin (ground term) (rulebase environment depth emit)
   (declare (cl:ignore rulebase depth))
   (unless (%term-has-variables-p (%term-resolve term environment))
+    (funcall emit environment)))
+
+(define-builtin (acyclic_term term) (rulebase environment depth emit)
+  (declare (cl:ignore rulebase depth))
+  (when (%term-acyclic-p term environment)
+    (funcall emit environment)))
+
+(define-builtin (cyclic_term term) (rulebase environment depth emit)
+  (declare (cl:ignore rulebase depth))
+  (unless (%term-acyclic-p term environment)
     (funcall emit environment)))
 
 (define-builtin (functor term name arity) (rulebase environment depth emit)

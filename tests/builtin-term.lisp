@@ -66,6 +66,8 @@
   ((and (= ?goal (node left)) (cl-prolog:callable ?goal)) :succeeds)
   ((cl-prolog::ground (node left 3)) :succeeds)
   ((cl-prolog::ground (node ?x 3)) :fails)
+  ((cl-prolog:acyclic_term (node ?x (leaf value))) :succeeds)
+  ((cl-prolog:cyclic_term (node ?x (leaf value))) :fails)
   ((cl-prolog::functor (node left right) ?name ?arity)
    => (((?name . node) (?arity . 2))))
   ((cl-prolog::functor value ?name ?arity)
@@ -109,6 +111,19 @@
    => (((?term node left right))))
   ((cl-prolog::|=..| ?term (value))
    => (((?term . value)))))
+
+(deftest cyclic-term-detection-handles-circular-and-shared-conses ()
+  (let* ((shared (list 'leaf 'value))
+         (acyclic (list 'pair shared shared))
+         (car-cycle (list 'node))
+         (cdr-cycle (list 'node)))
+    (setf (car car-cycle) car-cycle
+          (cdr cdr-cycle) cdr-cycle)
+    (is (cl-prolog::%term-acyclic-p acyclic))
+    (is (not (cl-prolog::%term-acyclic-p car-cycle)))
+    (is (not (cl-prolog::%term-acyclic-p cdr-cycle)))
+    (is (not (cl-prolog::%term-acyclic-p
+              '?cycle '((?cycle node ?cycle)))))))
 
 (defun term-builtin-error-summary (goal)
   (handler-case

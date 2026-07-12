@@ -142,6 +142,8 @@ is extensible (see DEFINE-FOREIGN-PREDICATE).")
    #:compound
    #:callable
    #:ground
+   #:acyclic_term
+   #:cyclic_term
    #:functor
    #:arg
    #:copy_term
