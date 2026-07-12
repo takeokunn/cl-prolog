@@ -47,7 +47,11 @@
   (format stream "Runs only the core suites; script-contract tests stay out of this gate.~%"))
 
 (defun compile-command-arguments (source-file output)
-  (list "--disable-debugger"
+  ;; The wide dynamic space pairs with the child's explicit-GC discipline:
+  ;; on Darwin hosts with broken trap delivery the implicit GC trigger must
+  ;; never be reached (see scripts/bootstrap.lisp).
+  (list "--dynamic-space-size" "4096"
+        "--disable-debugger"
         "--script"
         (namestring (cl-prolog.bootstrap:repo-file "scripts/coverage-compile-file.lisp"))
         source-file
@@ -107,7 +111,8 @@
       (push (enough-namestring output (cl-prolog.bootstrap:repo-root))
             dependencies)))
   (dolist (output (nreverse outputs))
-    (load output)))
+    (load output)
+    #+sbcl (sb-ext:gc)))
 
 (declaim (optimize (sb-cover:store-coverage-data 0)))
 

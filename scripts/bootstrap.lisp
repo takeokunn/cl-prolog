@@ -19,7 +19,6 @@
            #:sbcl-program
            #:perl-timeout-wrapper
            #:core-source-files
-           #:test-source-files
            #:load-source-file
            #:load-core-sources
            #:load-test-sources
@@ -93,9 +92,6 @@
 (defun core-source-files ()
   (copy-list *core-source-files*))
 
-(defun test-source-files ()
-  (copy-list *test-source-files*))
-
 (defparameter *bootstrap-path*
   (or *load-truename*
       *load-pathname*
@@ -112,13 +108,6 @@
 
 (defun repo-file (relative-path)
   (merge-pathnames relative-path (repo-root)))
-
-(defun source-pathname (path)
-  (let ((pathname (pathname path)))
-    (if (and (pathname-directory pathname)
-             (eq (first (pathname-directory pathname)) :absolute))
-        pathname
-        (repo-file pathname))))
 
 (defun read-manifest ()
   (with-open-file (stream (repo-file "contracts/public-contract.sexp")

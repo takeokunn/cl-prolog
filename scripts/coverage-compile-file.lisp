@@ -2,6 +2,12 @@
 
 ;;;; Isolated sb-cover compilation for a single source file.
 
+;; Same Darwin trap-delivery workaround as scripts/bootstrap.lisp: keep the
+;; implicit GC trigger out of reach and collect explicitly between phases.
+;; The parent passes --dynamic-space-size 4096 so this threshold fits.
+#+(and sbcl darwin)
+(setf (sb-ext:bytes-consed-between-gcs) (* 3 1024 1024 1024))
+
 (require :sb-cover)
 
 (declaim (optimize sb-cover:store-coverage-data))
@@ -37,7 +43,8 @@
 (multiple-value-bind (source output dependencies)
   (parse-args)
   (dolist (dependency dependencies)
-    (load (repo-file dependency)))
+    (load (repo-file dependency))
+    #+sbcl (sb-ext:gc))
   (compile-file (repo-file source)
                 :output-file (repo-file output)
                 :verbose nil
