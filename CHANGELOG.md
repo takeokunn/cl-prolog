@@ -13,6 +13,7 @@ section at the top of the file.
 - Split parser, source-loader, prover-state, I/O, and engine test support into focused files.
 - Split query-engine tests into collection, arithmetic, flag, and core suites.
 - Split runtime tests into tabling, depth-limit, foreign-predicate, and error suites.
+- Split source-loader error tests into a focused suite.
 - Remove unused internal helpers and add Paredit-driven structural refactoring support.
 - Update the cl-weave test runner input to v0.6.0.
 
