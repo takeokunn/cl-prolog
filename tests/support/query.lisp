@@ -42,10 +42,14 @@ SPEC is (QUERY KIND EXPECTED... OPTIONS...):
   (Q :fails)          not provable
   (Q :signals)        signals an error
 Trailing OPTIONS (e.g. :limit 2) are passed to QUERY-PROLOG."
-  `(deftest ,name ()
-     (let ((%rulebase ,rulebase-form))
-       (declare (ignorable %rulebase))
-       ,@(mapcar #'%query-spec-assertion specs))))
+  `(cl-weave:describe-sequential ,(string-downcase (symbol-name name))
+     ,@(loop for spec in specs
+             for index from 1
+             collect `(cl-weave:it ,(format nil "case ~D: ~S" index spec)
+                        (let ((%rulebase ,rulebase-form))
+                          (declare (ignorable %rulebase))
+                          (cl-weave:expect-has-assertions)
+                          ,(%query-spec-assertion spec))))))
 
 (defmacro assert-query (rulebase query kind &rest rest)
   "Assert one query expectation against RULEBASE.

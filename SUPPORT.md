@@ -10,7 +10,6 @@ Open a GitHub issue when you need help with:
 - choosing between immutable construction and explicit dynamic rulebase
   mutation
 - understanding solver limits such as `:max-depth`
-- interpreting release-audit or public-contract verifier output
 
 Include:
 
@@ -32,9 +31,8 @@ Useful evidence:
 - a minimal failing query or rulebase
 - the public API entry point involved
 - the exact command used to reproduce the failure
-- whether `sbcl --script scripts/release-audit.lisp --with-nix` passes locally
-- whether `asdf:test-system :cl-prolog` still passes locally
-- whether `sbcl --script scripts/verify-public-contract.lisp --json` fails
+- whether `nix run .` passes locally
+- whether `nix flake check` passes locally
 
 ## Security issues
 

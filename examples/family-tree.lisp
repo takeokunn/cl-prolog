@@ -1,10 +1,3 @@
-(eval-when (:compile-toplevel :load-toplevel :execute)
-  (load (merge-pathnames "../scripts/bootstrap.lisp"
-                         (or *load-truename* *load-pathname*))))
-
-(unless (find-package "CL-PROLOG")
-  (cl-prolog.bootstrap:load-core-sources))
-
 (in-package #:cl-prolog)
 
 (define-rulebase *family*

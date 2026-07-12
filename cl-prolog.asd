@@ -8,7 +8,7 @@
   :bug-tracker "https://github.com/takeokunn/cl-prolog/issues"
   :source-control (:git "https://github.com/takeokunn/cl-prolog.git")
   :long-name "cl-prolog"
-  :version "0.2.0"
+  :version "0.4.0"
   :pathname "src"
   :serial t
   :components ((:file "package")
@@ -45,35 +45,44 @@
   :in-order-to ((asdf:test-op (asdf:test-op "cl-prolog/tests"))))
 
 (asdf:defsystem #:cl-prolog/tests
-  :depends-on (#:cl-prolog)
-  :pathname ""
-  :serial t
-  :components ((:file "tests")))
-
-(asdf:defsystem #:cl-prolog/weave-tests
   :depends-on (#:cl-prolog #:cl-weave)
-  :description "cl-weave (Vitest-shaped) test suite for the public cl-prolog surface."
+  :pathname "tests"
   :serial t
-  :pathname "tests-weave"
-  :components ((:file "package")
-               (:file "prolog"))
+  :components ((:file "support")
+               (:module "support-files"
+                :pathname "support"
+                :serial t
+                :components ((:file "core")
+                             (:file "query")
+                             (:file "fixtures")))
+               (:file "unification")
+               (:file "operator-table")
+               (:file "parser")
+               (:file "term-writer")
+               (:file "io-context")
+               (:file "source-loader")
+               (:file "engine-surface")
+               (:file "engine-queries")
+               (:file "engine-runtime")
+               (:file "builtin-term")
+               (:file "builtin-atom")
+               (:file "builtin-operator")
+               (:file "builtin-io")
+               (:file "builtin-io-code")
+               (:file "builtin-fd")
+               (:file "module-system")
+               (:file "dcg")
+               (:file "weave-quality"))
   :perform (asdf:test-op (op c)
              (declare (ignore op c))
              (unless (uiop:symbol-call "CL-WEAVE" "RUN-ALL" :reporter :spec)
-               (uiop:quit 1))))
+               (error "cl-prolog cl-weave test suite failed."))))
 
 (asdf:defsystem #:cl-prolog/examples
   :depends-on (#:cl-prolog)
-  :description "Runnable example scripts for cl-prolog."
+  :description "Runnable examples for cl-prolog."
   :serial t
   :pathname "examples"
   :components ((:file "quick-start")
                (:file "family-tree")
                (:file "relational-lists")))
-
-(asdf:defsystem #:cl-prolog/benchmark
-  :depends-on (#:cl-prolog)
-  :description "Support helpers and scenario definitions for cl-prolog benchmarks."
-  :serial t
-  :pathname "scripts"
-  :components ((:file "benchmark-support")))

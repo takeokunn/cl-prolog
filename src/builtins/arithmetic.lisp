@@ -75,7 +75,7 @@
       (%arithmetic-error expression "logarithm is undefined for ~S" value))
     ;; Call LOG through its function object: SBCL's compile-time interval
     ;; derivation for LOG evaluates float bounds, and on hosts with broken
-    ;; FP-trap delivery (see scripts/bootstrap.lisp) that evaluation hangs
+    ;; FP-trap delivery that would otherwise make evaluation hang
     ;; COMPILE-FILE.  The dynamic call skips the derivation entirely.
     (funcall (symbol-function 'cl:log) value))
   (:sin (value expression) (sin value))

@@ -2,31 +2,26 @@
 
 (in-package #:cl-prolog.tests)
 
-(defvar *tests* '())
-(defvar *assertion-count* 0)
 (defparameter *test-timeout-seconds* 10)
 
 (defmacro deftest (name (&key (timeout '*test-timeout-seconds*)) &body body)
-  `(push (list :name ',name
-               :timeout ,timeout
-               :thunk (lambda () ,@body))
-         *tests*))
+  "Register NAME as a cl-weave test while preserving the suite's old DSL."
+  `(cl-weave:it ,(string-downcase (symbol-name name))
+     (:timeout-ms (* 1000 ,timeout))
+     (cl-weave:expect-has-assertions)
+     ,@body))
 
-(defmacro is (form &optional (message (format nil "Assertion failed: ~S" form)))
-  `(progn
-     (incf *assertion-count*)
-     (unless ,form
-       (error "~A" ,message))))
+(defmacro is (form &optional message)
+  (declare (ignore message))
+  `(cl-weave:expect ,form :to-be-truthy))
 
-(defmacro is-equal (expected form &optional (message (format nil "Values differ for ~S" form)))
+(defmacro is-equal (expected form &optional message)
+  (declare (ignore message))
   (let ((expected-value (gensym "EXPECTED"))
         (actual-value (gensym "ACTUAL")))
     `(let ((,expected-value ,expected)
            (,actual-value ,form))
-       (incf *assertion-count*)
-       (unless (equal ,expected-value ,actual-value)
-         (error "~A~%expected: ~S~%actual:   ~S"
-                ,message ,expected-value ,actual-value)))))
+       (cl-weave:expect ,actual-value :to-equal ,expected-value))))
 
 (defun %proper-list-p (value)
   (loop with slow = value
@@ -99,17 +94,9 @@
 (defmacro is-same-set (expected form &optional (message (format nil "Sets differ for ~S" form)))
   `(is-equal (%canonical-form ,expected) (%canonical-form ,form) ,message))
 
-(defmacro signals-error (form &optional (message "Expected an error"))
-  `(progn
-     (incf *assertion-count*)
-     (let ((signaled-p nil))
-       (handler-case
-           ,form
-         (error ()
-           (setf signaled-p t)))
-       (unless signaled-p
-         (error "~A: ~S" ,message ',form))
-       t)))
+(defmacro signals-error (form &optional message)
+  (declare (ignore message))
+  `(cl-weave:expect (lambda () ,form) :to-throw))
 
 (defun %table-spec-assertion (spec)
   "Compile one table SPEC into an assertion form."
@@ -166,8 +153,12 @@ Supported spec forms:
   (:signals FORM [MESSAGE])
   (:exported NAME PACKAGE-NAME)
   (:not-exported NAME PACKAGE-NAME)"
-  `(deftest ,name ()
-     ,@(mapcar #'%table-spec-assertion specs)))
+  `(cl-weave:describe-sequential ,(string-downcase (symbol-name name))
+     ,@(loop for spec in specs
+             for index from 1
+             collect `(cl-weave:it ,(format nil "case ~D: ~S" index spec)
+                        (cl-weave:expect-has-assertions)
+                        ,(%table-spec-assertion spec)))))
 
 (defmacro deftest-unification (name &body specs)
   "Define NAME as a test composed from unification table SPECS.
@@ -177,8 +168,12 @@ Supported spec forms:
   (:fails LEFT RIGHT [:initial-env ENV])
   (:ok LEFT RIGHT [:initial-env ENV])
   (:not-ok LEFT RIGHT [:initial-env ENV])"
-  `(deftest ,name ()
-     ,@(mapcar #'%unification-spec-assertion specs)))
+  `(cl-weave:describe-sequential ,(string-downcase (symbol-name name))
+     ,@(loop for spec in specs
+             for index from 1
+             collect `(cl-weave:it ,(format nil "case ~D: ~S" index spec)
+                        (cl-weave:expect-has-assertions)
+                        ,(%unification-spec-assertion spec)))))
 
 (defun %tree-target-form (target)
   "Compile TARGET syntax into a form producing the fragment to search for."
@@ -189,48 +184,15 @@ Supported spec forms:
 
 (defmacro deftest-tree-contains (name (tree-form) &body targets)
   "Define NAME as a test that asserts TREE-FORM contains each TARGET."
-  `(deftest ,name ()
-     (let ((tree ,tree-form))
-       ,@(mapcar (lambda (target)
-                   `(is (%tree-contains-p tree ,(%tree-target-form target))))
-                 targets))))
+  `(cl-weave:describe-sequential ,(string-downcase (symbol-name name))
+     ,@(loop for target in targets
+             for index from 1
+             collect `(cl-weave:it ,(format nil "target ~D: ~S" index target)
+                        (cl-weave:expect-has-assertions)
+                        (let ((tree ,tree-form))
+                          (is (%tree-contains-p tree ,(%tree-target-form target))))))))
 
 (defmacro with-macroexpansion ((name form) &body body)
   "Bind NAME to the single-step macro expansion of FORM and run BODY."
   `(let ((,name (macroexpand-1 ,form)))
      ,@body))
-
-(defun %run-test (name thunk timeout)
-  (handler-case
-      (progn
-        #+sbcl
-        (sb-ext:gc :full t)
-        (format t "running ~A~%" name)
-        (finish-output)
-        #+sbcl
-        (sb-ext:with-timeout timeout
-          (funcall thunk))
-        #-sbcl
-        (funcall thunk)
-        (format t "ok ~A~%" name)
-        (finish-output)
-        t)
-    (error (condition)
-      (format t "not ok ~A~%~A~%" name condition)
-      (finish-output)
-      nil)))
-
-(defun run-tests ()
-  (let ((passed 0)
-        (failed 0))
-    (dolist (test (reverse *tests*))
-      (if (%run-test (getf test :name)
-                     (getf test :thunk)
-                     (getf test :timeout *test-timeout-seconds*))
-          (incf passed)
-        (incf failed)))
-    (format t "~%~D tests, ~D assertions, ~D failures~%"
-            (+ passed failed) *assertion-count* failed)
-    (finish-output)
-    (when (plusp failed)
-      (error "Test suite failed with ~D failing test~:P." failed))))

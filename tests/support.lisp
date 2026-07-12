@@ -1,10 +1,9 @@
-;;;; Test harness entry point.
+;;;; Test package for the ASDF-loaded cl-weave suite.
 
 (defpackage #:cl-prolog.tests
   (:use #:cl #:cl-prolog)
   (:shadowing-import-from #:cl-prolog #:catch #:throw)
-  (:export #:run-tests
-           #:deftest
+  (:export #:deftest
            #:deftest-table
            #:deftest-queries
            #:assert-query
@@ -15,11 +14,3 @@
            #:make-family-rulebase))
 
 (in-package #:cl-prolog.tests)
-
-(defparameter *support-source-files*
-  '("tests/support/core.lisp"
-    "tests/support/query.lisp"
-    "tests/support/fixtures.lisp"))
-
-(dolist (relative-path *support-source-files*)
-  (cl-prolog.bootstrap:load-source-file relative-path))

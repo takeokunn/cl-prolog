@@ -14,52 +14,6 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  test:
-    name: Tests (SBCL, ${{ matrix.os }})
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, macos-latest]
-    timeout-minutes: 30
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Install SBCL (Linux)
-        if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y sbcl
-
-      - name: Install SBCL (macOS)
-        if: runner.os == 'macOS'
-        run: brew install sbcl
-
-      - name: Core test suite (no ASDF)
-        timeout-minutes: 5
-        run: sbcl --script scripts/run-tests-noasdf.lisp
-
-      - name: Full test suite (ASDF test-op)
-        timeout-minutes: 10
-        run: |
-          sbcl --non-interactive \
-            --eval '(require :asdf)' \
-            --eval '(asdf:load-asd (truename "cl-prolog.asd"))' \
-            --eval '(asdf:test-system :cl-prolog)'
-
-      - name: Public contract verifier
-        timeout-minutes: 10
-        run: sbcl --script scripts/verify-public-contract.lisp --json
-
-      - name: Benchmark smoke
-        timeout-minutes: 5
-        run: sbcl --script scripts/benchmark.lisp --json --iterations 10
-
-      - name: Example scripts
-        timeout-minutes: 5
-        run: |
-          sbcl --script examples/quick-start.lisp
-          sbcl --script examples/family-tree.lisp
-          sbcl --script examples/relational-lists.lisp
-
   nix:
     name: nix flake check (${{ matrix.system }})
     runs-on: ${{ matrix.os }}

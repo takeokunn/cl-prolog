@@ -62,11 +62,6 @@
   ((cl-prolog::current_char_conversion ?from ?to) :fails)
   ((cl-prolog::char_conversion cl-prolog::|a| cl-prolog::|b|) :succeeds)
   ((cl-prolog::char_conversion cl-prolog::|x| cl-prolog::|y|) :succeeds)
-  ((cl-prolog::current_char_conversion ?from ?to)
-   => (((?from . cl-prolog::|a|) (?to . cl-prolog::|b|))
-       ((?from . cl-prolog::|x|) (?to . cl-prolog::|y|))))
-  ((cl-prolog::current_char_conversion cl-prolog::|a| ?to)
-   => (((?to . cl-prolog::|b|))))
   ((cl-prolog::current_char_conversion cl-prolog::|b| ?to) :fails)
   ;; Mapping a character to itself removes its conversion.
   ((cl-prolog::char_conversion cl-prolog::|a| cl-prolog::|a|) :succeeds)
@@ -74,3 +69,17 @@
   ((cl-prolog::char_conversion ?from cl-prolog::|b|) :signals)
   ((cl-prolog::char_conversion ab cl-prolog::|b|) :signals)
   ((cl-prolog::char_conversion cl-prolog::|a| 7) :signals))
+
+(deftest char-conversion-enumeration-reflects-one-rulebase ()
+  (let ((rulebase (make-rulebase)))
+    (assert-query rulebase
+                  (cl-prolog::char_conversion cl-prolog::|a| cl-prolog::|b|)
+                  :succeeds)
+    (assert-query rulebase
+                  (cl-prolog::char_conversion cl-prolog::|x| cl-prolog::|y|)
+                  :succeeds)
+    (assert-query rulebase (cl-prolog::current_char_conversion ?from ?to)
+                  => (((?from . cl-prolog::|a|) (?to . cl-prolog::|b|))
+                      ((?from . cl-prolog::|x|) (?to . cl-prolog::|y|))))
+    (assert-query rulebase (cl-prolog::current_char_conversion cl-prolog::|a| ?to)
+                  => (((?to . cl-prolog::|b|))))))
