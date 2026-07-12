@@ -7,6 +7,30 @@ section at the top of the file.
 
 ## Unreleased
 
+## 0.4.1 - 2026-07-12
+
+### Changed
+
+- the stream read/write builtins (`read`/`read_term`, `write`-family, `nl`,
+  `flush_output`, character/byte I/O, `at_end_of_stream`) moved from
+  `io.lisp` into the new `io-streams.lisp`, defined through a shared
+  `%define-io-dual-builtin` macro that derives the current-stream and
+  explicit-stream variants from one specification; the macro validates its
+  clause plist at macroexpansion time so a malformed definition fails the
+  build instead of compiling a builtin that silently always fails
+- `%io-options` and `%io-read-options` share one option-list parser
+  (`%io-parse-option-list`) instead of two divergent copies
+- `query-prolog` and `query-prolog-first` reuse the solution-mapping core
+  of `map-prolog-solutions` instead of re-decoding their options through
+  the public entry point
+- `deftest-table` / `deftest-unification` expand each table spec into its
+  own named cl-weave case, so a failing spec is reported individually
+
+### Added
+
+- a regression test that `read_term/2` rejects unsupported read options
+  with an ISO domain error
+
 ## 0.4.0 - 2026-07-12
 
 ### Added
