@@ -20,8 +20,6 @@
 (defvar *constraints-active-p-hook* nil
   "Function reporting whether a dynamically scoped constraint store is active.")
 
-(define-condition %call-depth-limit-exceeded (error)
-  ((token :initarg :token :reader %call-depth-limit-exceeded-token)))
 (defvar *caller-cut-tag* nil
   "Cut barrier of the goal invocation currently dispatching a builtin solver.
 
@@ -299,8 +297,7 @@ into the caller's remaining goals."
       (%prove-goal-dispatch/k goal state succeed)
       (progn
         (when (zerop *call-depth-limit-remaining*)
-          (error '%call-depth-limit-exceeded
-                 :token *call-depth-limit-token*))
+          (throw *call-depth-limit-token* *call-depth-limit-token*))
         (let ((*call-depth-limit-remaining*
                 (1- *call-depth-limit-remaining*))
               (*call-depth-limit-used*
