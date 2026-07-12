@@ -22,10 +22,7 @@ over their logic variables."
 
 (defmacro extend-rulebase (base &body clauses)
   "Return a new rulebase whose clauses shadow-extend BASE."
-  (let ((extension (gensym "EXTENSION")))
-    `(let ((,extension (prolog ,@clauses)))
-       (make-rulebase :clauses (append (rulebase-visible-clauses ,extension)
-                                       (rulebase-visible-clauses ,base))))))
+  `(rulebase-extend ,base (list ,@(%clause-forms clauses))))
 
 (defmacro def-rule (head &body body)
   "Return a clause value for HEAD :- BODY without mutating a rulebase."
@@ -36,9 +33,12 @@ over their logic variables."
   "Bind BINDING-VARS from the first solution of QUERY and run BODY.
 
 BODY is skipped entirely when QUERY has no proof."
-  (let ((solution (gensym "SOLUTION")))
-    `(let ((,solution (query-prolog-first ,rulebase ,query :max-depth ,max-depth)))
-       (when ,solution
+  (let ((solution (gensym "SOLUTION"))
+        (succeeded-p (gensym "SUCCEEDED-P")))
+    `(multiple-value-bind (,solution ,succeeded-p)
+         (query-prolog-first ,rulebase ,query :max-depth ,max-depth)
+       (declare (ignorable ,solution))
+       (when ,succeeded-p
          (let ,(mapcar (lambda (variable)
                          `(,variable (solution-binding ',variable ,solution)))
                        binding-vars)
