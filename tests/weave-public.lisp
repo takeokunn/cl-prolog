@@ -1,7 +1,10 @@
 ;;;; Tests for the public cl-prolog/cl-weave helpers.
 
 (defpackage #:cl-prolog.weave.tests
-  (:use #:cl #:cl-prolog)
+  (:use #:cl)
+  (:import-from #:cl-prolog
+   #:invalid-max-depth-error
+   #:prolog)
   (:import-from #:cl-prolog/weave
    #:assert-query
    #:deftest-queries))
@@ -27,10 +30,10 @@
 
 (deftest-queries fresh-query-rulebases ((prolog ((seed value))))
   ("a case may mutate its rulebase"
-   (assertz (temporary value))
+   (cl-prolog:assertz (temporary value))
    :succeeds)
   ("the next case does not observe that mutation"
-   (temporary value)
+   (cl-prolog:current_predicate (/ temporary 1))
    :fails))
 
 (cl-weave:describe-sequential "assert-query"
