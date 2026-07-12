@@ -126,6 +126,42 @@
     (query-prolog (make-rulebase)
                   (read-prolog-term "ghost:true."))))
 
+(deftest qualified-module-variable-resolves-through-bindings ()
+  (let ((rulebase (make-rulebase)))
+    (consult-prolog
+     ":- module(alpha, [value/1]). value(alpha)."
+     rulebase)
+    (is (prolog-succeeds-p
+         rulebase
+         (read-prolog-term "Module = alpha, Module:value(alpha).")))))
+
+(deftest qualified-module-errors-are-catchable ()
+  (let ((rulebase (make-rulebase)))
+    (is (prolog-succeeds-p
+         rulebase
+         (read-prolog-term
+          "catch(Module:true, error(instantiation_error, _), true).")))
+    (is (prolog-succeeds-p
+         rulebase
+         (read-prolog-term
+          "catch(42:true, error(type_error(atom, 42), _), true).")))
+    (is (prolog-succeeds-p
+         rulebase
+         (read-prolog-term
+          "catch(unknown_module:true, error(existence_error(module, unknown_module), _), true).")))))
+
+(deftest current-predicate-includes-imported-predicates ()
+  (let ((rulebase (make-rulebase)))
+    (consult-prolog
+     ":- module(alpha, [value/1]). value(alpha)."
+     rulebase)
+    (consult-prolog
+     ":- module(client, []). :- use_module(alpha)."
+     rulebase)
+    (is (prolog-succeeds-p
+         rulebase
+         (read-prolog-term "client:current_predicate(value/1).")))))
+
 (deftest module-consult-rolls-back-import-redefinition ()
   (let ((rulebase (make-rulebase)))
     (consult-prolog ":- module(alpha, [value/1]). value(alpha)." rulebase)

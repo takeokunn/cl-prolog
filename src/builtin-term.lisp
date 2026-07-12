@@ -109,7 +109,7 @@
 (defun %term-order-class (term)
   (cond
     ((logic-var-p term) 0)
-    ((numberp term) 1)
+    ((%prolog-number-p term) 1)
     ((%term-atom-p term) 2)
     ((consp term) 3)
     (t 4)))
@@ -244,12 +244,12 @@
 (define-builtin (atomic term) (rulebase environment depth emit)
   (declare (cl:ignore rulebase depth))
   (let ((resolved-term (%term-resolve term environment)))
-    (when (or (%term-atom-p resolved-term) (numberp resolved-term))
+    (when (or (%term-atom-p resolved-term) (%prolog-number-p resolved-term))
       (funcall emit environment))))
 
 (define-builtin (number term) (rulebase environment depth emit)
   (declare (cl:ignore rulebase depth))
-  (when (numberp (%term-resolve term environment))
+  (when (%prolog-number-p (%term-resolve term environment))
     (funcall emit environment)))
 
 (define-builtin (integer term) (rulebase environment depth emit)
@@ -422,7 +422,8 @@
            ((logic-var-p resolved-arity)
             (%raise-instantiation-error
              environment operation "functor/3 requires an instantiated arity"))
-           ((not (or (%term-atom-p resolved-name) (numberp resolved-name)))
+           ((not (or (%term-atom-p resolved-name)
+                     (%prolog-number-p resolved-name)))
             (%raise-type-error
              "ATOMIC" resolved-name environment operation
              "functor/3 name must be atomic"))
@@ -450,7 +451,7 @@
                      (cons name resolved-name)
                      (cons arity resolved-arity))
                environment emit))))))
-      ((or (%term-atom-p resolved-term) (numberp resolved-term))
+      ((or (%term-atom-p resolved-term) (%prolog-number-p resolved-term))
        (%term-unify-sequence
         (list (cons name resolved-term) (cons arity 0)) environment emit))
       ((%term-compound-p resolved-term)
@@ -534,7 +535,8 @@
       ((not (logic-var-p resolved-term))
        (let ((decomposition
                (cond
-                 ((or (%term-atom-p resolved-term) (numberp resolved-term))
+                 ((or (%term-atom-p resolved-term)
+                      (%prolog-number-p resolved-term))
                   (list resolved-term))
                  ((%term-compound-p resolved-term) resolved-term))))
          (if decomposition
@@ -565,7 +567,7 @@
              "ATOM" head environment operation
              "=../2 compound functor must be an atom"))
            ((and (null arguments)
-                 (not (or (%term-atom-p head) (numberp head))))
+                 (not (or (%term-atom-p head) (%prolog-number-p head))))
             (%raise-type-error
              "ATOMIC" head environment operation
              "=../2 singleton list must contain an atomic term"))

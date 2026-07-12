@@ -23,7 +23,7 @@ If the public surface changed, update the docs in the same change.
 Run:
 
 ```sh
-nix run .
+nix run .          # on Linux
 nix flake check
 ```
 

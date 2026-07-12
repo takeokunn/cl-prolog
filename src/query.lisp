@@ -8,7 +8,8 @@
 
 (defun %collect-query-variables (query)
   "Collect public variables, excluding variables scoped by FORALL/2."
-  (let ((variables '()))
+  (let ((variables '())
+        (seen-conses (make-hash-table :test #'eq)))
     (labels ((walk (term)
                (cond
                  ((logic-var-p term)
@@ -16,8 +17,10 @@
                  ((and (consp term) (eq (first term) 'forall))
                   nil)
                  ((consp term)
-                  (walk (car term))
-                  (walk (cdr term))))))
+                  (unless (gethash term seen-conses)
+                    (setf (gethash term seen-conses) t)
+                    (walk (car term))
+                    (walk (cdr term)))))))
       (walk query))
     (nreverse variables)))
 

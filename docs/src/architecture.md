@@ -111,7 +111,7 @@ state ownership visible at the call site.
 
 ## Verification Layers
 
-1. `nix run .` — cl-weave-backed ASDF regression behavior
+1. `nix run .` — cl-weave-backed ASDF regression behavior on Linux
 2. `nix flake check` — packaging and clean-source verification
 
 When architecture changes land, update the narrowest affected layer first.

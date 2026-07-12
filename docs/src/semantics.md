@@ -8,7 +8,18 @@
   `:max-depth` to a non-negative integer to bound user-rule resolution;
   exhaustion signals `prolog-depth-limit-exceeded` rather than masquerading
   as logical failure.
-- **Occurs check** is always on; unification never builds cyclic terms.
+- **Occurs check** is always on; unification never introduces cyclic terms.
+  Host-provided cyclic cons structures are nevertheless handled safely:
+  unification compares them coinductively, substitution preserves cycles and
+  sharing, and variable collection terminates.
+
+## Modules
+
+Unqualified calls first resolve predicates in the current module and then its
+imports. `current_predicate/1` follows the same visible-predicate view, including
+imported predicates. In a qualified call `Module:Goal`, `Module` is resolved
+through the current bindings and must become an atom naming an existing module;
+violations raise catchable ISO instantiation, type, or existence errors.
 
 ## Proof-search semantics
 

@@ -20,8 +20,14 @@
   (unless (nth-value 1 (unify left right environment))
     (funcall emit environment)))
 
+(defun %resolve-callable-goal (goal environment operation)
+  "Resolve GOAL in ENVIRONMENT and validate it as an ISO callable term."
+  (%ensure-callable (logic-substitute goal environment)
+                    environment operation))
+
 (define-builtin ((not |\\+|) goal) (rulebase environment depth emit)
-  (unless (%provable-p (logic-substitute goal environment)
+  (unless (%provable-p (%resolve-callable-goal goal environment
+                                               (%iso-atom "NOT"))
                        rulebase environment depth *current-prolog-module*)
     (funcall emit environment)))
 
@@ -53,7 +59,7 @@
 (define-builtin (once goal) (rulebase environment depth emit)
   (block first-proof
     (%prove-bindings/k
-     (logic-substitute goal environment)
+     (%resolve-callable-goal goal environment (%iso-atom "ONCE"))
      rulebase environment depth
      (lambda (extended)
        (funcall emit extended)
@@ -155,12 +161,15 @@
         (member name '("TRUE" "=" "UNIFY_WITH_OCCURS_CHECK" "==" "\\==")
                 :test #'string=))))
 
-(defun %call-cleanup/k (setup goal cleanup rulebase environment depth emit)
+(defun %call-cleanup/k (setup goal cleanup rulebase environment depth emit
+                        operation)
   "Commit to SETUP, stream GOAL's proofs, then run CLEANUP exactly once.
 
 CLEANUP failure is ignored, while a condition raised by CLEANUP propagates."
   (multiple-value-bind (setup-environment setup-succeeded-p)
-      (%first-proof-environment setup rulebase environment depth)
+      (%first-proof-environment
+       (%resolve-callable-goal setup environment operation)
+       rulebase environment depth)
     (when setup-succeeded-p
       (let ((cleanup-environment setup-environment)
             (cleanup-ran-p nil)
@@ -168,13 +177,13 @@ CLEANUP failure is ignored, while a condition raised by CLEANUP propagates."
         (labels ((run-cleanup ()
                    (unless cleanup-ran-p
                      (setf cleanup-ran-p t)
-                     (%first-proof-environment cleanup
-                                               rulebase
-                                               cleanup-environment
-                                               depth))))
+                     (%first-proof-environment
+                      (%resolve-callable-goal cleanup cleanup-environment
+                                              operation)
+                      rulebase cleanup-environment depth))))
           (unwind-protect
                (%prove-bindings/k
-                (logic-substitute goal setup-environment)
+                (%resolve-callable-goal goal setup-environment operation)
                 rulebase setup-environment depth
                 (lambda (goal-environment)
                   (setf cleanup-environment goal-environment)
@@ -186,24 +195,28 @@ CLEANUP failure is ignored, while a condition raised by CLEANUP propagates."
 (define-builtin (setup_call_cleanup setup goal cleanup)
     (rulebase environment depth emit)
   (%call-cleanup/k setup goal cleanup
-                   rulebase environment depth emit))
+                   rulebase environment depth emit
+                   (%iso-atom "SETUP_CALL_CLEANUP")))
 
 (define-builtin (call_cleanup goal cleanup)
     (rulebase environment depth emit)
   (%call-cleanup/k 'true goal cleanup
-                   rulebase environment depth emit))
+                   rulebase environment depth emit
+                   (%iso-atom "CALL_CLEANUP")))
 
 (define-builtin (forall condition action) (rulebase environment depth emit)
   (let ((succeeded-p t))
     (block failed-action
       (%prove-bindings/k
-       (logic-substitute condition environment)
+       (%resolve-callable-goal condition environment (%iso-atom "FORALL"))
        rulebase environment depth
        (lambda (condition-environment)
          (unless (nth-value 1
-                            (%first-proof-environment action rulebase
-                                                      condition-environment
-                                                      depth))
+                            (%first-proof-environment
+                             (%resolve-callable-goal
+                              action condition-environment
+                              (%iso-atom "FORALL"))
+                             rulebase condition-environment depth))
            (setf succeeded-p nil)
            (return-from failed-action)))))
     (when succeeded-p
@@ -212,7 +225,9 @@ CLEANUP failure is ignored, while a condition raised by CLEANUP propagates."
 (define-builtin (cl-prolog.user-atoms::ignore goal)
     (rulebase environment depth emit)
   (multiple-value-bind (goal-environment succeeded-p)
-      (%first-proof-environment goal rulebase environment depth)
+      (%first-proof-environment
+       (%resolve-callable-goal goal environment (%iso-atom "IGNORE"))
+       rulebase environment depth)
     (funcall emit (if succeeded-p goal-environment environment))))
 
 (define-builtin (if-then-else condition then else)
@@ -221,11 +236,16 @@ CLEANUP failure is ignored, while a condition raised by CLEANUP propagates."
   ;; shares the caller's cut barrier, as ISO requires.
   (let ((caller-cut-tag *caller-cut-tag*))
     (multiple-value-bind (condition-environment matched-p)
-        (%first-proof-environment condition rulebase environment depth)
+        (%first-proof-environment
+         (%resolve-callable-goal condition environment
+                                 (%iso-atom "IF_THEN_ELSE"))
+         rulebase environment depth)
       (let ((branch-environment
               (if matched-p condition-environment environment)))
         (%prove-with-cut-tag/k
-         (logic-substitute (if matched-p then else) branch-environment)
+         (%resolve-callable-goal (if matched-p then else)
+                                 branch-environment
+                                 (%iso-atom "IF_THEN_ELSE"))
          rulebase branch-environment depth caller-cut-tag emit)))))
 
 (define-builtin (soft-if-then-else condition then else)
@@ -235,16 +255,19 @@ CLEANUP failure is ignored, while a condition raised by CLEANUP propagates."
   (let ((caller-cut-tag *caller-cut-tag*)
         (matched-p nil))
     (%prove-bindings/k
-     (logic-substitute condition environment)
+     (%resolve-callable-goal condition environment
+                             (%iso-atom "SOFT_IF_THEN_ELSE"))
      rulebase environment depth
      (lambda (condition-environment)
        (setf matched-p t)
        (%prove-with-cut-tag/k
-        (logic-substitute then condition-environment)
+        (%resolve-callable-goal then condition-environment
+                                (%iso-atom "SOFT_IF_THEN_ELSE"))
         rulebase condition-environment depth caller-cut-tag emit)))
     (unless matched-p
       (%prove-with-cut-tag/k
-       (logic-substitute else environment)
+       (%resolve-callable-goal else environment
+                               (%iso-atom "SOFT_IF_THEN_ELSE"))
        rulebase environment depth caller-cut-tag emit))))
 
 (define-builtin (throw ball) (rulebase environment depth emit)
@@ -259,7 +282,7 @@ CLEANUP failure is ignored, while a condition raised by CLEANUP propagates."
   (let ((continuation-condition nil))
     (handler-case
         (%prove-bindings/k
-         (logic-substitute goal environment)
+         (%resolve-callable-goal goal environment (%iso-atom "CATCH"))
          rulebase environment depth
          (lambda (goal-environment)
            (handler-case
@@ -276,7 +299,8 @@ CLEANUP failure is ignored, while a condition raised by CLEANUP propagates."
                    environment)
           (if matched-p
               (%prove-bindings/k
-               (logic-substitute recover recovery-environment)
+               (%resolve-callable-goal recover recovery-environment
+                                       (%iso-atom "CATCH"))
                rulebase recovery-environment depth emit)
               (error condition)))))))
 

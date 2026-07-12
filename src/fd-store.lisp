@@ -136,6 +136,10 @@
           (cond
             ((and left-ground-p right-ground-p)
              (values store (%fd-relation-true-p operator left-value right-value)))
+            ((and (logic-var-p resolved-left)
+                  (eq resolved-left resolved-right))
+             (values store
+                     (member operator '(|#=| |#=<| |#>=|) :test #'eq)))
             ((and (logic-var-p resolved-left) right-ground-p)
              (%fd-filter-variable store resolved-left operator right-value t))
             ((and left-ground-p (logic-var-p resolved-right))

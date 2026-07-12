@@ -94,7 +94,16 @@
       (dolist (candidate (%builtin-predicate-indicators))
         (remember (second candidate) (third candidate)))
       (dolist (candidate (%foreign-predicate-indicators))
-        (remember (second candidate) (third candidate))))
+        (remember (second candidate) (third candidate)))
+      (let ((namespace
+              (gethash *current-prolog-module*
+                       (module-registry-modules
+                        (rulebase-module-registry rulebase)))))
+        (when namespace
+          (maphash (lambda (key origin)
+                     (declare (ignore origin))
+                     (remember (car key) (cdr key)))
+                   (prolog-module-imports namespace)))))
     (unless (logic-var-p resolved)
       (unless (and (%proper-list-p resolved)
                    (= (length resolved) 3)

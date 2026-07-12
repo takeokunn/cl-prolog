@@ -45,6 +45,23 @@
                                          ((cl-prolog::quoted maybe)))
                   :signals)))
 
+(deftest io-end-of-stream-state-progresses-from-at-to-past ()
+  (with-io-rulebase (rulebase input output) ""
+    (assert-query
+     rulebase
+     (cl-prolog::stream_property
+      cl-prolog::user_input (cl-prolog::end_of_stream ?state))
+     => (((?state . cl-prolog::at))))
+    (assert-query rulebase (cl-prolog::get_char ?character)
+                  => (((?character . cl-prolog::end_of_file))))
+    (assert-query
+     rulebase
+     (cl-prolog::stream_property
+      cl-prolog::user_input (cl-prolog::end_of_stream ?state))
+     => (((?state . cl-prolog::past))))
+    (assert-query rulebase (cl-prolog::get_char ?character)
+                  => (((?character . cl-prolog::end_of_file))))))
+
 (deftest io-read-term-current-stream-reports-variables ()
   (with-io-rulebase (rulebase input output) "pair(X, X, Y)."
     (assert-query
@@ -56,6 +73,18 @@
           (?variables . (cl-prolog::?x cl-prolog::?y))
           (?names . ((cl-prolog::= cl-prolog::|X| cl-prolog::?x)
                      (cl-prolog::= cl-prolog::|Y| cl-prolog::?y))))))))
+
+(deftest io-read-term-reports-named-singletons-only ()
+  (with-io-rulebase (rulebase input output) "tuple(X, Y, X, _, Z)."
+    (assert-query
+     rulebase
+     (cl-prolog::read_term
+      ?term ((cl-prolog::singletons ?singletons)))
+     => (((?term . (cl-prolog::tuple cl-prolog::?x cl-prolog::?y
+                                    cl-prolog::?x cl-prolog::?anon
+                                    cl-prolog::?z))
+          (?singletons . ((cl-prolog::= cl-prolog::|Y| cl-prolog::?y)
+                          (cl-prolog::= cl-prolog::|Z| cl-prolog::?z))))))))
 
 (deftest io-read-term-validates-syntax-error-policy ()
   (with-io-rulebase (rulebase input output) "broken( ."
@@ -197,6 +226,23 @@
   (with-io-rulebase (rulebase input output) "abc"
     (assert-query rulebase (cl-prolog::get_char ?first)
                   => (((?first . cl-prolog::|a|))))
+    (assert-query rulebase
+                  (cl-prolog::set_stream_position cl-prolog::user_input 0)
+                  :succeeds)
+    (assert-query rulebase (cl-prolog::get_char ?again)
+                  => (((?again . cl-prolog::|a|))))))
+
+(deftest io-set-stream-position-clears-past-end-state ()
+  (with-io-rulebase (rulebase input output) "a"
+    (assert-query rulebase (cl-prolog::get_char ?character)
+                  => (((?character . cl-prolog::|a|))))
+    (assert-query rulebase (cl-prolog::get_char ?character)
+                  => (((?character . cl-prolog::end_of_file))))
+    (assert-query
+     rulebase
+     (cl-prolog::stream_property
+      cl-prolog::user_input (cl-prolog::end_of_stream cl-prolog::past))
+     :succeeds)
     (assert-query rulebase
                   (cl-prolog::set_stream_position cl-prolog::user_input 0)
                   :succeeds)

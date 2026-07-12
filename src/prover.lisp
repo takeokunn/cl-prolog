@@ -168,6 +168,24 @@ caller's clause alternatives, as ISO requires.")
   (and (consp goal) (= (length goal) 3)
        (eq (first goal) (%prolog-symbol ":"))))
 
+(defun %resolve-qualified-module (module state)
+  "Resolve MODULE through the current bindings and validate it as a module atom."
+  (let* ((environment (proof-state-bindings state))
+         (resolved (logic-substitute module environment))
+         (context (%iso-atom "CALL")))
+    (when (logic-var-p resolved)
+      (%raise-instantiation-error environment context
+                                  "module qualifier must be instantiated"))
+    (unless (symbolp resolved)
+      (%raise-type-error "ATOM" resolved environment context
+                         "module qualifier must be an atom"))
+    (unless (gethash resolved
+                     (module-registry-modules
+                      (rulebase-module-registry (proof-state-rulebase state))))
+      (%raise-existence-error "MODULE" resolved environment context
+                              "unknown module"))
+    resolved))
+
 (defun %resolve-user-goal (goal state &optional explicit-module)
   (let* ((rulebase (proof-state-rulebase state))
          (registry (rulebase-module-registry rulebase))
@@ -224,7 +242,8 @@ into the caller's remaining goals."
   "Prove GOAL from STATE after any active depth-limit accounting."
   (let* ((*current-table-session* (proof-state-table-session state))
          (qualified-p (%qualified-goal-p goal))
-         (explicit-module (and qualified-p (second goal)))
+         (explicit-module (and qualified-p
+                               (%resolve-qualified-module (second goal) state)))
          (normalized-goal
            (%ensure-goal-form (if qualified-p (third goal) goal))))
     (cond

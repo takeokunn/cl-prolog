@@ -66,7 +66,7 @@ combinators `dcg-alt`, `dcg-opt`, `dcg-star`, `dcg-plus`,
 
 ## Script Entry Points
 
-- `nix run .` — cl-weave-backed ASDF regression suite
+- `nix run .` — cl-weave-backed ASDF regression suite on Linux
 - `asdf:load-system :cl-prolog/examples` — runnable examples
 
 Anything not exported from `cl-prolog` should be treated as internal.

@@ -25,6 +25,10 @@ and generated relational properties. Nix provides the self-contained runner:
 nix run .
 ```
 
+The packaged Nix app is supported on Linux only. On Darwin, use the Quicklisp
+or ASDF workflow for library development and rely on `nix flake check` in CI
+for the Linux verification path.
+
 Pass any cl-weave CLI options after `--`; for example, to produce a JSON
 result:
 

@@ -19,7 +19,8 @@
   type
   alias
   owned-p
-  source)
+  source
+  (end-of-stream :not))
 
 (defstruct (prolog-io-context
              (:constructor %make-prolog-io-context

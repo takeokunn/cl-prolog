@@ -27,9 +27,17 @@
                                 context "variable(s) and integer(s) required")))))
 
 (defun %fd-post (operator arguments environment emit)
-  (multiple-value-bind (store successp)
-      (%fd-propagate (%fd-add-constraint *fd-store* operator arguments) environment)
-    (when successp (%fd-emit store environment emit))))
+  (let ((left (logic-substitute (first arguments) environment))
+        (right (logic-substitute (second arguments) environment)))
+    (cond
+      ((and (eq operator '|#=|)
+            (or (and (logic-var-p left) (integerp right))
+                (and (integerp left) (logic-var-p right))))
+       (%constraint-unify-emit left right environment emit))
+      (t
+       (multiple-value-bind (store successp)
+           (%fd-propagate (%fd-add-constraint *fd-store* operator arguments) environment)
+         (when successp (%fd-emit store environment emit)))))))
 
 (defmacro define-fd-relation (name)
   `(define-builtin (,name left right) (rulebase environment depth emit)
