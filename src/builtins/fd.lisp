@@ -4,14 +4,14 @@
   (let ((*fd-store* store))
     (funcall emit environment)))
 
-(defun %fd-variable-terms (term environment)
+(defun %fd-variable-terms (term environment &optional (context (%iso-atom "CLPFD")))
   (let ((resolved (logic-substitute term environment)))
     (cond ((logic-var-p resolved) (list resolved))
           ((and (%proper-list-p resolved)
                 (every (lambda (item) (logic-var-p (logic-substitute item environment))) resolved))
            (mapcar (lambda (item) (logic-substitute item environment)) resolved))
           (t (%raise-type-error "VARIABLE_OR_VARIABLE_LIST" resolved environment
-                                (%iso-atom "CLPFD") "unbound variable(s) required")))))
+                                context "unbound variable(s) required")))))
 
 (defun %fd-post (operator arguments environment emit)
   (multiple-value-bind (store successp)
@@ -22,12 +22,12 @@
   `(define-builtin (,name left right) (rulebase environment depth emit)
      (%fd-post ',name (list left right) environment emit)))
 
-(define-builtin (in variables domain-spec) (rulebase environment depth emit)
-  (let ((domain (%fd-domain-spec domain-spec environment))
+(defun %fd-constrain-domain (variables domain-spec environment emit context)
+  (let ((domain (%fd-domain-spec domain-spec environment context))
         (store *fd-store*)
         (successp t))
     (when domain
-      (dolist (variable (%fd-variable-terms variables environment))
+      (dolist (variable (%fd-variable-terms variables environment context))
         (multiple-value-bind (next restrictedp) (%fd-restrict-domain store variable domain)
           (unless restrictedp
             (setf successp nil)
@@ -36,6 +36,12 @@
       (when successp
         (multiple-value-bind (propagated propagatedp) (%fd-propagate store environment)
           (when propagatedp (%fd-emit propagated environment emit)))))))
+
+(define-builtin (in variables domain-spec) (rulebase environment depth emit)
+  (%fd-constrain-domain variables domain-spec environment emit (%iso-atom "IN")))
+
+(define-builtin (ins variables domain-spec) (rulebase environment depth emit)
+  (%fd-constrain-domain variables domain-spec environment emit (%iso-atom "INS")))
 
 (define-fd-relation |#=|)
 (define-fd-relation |#\\=|)
@@ -68,7 +74,8 @@
                  :key (lambda (variable) (length (%fd-domain-of store variable)))))
       (first variables)))
 
-(defun %fd-label (variables store environment options emit)
+(defun %fd-label (variables store environment options emit
+                  &optional (context (%iso-atom "LABELING")))
   (let ((pending (remove-if-not #'logic-var-p
                                 (mapcar (lambda (term) (logic-substitute term environment)) variables))))
     (if (null pending)
@@ -76,7 +83,7 @@
         (let* ((variable (%fd-select-variable pending store options))
                (domain (%fd-domain-of store variable)))
           (unless domain
-            (%raise-instantiation-error environment (%iso-atom "LABELING")
+            (%raise-instantiation-error environment context
                                         "every labeling variable needs a finite domain"))
           (dolist (value (if (%fd-option-p "DOWN" options) (reverse domain) domain))
             (let ((next-environment (unify variable value environment)))
@@ -85,8 +92,13 @@
                     (%fd-propagate store next-environment)
                   (when successp
                     (let ((*fd-store* next-store))
-                      (%fd-label pending next-store next-environment options emit)))))))))))
+                      (%fd-label pending next-store next-environment options emit context)))))))))))
 
 (define-builtin (labeling options variables) (rulebase environment depth emit)
   (%fd-label (%fd-variable-terms variables environment)
              *fd-store* environment (%fd-label-options options environment) emit))
+
+(define-builtin (indomain variable) (rulebase environment depth emit)
+  (let ((context (%iso-atom "INDOMAIN")))
+    (%fd-label (%fd-variable-terms variable environment context)
+               *fd-store* environment nil emit context)))

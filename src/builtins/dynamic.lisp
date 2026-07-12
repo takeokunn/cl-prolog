@@ -150,6 +150,37 @@
                                     *current-prolog-module*))
       (%unify-emit property candidate environment emit))))
 
+(defun %current-module-names (rulebase)
+  "Return registered module names in a deterministic reflection order."
+  (let ((names '()))
+    (maphash (lambda (name module)
+               (declare (ignore module))
+               (unless (eq name +default-prolog-module+)
+                 (push name names)))
+             (module-registry-modules
+              (rulebase-module-registry rulebase)))
+    (cons +default-prolog-module+
+          (sort names #'string<
+                :key (lambda (name)
+                       (format nil "~A/~A"
+                               (or (and (symbol-package name)
+                                        (package-name (symbol-package name)))
+                                   "")
+                               (symbol-name name)))))))
+
+(define-builtin (current_module module) (rulebase environment depth emit)
+  (let ((resolved (logic-substitute module environment)))
+    (unless (or (logic-var-p resolved) (symbolp resolved))
+      (%raise-type-error "ATOM" resolved environment 'current_module
+                         "module name must be an atom"))
+    (if (logic-var-p resolved)
+        (dolist (candidate (%current-module-names rulebase))
+          (%unify-emit module candidate environment emit))
+        (when (gethash resolved
+                       (module-registry-modules
+                        (rulebase-module-registry rulebase)))
+          (funcall emit environment)))))
+
 (define-builtin (abolish indicator) (rulebase environment depth emit)
   (let* ((goal (list 'abolish indicator))
          (resolved (logic-substitute indicator environment)))

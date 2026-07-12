@@ -58,6 +58,31 @@
        (funcall emit extended)
        (return-from first-proof nil)))))
 
+(define-builtin (call_nth goal n) (rulebase environment depth emit)
+  (let* ((resolved-goal
+           (%extend-callable-goal (logic-substitute goal environment)
+                                  '() environment))
+         (resolved-n (logic-substitute n environment)))
+    (unless (or (logic-var-p resolved-n) (integerp resolved-n))
+      (%raise-type-error "INTEGER" resolved-n environment
+                         (%iso-atom "CALL_NTH")
+                         "call_nth/2 requires an integer solution number"))
+    (when (and (integerp resolved-n) (< resolved-n 1))
+      (%raise-domain-error "NOT_LESS_THAN_ONE" resolved-n environment
+                           (%iso-atom "CALL_NTH")
+                           "call_nth/2 requires a positive solution number"))
+    (let ((count 0))
+      (block requested-proof
+        (%prove-bindings/k
+         resolved-goal rulebase environment depth
+         (lambda (extended)
+           (incf count)
+           (if (logic-var-p resolved-n)
+               (%unify-emit n count extended emit)
+               (when (= count resolved-n)
+                 (funcall emit extended)
+                 (return-from requested-proof nil)))))))))
+
 (defun %first-proof-environment (goal rulebase environment depth)
   "Return the first proof environment for GOAL and whether one exists."
   (let ((matched-p nil)

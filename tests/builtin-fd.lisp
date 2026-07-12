@@ -27,6 +27,18 @@
         (labeling () (?x ?y)))
    => (((?x . 1) (?y . 2)) ((?x . 1) (?y . 3)) ((?x . 2) (?y . 3)))))
 
+(deftest-queries finite-domain-ins-and-indomain ((make-rulebase))
+  ((and (ins (?x ?y) (2 |..| 4)) (|#<| ?x ?y)
+        (indomain ?x) (indomain ?y))
+   => (((?x . 2) (?y . 3)) ((?x . 2) (?y . 4)) ((?x . 3) (?y . 4))))
+  ((and (ins ?x (3 1 2)) (indomain ?x))
+   => (((?x . 1)) ((?x . 2)) ((?x . 3))))
+  ((and (ins ?x (1 |..| 1)) (|#=| ?x 2)) :fails)
+  ((ins atom (1 |..| 3)) :signals)
+  ((ins (?x) invalid-domain) :signals)
+  ((indomain ?x) :signals)
+  ((indomain 1) :signals))
+
 (deftest-queries finite-domain-all-different-and-isolation ((make-rulebase))
   ((and (in (?x ?y) (1 |..| 2)) (all_different (?x ?y))
         (labeling (ff) (?x ?y)))

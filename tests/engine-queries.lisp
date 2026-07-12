@@ -76,6 +76,15 @@
                                        ((?goal choice right) (?x . right))))
   ((once (choice ?x))            => (((?x . left))))
   ((once (parent nobody ?x))     :fails)
+  ((call_nth (choice ?x) 2)      => (((?x . right))))
+  ((call_nth (choice ?x) 3)      :fails)
+  ((call_nth (choice ?x) ?n)     => (((?x . left) (?n . 1))
+                                      ((?x . right) (?n . 2))))
+  ((call_nth fail ?n)            :fails)
+  ((call_nth (and (or (= ?x left) (= ?x right)) !) ?n)
+                                   => (((?x . left) (?n . 1))))
+  ((or (call_nth (and ! fail) 1) (= ?side fallback))
+                                   => (((?side . fallback))))
   ((cl-prolog.user-atoms::ignore (choice ?x)) => (((?x . left))))
   ((cl-prolog.user-atoms::ignore fail) => (nil))
   ((forall (choice ?x) (or (= ?x left) (= ?x right))) => (nil))
@@ -107,6 +116,32 @@
   ((catch (throw mismatch) expected true) :signals)
   ((throw ?unbound)              :signals)
   ((repeat)                      => (nil nil nil) :limit 3))
+
+(deftest call-nth-validates-arguments ()
+  (let ((rulebase (make-rulebase)))
+    (dolist (goal '((call_nth ?goal 1)))
+      (signals-condition prolog-instantiation-error
+        (query-prolog rulebase goal)))
+    (dolist (goal '((call_nth 42 1)
+                    (call_nth true atom)
+                    (call_nth true 1.5)))
+      (signals-condition prolog-type-error
+        (query-prolog rulebase goal)))
+    (dolist (goal '((call_nth true 0)
+                    (call_nth true -1)))
+      (signals-condition prolog-domain-error
+        (query-prolog rulebase goal)))))
+
+(deftest call-nth-ground-index-stops-inner-search ()
+  (let ((rulebase (make-rulebase)))
+    (assert-query rulebase
+                  '(call_nth (or (= ?value first)
+                                 (and (assertz (visited-later-solution))
+                                      (= ?value second)))
+                             1)
+                  =>
+                  (((?value . first))))
+    (assert-query rulebase '(visited-later-solution) :fails)))
 
 (deftest cleanup-runs-on-exception-and-early-query-exit ()
   (let ((rulebase (make-family-rulebase)))

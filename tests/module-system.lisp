@@ -65,7 +65,21 @@
       (cl-prolog::module-registry-resolve-qualified
        registry 'new-module 'anything 0
        (lambda (module predicate arity)
-         (declare (ignore module predicate arity)) t)))))
+                 (declare (ignore module predicate arity)) t)))))
+
+(deftest current-module-reflects-module-registry ()
+  (let ((rulebase (make-rulebase)))
+    (cl-prolog::module-registry-declare!
+     (cl-prolog::rulebase-module-registry rulebase) 'zeta '())
+    (cl-prolog::module-registry-declare!
+     (cl-prolog::rulebase-module-registry rulebase) 'alpha '())
+    (assert-query rulebase (cl-prolog::current_module ?module)
+      => (((?module . cl-prolog::user))
+          ((?module . alpha))
+          ((?module . zeta))))
+    (assert-query rulebase (cl-prolog::current_module alpha) :succeeds)
+    (assert-query rulebase (cl-prolog::current_module missing) :fails)
+    (assert-query rulebase (cl-prolog::current_module 42) :signals)))
 
 (deftest module-consult-isolates-colliding-predicates ()
   (let ((rulebase (make-rulebase)))
