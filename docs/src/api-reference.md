@@ -12,13 +12,18 @@ examples.
 ## Data
 
 - `clause`, `clause-p`, `clause-head`, `clause-body`, `make-clause`
-- `rulebase`, `rulebase-p`, `rulebase-visible-clauses`, `make-rulebase`
+- `rulebase`, `rulebase-p`, `rulebase-visible-clauses`, `make-rulebase`,
+  `copy-rulebase`, `rulebase-extend`
 - `rulebase-insert-clause!`
 
 A clause with an empty body is a fact. Rulebases are always explicit values;
 the library has no global rulebase. Prefer `prolog` and `extend-rulebase` for
 declarative construction, and use the mutators only for dynamic database
 semantics such as `asserta`, `assertz`, `retract`, and `abolish`.
+Use `copy-rulebase` to preserve a reusable base while applying dynamic updates
+to an isolated rulebase. It copies stored clauses, their cons-based terms,
+mutable registries, and I/O state; immutable atoms and persistent metadata
+such as operator tables may be shared between the rulebases.
 
 ## Unification
 
