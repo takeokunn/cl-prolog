@@ -10,16 +10,16 @@
         ]
       },
       "locked": {
-        "lastModified": 1783828764,
-        "narHash": "sha256-tiypCJiAsRkW8Yi7WUnkoz5c+nqoWRjU5ca4fa75GJo=",
+        "lastModified": 1783883924,
+        "narHash": "sha256-RDgt6EKDByAUrs2Z123cH/WIFPJRv6vgNNuuuFA7Yzc=",
         "owner": "takeokunn",
         "repo": "cl-weave",
-        "rev": "fce218ade897376e6a50030e4ced0833ba8c5447",
+        "rev": "6d379f361d2aefe018848ecd6f6806ac0b872819",
         "type": "github"
       },
       "original": {
         "owner": "takeokunn",
-        "ref": "v0.4.0",
+        "ref": "v0.6.0",
         "repo": "cl-weave",
         "type": "github"
       }
