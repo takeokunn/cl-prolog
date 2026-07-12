@@ -118,7 +118,7 @@
             (*call-depth-limit-used* 0)
             (*depth-limited-search-p* t))
         (when (eq token
-                  (catch token
+                  (cl:catch token
                     (%prove-bindings/k
                      resolved-goal rulebase environment depth
                      (lambda (extended)

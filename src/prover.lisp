@@ -297,7 +297,7 @@ into the caller's remaining goals."
       (%prove-goal-dispatch/k goal state succeed)
       (progn
         (when (zerop *call-depth-limit-remaining*)
-          (throw *call-depth-limit-token* *call-depth-limit-token*))
+          (cl:throw *call-depth-limit-token* *call-depth-limit-token*))
         (let ((*call-depth-limit-remaining*
                 (1- *call-depth-limit-remaining*))
               (*call-depth-limit-used*
