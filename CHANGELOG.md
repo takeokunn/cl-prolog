@@ -23,12 +23,12 @@ section at the top of the file.
   grouping)
 
 - cl-weave (Vitest-shaped) testing library integration: the new
-  `cl-prolog/weave-tests` ASDF system exercises the public engine surface with
+  `cl-prolog/tests` ASDF system exercises the public engine surface with
   `describe` / `it` / `expect` suites (unification, family relations, list and
   control-flow builtins, goal validation)
-- `flake.nix` gains a `cl-weave` input and a `checks.weave-tests` derivation, so
-  `nix flake check` runs the cl-weave suite locally and in CI with no extra
-  entrypoint; `scripts/run-weave-tests.lisp` is the standalone runner
+- `flake.nix` gains a `cl-weave` input and a `cl-prolog/tests` check, so
+  `nix flake check` runs the complete ASDF suite locally and in CI with no
+  project-local runner
 - `flake.nix` gains a `paredit-cli` input: `nix develop` puts the `paredit`
   structural S-expression CLI on `PATH` for renames, moves, and other
   refactors of Lisp sources, and `checks.paredit-lint` fails `nix flake

@@ -111,11 +111,7 @@ state ownership visible at the call site.
 
 ## Verification Layers
 
-1. `scripts/verify-public-contract.lisp` — exact public surface and shipped files
-2. `sbcl --script tests.lisp` — regression behavior
-3. `sbcl --script scripts/run-tests-noasdf.lisp` — same core suite without script-contract tests
-4. `scripts/benchmark.lisp` — proof-search and DCG performance smoke
-5. `scripts/release-audit.lisp` — release orchestration
-6. `nix flake check` — packaging and clean-source verification
+1. `nix run .` — cl-weave-backed ASDF regression behavior
+2. `nix flake check` — packaging and clean-source verification
 
 When architecture changes land, update the narrowest affected layer first.

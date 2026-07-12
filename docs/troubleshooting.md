@@ -63,7 +63,7 @@ This has two meanings depending on the grammar:
 
 Use `phrase-all` when you need to inspect every successful remainder stream.
 
-## Example or verifier scripts fail under Nix but not locally
+## Nix checks fail only in a clean source tree
 
 Check whether the file is tracked in git. The release checks intentionally
 validate the tracked tree, not only the working directory.
@@ -79,7 +79,7 @@ Confirm:
 Direct smoke:
 
 ```sh
-sbcl --script scripts/run-tests-noasdf.lisp
+nix run .
 ```
 
 ## What To Include In A Bug Report
@@ -88,5 +88,5 @@ sbcl --script scripts/run-tests-noasdf.lisp
 - expected result
 - actual result
 - SBCL version
-- output of `sbcl --script tests.lisp`
-- output of `sbcl --script scripts/verify-public-contract.lisp --json`
+- output of `nix run .`
+- output of `nix flake check --print-build-logs`

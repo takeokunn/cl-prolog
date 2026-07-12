@@ -146,13 +146,8 @@ Combinators: `dcg-alt`, `dcg-opt`, `dcg-star`, `dcg-plus`,
 
 - [API reference](docs/api-reference.md)
 - [Architecture](docs/architecture.md)
-- [OSS readiness audit](docs/oss-readiness-audit.md)
-- [Performance notes](docs/performance.md)
-- [Public contract verifier](docs/public-contract-verifier.md)
-- [Release audit](docs/release-audit.md)
 - [Release checklist](docs/release-checklist.md)
 - [Troubleshooting](docs/troubleshooting.md)
-- [Quality gates](docs/quality-gates.md)
 
 ## Examples
 
@@ -165,38 +160,42 @@ sbcl --script examples/relational-lists.lisp
 ## Testing
 
 ```sh
-sbcl --script tests.lisp
+nix run .
 ```
 
-The core suite excludes the CLI-contract tests that spawn fresh SBCL
-images. Enable them with `CL_PROLOG_TEST_SCRIPTS=1` before running
-`sbcl --script tests.lisp` when you need the full script-contract layer.
-For a fast, ASDF-free core run:
+### cl-weave Integration
+
+The `cl-prolog/tests` ASDF system depends on
+[cl-weave](https://github.com/takeokunn/cl-weave) and runs the complete
+regression suite, including isolated table cases, per-query cases, fixtures,
+and generated relational properties. Nix provides the self-contained runner:
 
 ```sh
-sbcl --script scripts/run-tests-noasdf.lisp
+nix run .
+```
+
+Pass any cl-weave CLI options after `--`; for example, to produce a JSON result:
+
+```sh
+nix run . -- --reporter json --output cl-prolog-weave-results.json
+```
+
+The full Nix verification suite is:
+
+```sh
+nix flake check
 ```
 
 Release-level verification:
 
 ```sh
-sbcl --script scripts/coverage.lisp
-sbcl --script scripts/verify-public-contract.lisp
-sbcl --script scripts/release-audit.lisp --with-benchmarks
-sbcl --script scripts/release-audit.lisp --with-script-contracts
 nix flake check
 ```
-
-`scripts/verify-public-contract.lisp` also verifies that the shipped CI
-workflow still contains the documented release gates and explicit timeout
-declarations.
 
 ## Design Constraints
 
 - no runtime dependencies, SBCL-tested, ANSI-leaning core
 - a single canonical public API surface
-- the exact export set is machine-checked against
-  [`contracts/public-contract.sexp`](contracts/public-contract.sexp)
 
 ## Project Policy
 

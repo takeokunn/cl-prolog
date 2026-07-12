@@ -489,7 +489,6 @@
     ((?name . cl-prolog::unknown) (?value . cl-prolog.user-atoms::error))
     ((?name . cl-prolog::double_quotes) (?value . cl-prolog::codes))))
   ((cl-prolog::set_prolog_flag debug cl-prolog::on) :succeeds)
-  ((cl-prolog::current_prolog_flag debug cl-prolog::on) :succeeds)
   ((cl-prolog::set_prolog_flag debug cl-prolog::off) :succeeds)
   ((cl-prolog::current_prolog_flag debug cl-prolog::off) :succeeds)
   ((cl-prolog::set_prolog_flag ?name on) :signals)
@@ -498,6 +497,11 @@
   ((cl-prolog::set_prolog_flag debug invalid) :signals)
   ((cl-prolog::set_prolog_flag bounded false) :signals)
   ((cl-prolog::current_prolog_flag 7 ?value) :signals))
+
+(deftest prolog-flag-mutation-is-observable-within-one-rulebase ()
+  (let ((rulebase (make-rulebase)))
+    (assert-query rulebase (cl-prolog::set_prolog_flag debug cl-prolog::on) :succeeds)
+    (assert-query rulebase (cl-prolog::current_prolog_flag debug cl-prolog::on) :succeeds)))
 
 (deftest prolog-flag-values-are-rulebase-local ()
   (let ((changed (make-rulebase))

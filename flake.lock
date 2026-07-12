@@ -4,18 +4,22 @@
       "inputs": {
         "nixpkgs": [
           "nixpkgs"
+        ],
+        "paredit-cli": [
+          "paredit-cli"
         ]
       },
       "locked": {
-        "lastModified": 1783741302,
-        "narHash": "sha256-6UkCLVgVKoXvn16irdUsb6FNQjf4gMp3OP5B6df7QSw=",
+        "lastModified": 1783827156,
+        "narHash": "sha256-AWs59kn9QYlWcAjPkDQuFAvdnBtnirEQotEfQSX48ug=",
         "owner": "takeokunn",
         "repo": "cl-weave",
-        "rev": "9bf025025b9d4d3216a45755d454dccc7e801313",
+        "rev": "168a19d2c3ec57c89b68c52b26cbc50b1d8f832a",
         "type": "github"
       },
       "original": {
         "owner": "takeokunn",
+        "ref": "v0.3.0",
         "repo": "cl-weave",
         "type": "github"
       }

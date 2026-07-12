@@ -21,7 +21,7 @@ User support and triage routing are defined in [`SUPPORT.md`](SUPPORT.md).
 4. When adding release artifacts exposed from `README.md` or `docs/`,
    ensure the files are tracked in git before relying on `nix flake check`:
    this repository's `cleanSourceWith` flake source omits untracked files,
-   so docs, example scripts, alias `.asd` files, and verifier entrypoints can
+   so docs, examples, and alias `.asd` files can
    disappear from Nix builds even when they exist in a dirty worktree.
 
 ## Structural refactors
@@ -40,11 +40,9 @@ re-run with `--write`. See the tool's own docs for the full command surface.
 
 ## Compatibility expectations
 
-- Treat `README.md` and `docs/api-reference.md` as the public contract.
+- Keep `README.md` and `docs/api-reference.md` aligned with the public API.
 - Treat `docs/release-checklist.md` as the minimum evidence gate before a
   change is considered releasable.
-- Treat `docs/release-audit.md` as the normative maintainer reference for the
-  bundled release gate CLI and result semantics.
 - Add or update tests when changing built-ins, unification, proof search, DCG,
   or macro expansion behavior.
 - Do not reintroduce compatibility aliases, alternate package surfaces, or
@@ -53,16 +51,12 @@ re-run with `--write`. See the tool's own docs for the full command surface.
 ## Documentation expectations
 
 - Update `README.md` when user-visible behavior changes.
-- Update `CHANGELOG.md` when a user-visible feature, public contract, or
+- Update `CHANGELOG.md` when a user-visible feature or API change
   maintenance policy changes.
 - Update `docs/release-checklist.md` when release evidence or ship criteria
   change.
-- Update `docs/release-audit.md` when the bundled release gate CLI, JSON
-  output, or exit-code contract changes.
-- Update `docs/public-contract-verifier.md` when the verifier's manifest keys,
-  result classes, or content checks change.
 - Update `SECURITY.md` when the supported-version or reporting policy changes.
-- Track newly added docs, examples, and verifier scripts in git
+- Track newly added docs and examples in git
   before treating `nix flake check` as release evidence.
 
 ## Change review checklist
@@ -70,4 +64,4 @@ re-run with `--write`. See the tool's own docs for the full command surface.
 - public API changes are documented
 - tests cover the new behavior or regression
 - release claims are evidence-backed
-- example scripts still load
+- examples still load through ASDF

@@ -3,10 +3,11 @@
 
   inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
 
-  # cl-weave is the Vitest-shaped testing library used by the weave-tests
+  # cl-weave is the testing library used by the cl-prolog/tests ASDF system.
   # suite.  It follows this flake's nixpkgs so both share a single SBCL.
-  inputs.cl-weave.url = "github:takeokunn/cl-weave";
+  inputs.cl-weave.url = "github:takeokunn/cl-weave/v0.3.0";
   inputs.cl-weave.inputs.nixpkgs.follows = "nixpkgs";
+  inputs.cl-weave.inputs.paredit-cli.follows = "paredit-cli";
 
   # paredit-cli provides structural S-expression tooling for this repo's
   # Lisp sources: a dev-shell binary for agent-driven refactors and a
@@ -14,36 +15,71 @@
   inputs.paredit-cli.url = "github:takeokunn/paredit-cli";
   inputs.paredit-cli.inputs.nixpkgs.follows = "nixpkgs";
 
-  outputs = { self, nixpkgs, cl-weave, paredit-cli }:
+  outputs =
+    {
+      self,
+      nixpkgs,
+      cl-weave,
+      paredit-cli,
+    }:
     let
-      systems = [ "x86_64-linux" "aarch64-linux" "x86_64-darwin" "aarch64-darwin" ];
-      forAllSystems = f: builtins.listToAttrs (map
-        (system: {
-          name = system;
-          value = f system;
-        })
-        systems);
-      sourceFor = pkgs: pkgs.lib.cleanSourceWith {
-        src = ./.;
-        filter = path: type:
-          (pkgs.lib.cleanSourceFilter path type)
-          && (let
-            name = builtins.baseNameOf path;
-          in
-            !(pkgs.lib.hasSuffix ".fasl" name
-              || pkgs.lib.hasSuffix ".cfasl" name
-              || pkgs.lib.hasSuffix ".dfsl" name
-              || pkgs.lib.hasSuffix ".ufasl" name
-              || pkgs.lib.hasSuffix ".core" name
-              || pkgs.lib.hasSuffix ".o" name));
-      };
+      systems = [
+        "x86_64-linux"
+        "aarch64-linux"
+        "x86_64-darwin"
+        "aarch64-darwin"
+      ];
+      forAllSystems =
+        f:
+        builtins.listToAttrs (
+          map (system: {
+            name = system;
+            value = f system;
+          }) systems
+        );
+      sourceFor =
+        pkgs:
+        pkgs.lib.cleanSourceWith {
+          src = ./.;
+          filter =
+            path: type:
+            (
+              (pkgs.lib.cleanSourceFilter path type)
+              # Keep test sources available to Nix checks before they are staged.
+              || (
+                let
+                  tests-directory = "${toString ./.}/tests";
+                  path-string = toString path;
+                in
+                path-string == tests-directory || pkgs.lib.hasPrefix "${tests-directory}/" path-string
+              )
+            )
+            && (
+              let
+                name = builtins.baseNameOf path;
+              in
+              !(
+                pkgs.lib.hasSuffix ".fasl" name
+                || pkgs.lib.hasSuffix ".cfasl" name
+                || pkgs.lib.hasSuffix ".dfsl" name
+                || pkgs.lib.hasSuffix ".ufasl" name
+                || pkgs.lib.hasSuffix ".core" name
+                || pkgs.lib.hasSuffix ".o" name
+              )
+            );
+        };
     in
     {
-      formatter = forAllSystems (system:
-        let pkgs = import nixpkgs { inherit system; };
-        in pkgs.nixpkgs-fmt);
+      formatter = forAllSystems (
+        system:
+        let
+          pkgs = import nixpkgs { inherit system; };
+        in
+        pkgs.nixpkgs-fmt
+      );
 
-      packages = forAllSystems (system:
+      packages = forAllSystems (
+        system:
         let
           pkgs = import nixpkgs { inherit system; };
           src = sourceFor pkgs;
@@ -51,52 +87,43 @@
         {
           default = pkgs.sbcl.buildASDFSystem {
             pname = "cl-prolog";
-            version = "0.2.0";
+            version = "0.3.0";
             src = src;
             systems = [ "cl-prolog" ];
           };
-        });
+        }
+      );
 
-      checks = forAllSystems (system:
+      checks = forAllSystems (
+        system:
         let
           pkgs = import nixpkgs { inherit system; };
           src = sourceFor pkgs;
         in
         {
-          default = pkgs.runCommand "cl-prolog-tests"
-            {
-              nativeBuildInputs = [ pkgs.sbcl self.packages.${system}.default ];
-            } ''
-              cp -R ${src} source
-              chmod -R u+w source
-              cd source
-              export HOME="$TMPDIR/home"
-              export XDG_CACHE_HOME="$TMPDIR/cache"
-              mkdir -p "$HOME" "$XDG_CACHE_HOME"
-              sbcl --non-interactive \
-                --eval '(require :asdf)' \
-                --eval '(asdf:load-asd (truename "cl-prolog.asd"))' \
-                --eval '(asdf:test-system :cl-prolog)'
-              touch $out
-            '';
-
-          # Run the cl-weave based suite.  cl-weave is exposed to ASDF through
-          # CL_SOURCE_REGISTRY; its flake package installs its source tree under
-          # share/common-lisp/source/cl-weave.
-          weave-tests = pkgs.runCommand "cl-prolog-weave-tests"
-            {
-              nativeBuildInputs = [ pkgs.sbcl ];
-            } ''
-              cp -R ${src} source
-              chmod -R u+w source
-              cd source
-              export HOME="$TMPDIR/home"
-              export XDG_CACHE_HOME="$TMPDIR/cache"
-              mkdir -p "$HOME" "$XDG_CACHE_HOME"
-              export CL_SOURCE_REGISTRY="${cl-weave.packages.${system}.default}/share/common-lisp/source//:$PWD//:"
-              sbcl --script scripts/run-weave-tests.lisp
-              touch $out
-            '';
+          # The complete suite is an ASDF system.  cl-weave is exposed through
+          # CL_SOURCE_REGISTRY, so no project-local test runner is required.
+          default =
+            pkgs.runCommand "cl-prolog-weave-tests"
+              {
+                nativeBuildInputs = [ pkgs.sbcl ];
+              }
+              ''
+                cp -R ${src} source
+                chmod -R u+w source
+                cd source
+                export HOME="$TMPDIR/home"
+                export XDG_CACHE_HOME="$TMPDIR/cache"
+                mkdir -p "$HOME" "$XDG_CACHE_HOME"
+                export CL_SOURCE_REGISTRY="${
+                  cl-weave.packages.${system}.default
+                }/share/common-lisp/source//:$PWD//:"
+                sbcl --non-interactive \
+                  --eval '(require :asdf)' \
+                  --eval '(asdf:load-asd (truename "cl-prolog.asd"))' \
+                  --eval '(asdf:test-system :cl-prolog/tests)'
+                touch $out
+              '';
 
           # Structural parse gate over every tracked Lisp source: fails if
           # any .lisp/.asd file is not a balanced S-expression document.
@@ -104,21 +131,20 @@
             src = src;
             name = "cl-prolog-paredit-lint";
           };
-        });
+        }
+      );
 
-      apps = forAllSystems (system:
+      apps = forAllSystems (
+        system:
         let
           pkgs = import nixpkgs { inherit system; };
+          clWeavePackage = cl-weave.packages.${system}.default;
           test = pkgs.writeShellApplication {
             name = "cl-prolog-test";
-            runtimeInputs = [ pkgs.sbcl self.packages.${system}.default ];
+            runtimeInputs = [ clWeavePackage ];
             text = ''
-              export XDG_CACHE_HOME="''${XDG_CACHE_HOME:-$PWD/.cache}"
-              mkdir -p "$XDG_CACHE_HOME"
-              sbcl --non-interactive \
-                --eval '(require :asdf)' \
-                --eval '(asdf:load-asd (truename "cl-prolog.asd"))' \
-                --eval '(asdf:test-system :cl-prolog)'
+              export CL_SOURCE_REGISTRY="${clWeavePackage}/share/common-lisp/source//:$PWD//:''${CL_SOURCE_REGISTRY:-}"
+              exec cl-weave run cl-prolog/tests "$@"
             '';
           };
         in
@@ -126,22 +152,32 @@
           test = {
             type = "app";
             program = "${test}/bin/cl-prolog-test";
-            meta.description = "Run the cl-prolog ASDF test suite";
+            meta.description = "Run the cl-prolog cl-weave ASDF test suite";
           };
           default = self.apps.${system}.test;
-        });
+        }
+      );
 
-      devShells = forAllSystems (system:
-        let pkgs = import nixpkgs { inherit system; };
-        in {
+      devShells = forAllSystems (
+        system:
+        let
+          pkgs = import nixpkgs { inherit system; };
+          clWeavePackage = cl-weave.packages.${system}.default;
+        in
+        {
           default = pkgs.mkShell {
             packages = [
               pkgs.nixpkgs-fmt
               pkgs.sbcl
               self.packages.${system}.default
+              clWeavePackage
               paredit-cli.packages.${system}.default
             ];
+            shellHook = ''
+              export CL_SOURCE_REGISTRY="${clWeavePackage}/share/common-lisp/source//:$PWD//:''${CL_SOURCE_REGISTRY:-}"
+            '';
           };
-        });
+        }
+      );
     };
 }

@@ -4,8 +4,7 @@
 
 The surface is intentionally small. Data construction, unification, proof
 search, the rule DSL, and DCG support are public; everything else is
-internal. The exact export set is machine-checked against
-`contracts/public-contract.sexp`.
+internal.
 
 ## Data
 
@@ -148,9 +147,7 @@ rules terminate.
 
 ## Script Entry Points
 
-- `sbcl --script tests.lisp` — regression suite
-- `sbcl --script scripts/run-tests-noasdf.lisp` — fast core suite without script-contract tests
-- `sbcl --script examples/quick-start.lisp` — runnable example script
-- `sbcl --script scripts/benchmark.lisp` — benchmark scenario runner
+- `nix run .` — cl-weave-backed ASDF regression suite
+- `asdf:load-system :cl-prolog/examples` — runnable examples
 
 Anything not exported from `cl-prolog` should be treated as internal.
