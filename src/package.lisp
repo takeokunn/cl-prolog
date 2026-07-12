@@ -23,6 +23,8 @@ is extensible (see DEFINE-FOREIGN-PREDICATE).")
    #:rulebase-p
    #:rulebase-visible-clauses
    #:make-rulebase
+   #:copy-rulebase
+   #:rulebase-extend
    #:rulebase-insert-clause!
    ;; unification
    #:logic-var-p

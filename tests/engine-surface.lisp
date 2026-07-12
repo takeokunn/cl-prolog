@@ -14,6 +14,8 @@
   (:exported "LOGIC-SUBSTITUTE" "CL-PROLOG")
   (:exported "FRESH-LOGIC-VARIABLE" "CL-PROLOG")
   (:exported "RULEBASE-VISIBLE-CLAUSES" "CL-PROLOG")
+  (:exported "COPY-RULEBASE" "CL-PROLOG")
+  (:exported "RULEBASE-EXTEND" "CL-PROLOG")
   (:not-exported "RULEBASE-CLAUSES" "CL-PROLOG")
   (:not-exported "RULEBASE-REMOVE-CLAUSE!" "CL-PROLOG")
   (:exported "TERM_VARIABLES" "CL-PROLOG")
@@ -142,6 +144,60 @@
               (query-prolog-first extended '(color apple ?shade)))
     (is-equal '(((?shade . green)) ((?shade . red)))
               (query-prolog extended '(color apple ?shade)))))
+
+(deftest rulebase-extension-preserves-complete-state ()
+  (let ((base (prolog ((color apple red)))))
+    (setf (gethash '(user marked 1)
+                   (cl-prolog::rulebase-predicate-properties base))
+          :dynamic
+          (gethash 'dialect (cl-prolog::rulebase-prolog-flag-values base))
+          :cl-prolog
+          (gethash #\a (cl-prolog::rulebase-char-conversions base))
+          #\b
+          (gethash #P"fixture.pl" (cl-prolog::rulebase-source-registry base))
+          (cl-prolog::%make-source-record :loaded))
+    (let ((extended (extend-rulebase base ((color apple green)))))
+      (is-equal '(((?shade . green)) ((?shade . red)))
+                (query-prolog extended '(color apple ?shade)))
+      (is (eq (cl-prolog::rulebase-operator-table base)
+              (cl-prolog::rulebase-operator-table extended)))
+      (is (not (eq (cl-prolog::rulebase-predicate-properties base)
+                   (cl-prolog::rulebase-predicate-properties extended))))
+      (is-equal :dynamic
+                (gethash '(user marked 1)
+                         (cl-prolog::rulebase-predicate-properties extended)))
+      (is (not (eq (cl-prolog::rulebase-io-context base)
+                   (cl-prolog::rulebase-io-context extended))))
+      (is (not (eq (cl-prolog::rulebase-module-registry base)
+                   (cl-prolog::rulebase-module-registry extended))))
+      (is (not (eq (cl-prolog::rulebase-source-registry base)
+                   (cl-prolog::rulebase-source-registry extended))))
+      (is-equal :loaded
+                (cl-prolog::%source-record-state
+                 (gethash #P"fixture.pl"
+                          (cl-prolog::rulebase-source-registry extended))))
+      (is-equal :cl-prolog
+                (gethash 'dialect
+                         (cl-prolog::rulebase-prolog-flag-values extended)))
+      (is-equal #\b
+                (gethash #\a
+                         (cl-prolog::rulebase-char-conversions extended))))))
+
+(deftest query-first-distinguishes-ground-success-from-failure ()
+  (let ((rulebase (prolog ((ready))
+                          ((status ok)))))
+    (multiple-value-bind (solution succeeded-p)
+        (query-prolog-first rulebase '(ready))
+      (is-equal nil solution)
+      (is succeeded-p))
+    (multiple-value-bind (solution succeeded-p)
+        (query-prolog-first rulebase '(status missing))
+      (is-equal nil solution)
+      (is (not succeeded-p)))
+    (let ((ran nil))
+      (with-prolog-query () (rulebase '(ready))
+        (setf ran t))
+      (is ran))))
 
 (deftest assert-query-first-keeps-options ()
   (with-macroexpansion (expansion

@@ -95,15 +95,20 @@ when PROJECT is NIL).  LIMIT bounds the number of solutions returned."
       (nreverse solutions))))
 
 (defun query-prolog-first (rulebase query &rest options)
-  "Return the first solution for QUERY, or NIL when it has no proof."
+  "Return the first solution for QUERY and whether a proof was found.
+
+The primary value remains NIL when a ground query succeeds, preserving the
+solution representation and existing callers.  The secondary value
+distinguishes that case from failure."
   (%with-query-options (options max-depth environment project limit)
     (declare (cl:ignore limit))
     (block first-solution
       (%map-prolog-solutions* (lambda (solution)
-                                (return-from first-solution solution))
+                                (return-from first-solution
+                                  (values solution t)))
                               rulebase query
                               max-depth environment project 1)
-      nil)))
+      (values nil nil))))
 
 (defun prolog-succeeds-p (rulebase query &key (max-depth *max-prolog-depth*))
   "Return true when QUERY has at least one proof in RULEBASE."

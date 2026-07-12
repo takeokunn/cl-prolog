@@ -227,6 +227,21 @@
                 (rulebase-table-declarations rulebase))
        copy))))
 
+(defun copy-rulebase (rulebase)
+  "Return a detached copy of RULEBASE, including its complete runtime state."
+  (check-type rulebase rulebase)
+  (%copy-rulebase rulebase))
+
+(defun rulebase-extend (rulebase clauses)
+  "Return a detached copy of RULEBASE shadow-extended by CLAUSES.
+
+CLAUSES retain their order and precede the clauses already visible in
+RULEBASE.  Operator declarations, predicate properties, I/O state, modules,
+source registrations, flags, and character conversions are copied as well."
+  (let ((extended (copy-rulebase rulebase)))
+    (dolist (clause (reverse clauses) extended)
+      (rulebase-insert-clause! extended clause :position :first))))
+
 (defun %replace-rulebase! (target source)
   "Replace TARGET's complete state with SOURCE after a successful transaction."
   (setf (rulebase-entries target) (rulebase-entries source)
