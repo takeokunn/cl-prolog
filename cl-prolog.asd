@@ -8,7 +8,7 @@
   :bug-tracker "https://github.com/takeokunn/cl-prolog/issues"
   :source-control (:git "https://github.com/takeokunn/cl-prolog.git")
   :long-name "cl-prolog"
-  :version "0.5.0"
+  :version "0.5.1"
   :pathname "src"
   :serial t
   :components ((:file "package")
@@ -18,9 +18,10 @@
                  (:file "unification")
                  (:file "parser")
                  (:file "term-writer")
-               (:file "engine")
-               (:file "io-context")
-               (:file "prover")
+                (:file "engine")
+                (:file "io-context")
+                (:file "prover-state")
+                (:file "prover")
                (:module "builtins"
                 :serial t
                 :components ((:file "core")
@@ -36,10 +37,12 @@
                              (:file "io-code")))
                (:file "fd-store")
                (:file "builtins/fd")
+               (:file "term-order")
                (:file "builtin-term")
                (:file "dcg-runtime")
                (:file "query")
                (:file "source-loader")
+               (:file "source-loader-builtins")
                (:file "dsl-compiler")
                (:file "dsl")
                (:file "dcg"))

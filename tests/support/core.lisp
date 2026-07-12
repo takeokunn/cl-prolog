@@ -216,3 +216,13 @@ Supported spec forms:
   "Bind NAME to the single-step macro expansion of FORM and run BODY."
   `(let ((,name (macroexpand-1 ,form)))
      ,@body))
+
+(defun builtin-error-summary (goal)
+  (handler-case
+      (progn
+        (query-prolog (make-rulebase) goal)
+        nil)
+    (prolog-runtime-error (condition)
+      (list (type-of condition)
+            (normalize-error-data
+             (second (prolog-exception-term condition)))))))

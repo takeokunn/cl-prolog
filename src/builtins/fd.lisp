@@ -43,31 +43,11 @@
   `(define-builtin (,name left right) (rulebase environment depth emit)
      (%fd-post ',name (list left right) environment emit)))
 
-(defun %fd-constrain-domain (variables domain-spec environment emit context)
-  (let ((domain (%fd-domain-spec domain-spec environment context))
-        (store *fd-store*)
-        (successp t))
-    (when domain
-      (dolist (term (%fd-domain-terms variables environment context))
-        (if (integerp term)
-            (unless (member term domain)
-              (setf successp nil)
-              (return))
-            (multiple-value-bind (next restrictedp)
-                (%fd-restrict-domain store term domain)
-              (unless restrictedp
-                (setf successp nil)
-                (return))
-              (setf store next))))
-      (when successp
-        (multiple-value-bind (propagated propagatedp) (%fd-propagate store environment)
-          (when propagatedp (%fd-emit propagated environment emit)))))))
+(defmacro %define-fd-domain-relation (name context) `(define-builtin (,name variables domain-spec) (rulebase environment depth emit) (%fd-constrain-domain variables domain-spec environment emit (%iso-atom ,context))))
 
-(define-builtin (in variables domain-spec) (rulebase environment depth emit)
-  (%fd-constrain-domain variables domain-spec environment emit (%iso-atom "IN")))
+(%define-fd-domain-relation in "IN")
 
-(define-builtin (ins variables domain-spec) (rulebase environment depth emit)
-  (%fd-constrain-domain variables domain-spec environment emit (%iso-atom "INS")))
+(%define-fd-domain-relation ins "INS")
 
 (define-fd-relation |#=|)
 (define-fd-relation |#\\=|)

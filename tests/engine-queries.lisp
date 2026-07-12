@@ -919,55 +919,55 @@
 
 (deftest-table control-builtins-report-iso-errors ()
   (:equal '(prolog-instantiation-error "INSTANTIATION_ERROR")
-          (term-builtin-error-summary '(throw ?ball)))
+          (builtin-error-summary '(throw ?ball)))
   (:equal '(prolog-instantiation-error "INSTANTIATION_ERROR")
-          (term-builtin-error-summary '(once ?goal)))
+          (builtin-error-summary '(once ?goal)))
   (:equal '(prolog-type-error ("TYPE_ERROR" "CALLABLE" 42))
-          (term-builtin-error-summary '(once 42)))
+          (builtin-error-summary '(once 42)))
   (:equal '(prolog-instantiation-error "INSTANTIATION_ERROR")
-          (term-builtin-error-summary '(not ?goal)))
+          (builtin-error-summary '(not ?goal)))
   (:equal '(prolog-type-error ("TYPE_ERROR" "CALLABLE" 42))
-          (term-builtin-error-summary '(cl-prolog::|\\+| 42)))
+          (builtin-error-summary '(cl-prolog::|\\+| 42)))
   (:equal '(prolog-instantiation-error "INSTANTIATION_ERROR")
-          (term-builtin-error-summary
+          (builtin-error-summary
            '(cl-prolog.user-atoms::ignore ?goal)))
   (:equal '(prolog-type-error ("TYPE_ERROR" "CALLABLE" 42))
-          (term-builtin-error-summary
+          (builtin-error-summary
            '(cl-prolog.user-atoms::ignore 42)))
   (:equal '(prolog-instantiation-error "INSTANTIATION_ERROR")
-          (term-builtin-error-summary '(forall ?condition true)))
+          (builtin-error-summary '(forall ?condition true)))
   (:equal '(prolog-type-error ("TYPE_ERROR" "CALLABLE" 42))
-          (term-builtin-error-summary '(forall true 42)))
+          (builtin-error-summary '(forall true 42)))
   (:equal nil
-          (term-builtin-error-summary '(forall fail 42)))
+          (builtin-error-summary '(forall fail 42)))
   (:equal '(prolog-instantiation-error "INSTANTIATION_ERROR")
-          (term-builtin-error-summary
+          (builtin-error-summary
            '(setup_call_cleanup ?setup true true)))
   (:equal '(prolog-type-error ("TYPE_ERROR" "CALLABLE" 42))
-          (term-builtin-error-summary '(call_cleanup 42 true)))
+          (builtin-error-summary '(call_cleanup 42 true)))
   (:equal nil
-          (term-builtin-error-summary
+          (builtin-error-summary
            '(setup_call_cleanup fail 42 43)))
   (:equal '(prolog-type-error ("TYPE_ERROR" "CALLABLE" 43))
-          (term-builtin-error-summary
+          (builtin-error-summary
            '(setup_call_cleanup true true 43)))
   (:equal '(prolog-instantiation-error "INSTANTIATION_ERROR")
-          (term-builtin-error-summary
+          (builtin-error-summary
            '(if-then-else ?condition true true)))
   (:equal nil
-          (term-builtin-error-summary
+          (builtin-error-summary
            '(if-then-else true true 42)))
   (:equal '(prolog-type-error ("TYPE_ERROR" "CALLABLE" 42))
-          (term-builtin-error-summary
+          (builtin-error-summary
            '(if-then-else fail true 42)))
   (:equal '(prolog-type-error ("TYPE_ERROR" "CALLABLE" 42))
-          (term-builtin-error-summary
+          (builtin-error-summary
            '(soft-if-then-else true 42 true)))
   (:equal nil
-          (term-builtin-error-summary
+          (builtin-error-summary
            '(soft-if-then-else true true 42)))
   (:equal '(prolog-instantiation-error "INSTANTIATION_ERROR")
-          (term-builtin-error-summary '(catch ?goal mismatch true)))
+          (builtin-error-summary '(catch ?goal mismatch true)))
   (:equal '(prolog-type-error ("TYPE_ERROR" "CALLABLE" 42))
-          (term-builtin-error-summary
+          (builtin-error-summary
            '(catch (throw ball) ball 42))))

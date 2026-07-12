@@ -70,7 +70,7 @@
         pkgs:
         pkgs.stdenvNoCC.mkDerivation {
           pname = "cl-prolog-docs";
-          version = "0.5.0";
+          version = "0.5.1";
           src = pkgs.lib.fileset.toSource {
             root = ./docs;
             fileset = pkgs.lib.fileset.unions [
@@ -107,7 +107,7 @@
           src = sourceFor pkgs;
           cl-prolog = pkgs.sbcl.buildASDFSystem {
             pname = "cl-prolog";
-            version = "0.5.0";
+            version = "0.5.1";
             src = src;
             systems = [ "cl-prolog" ];
           };
