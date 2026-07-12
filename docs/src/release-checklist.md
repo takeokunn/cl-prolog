@@ -7,9 +7,9 @@ This is the minimum evidence bar for calling a revision releasable.
 Confirm that these files still describe the current code:
 
 - `README.md`
-- `docs/api-reference.md`
-- `docs/architecture.md`
-- `docs/troubleshooting.md`
+- `docs/src/api-reference.md`
+- `docs/src/architecture.md`
+- `docs/src/troubleshooting.md`
 - `CHANGELOG.md`
 - `CONTRIBUTING.md`
 - `CODE_OF_CONDUCT.md`
@@ -31,6 +31,7 @@ nix flake check
 
 - ASDF/cl-weave regression suite
 - Nix packaging check when Nix is part of the release process
+- the mdBook documentation build (`checks.documentation`)
 
 ## Refuse To Ship When
 

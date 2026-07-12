@@ -68,6 +68,30 @@
               )
             );
         };
+      mkDocs =
+        pkgs:
+        pkgs.stdenvNoCC.mkDerivation {
+          pname = "cl-prolog-docs";
+          version = "0.4.1";
+          src = pkgs.lib.fileset.toSource {
+            root = ./docs;
+            fileset = pkgs.lib.fileset.unions [
+              ./docs/book.toml
+              ./docs/src
+            ];
+          };
+          nativeBuildInputs = [ pkgs.mdbook ];
+          buildPhase = ''
+            runHook preBuild
+            mdbook build --dest-dir "$out" .
+            runHook postBuild
+          '';
+          dontInstall = true;
+          meta = {
+            description = "Rendered mdBook documentation for cl-prolog";
+            license = pkgs.lib.licenses.mit;
+          };
+        };
     in
     {
       formatter = forAllSystems (
@@ -91,6 +115,7 @@
             src = src;
             systems = [ "cl-prolog" ];
           };
+          docs = mkDocs pkgs;
         }
       );
 
@@ -131,6 +156,14 @@
             src = src;
             name = "cl-prolog-paredit-lint";
           };
+
+          # Fails if the mdBook site does not build to a valid index.html.
+          documentation =
+            pkgs.runCommand "cl-prolog-documentation" { docs = self.packages.${system}.docs; }
+              ''
+                test -f "$docs/index.html"
+                touch $out
+              '';
         }
       );
 
@@ -169,6 +202,7 @@
             packages = [
               pkgs.nixpkgs-fmt
               pkgs.sbcl
+              pkgs.mdbook
               self.packages.${system}.default
               clWeavePackage
               paredit-cli.packages.${system}.default

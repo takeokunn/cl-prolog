@@ -18,7 +18,8 @@ Include:
 - your Common Lisp implementation and version
 - whether you loaded via Quicklisp, ASDF, or Nix
 
-Before opening an issue, check [`docs/troubleshooting.md`](docs/troubleshooting.md)
+Before opening an issue, check
+[`docs/src/troubleshooting.md`](docs/src/troubleshooting.md)
 for common cases such as `(nil)` ground success, `:unify-fail`, `:max-depth`
 limits, and release-gate failures.
 

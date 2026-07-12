@@ -40,8 +40,8 @@ re-run with `--write`. See the tool's own docs for the full command surface.
 
 ## Compatibility expectations
 
-- Keep `README.md` and `docs/api-reference.md` aligned with the public API.
-- Treat `docs/release-checklist.md` as the minimum evidence gate before a
+- Keep `README.md` and `docs/src/api-reference.md` aligned with the public API.
+- Treat `docs/src/release-checklist.md` as the minimum evidence gate before a
   change is considered releasable.
 - Add or update tests when changing built-ins, unification, proof search, DCG,
   or macro expansion behavior.
@@ -53,7 +53,7 @@ re-run with `--write`. See the tool's own docs for the full command surface.
 - Update `README.md` when user-visible behavior changes.
 - Update `CHANGELOG.md` when a user-visible feature or API change
   maintenance policy changes.
-- Update `docs/release-checklist.md` when release evidence or ship criteria
+- Update `docs/src/release-checklist.md` when release evidence or ship criteria
   change.
 - Update `SECURITY.md` when the supported-version or reporting policy changes.
 - Track newly added docs and examples in git

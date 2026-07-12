@@ -29,173 +29,30 @@ The public package is `cl-prolog`.
 ;; => (((?WHO . BOB)) ((?WHO . ALICE)))
 ```
 
-Facts are one-element clauses; rules are a head followed by body goals.
-Logic variables are `?`-prefixed symbols.
+Start with the [documentation source](docs/src/README.md) for querying,
+builtin goals, the rule DSL, DCG support, and semantics. The published site
+is available at <https://takeokunn.github.io/cl-prolog/>.
 
-## Querying
-
-```lisp
-(query-prolog rb '(ancestor tom ?who))          ; all solutions
-(query-prolog rb '(ancestor tom ?who) :limit 2) ; bounded search
-(query-prolog-first rb '(ancestor ?x bob))      ; first solution or NIL
-(prolog-succeeds-p rb '(ancestor tom eve))      ; boolean, stops at first proof
-
-;; streaming: the function is called as each solution is proven
-(map-prolog-solutions
- (lambda (solution) (format t "~&=> ~S~%" solution))
- rb '(ancestor tom ?who))
-```
-
-`with-prolog-query` binds variables from the first solution; `prolog-match`
-dispatches like `cond` over queries.
-
-## Builtin Goals
-
-| Category | Goals | Meaning |
-|---|---|---|
-| Unification | `(= a b)`, `(\= a b)` | unify two terms, or require that they cannot unify |
-| Control | `!`, `(not g)`, `(and g...)`, `(or g...)` | cut, negation as failure, conjunction, and disjunction |
-| Meta-call | `(call g)`, `(once g)`, `(repeat)` | invoke a goal, keep its first proof, or generate repeated proofs |
-| Collection | `(findall t g ?bag)`, `(bagof t g ?bag)`, `(setof t g ?set)` | collect templates; `bagof` groups free variables and `setof` also removes duplicates and sorts |
-| Dynamic database | `(asserta c)`, `(assertz c)`, `(retract c)`, `(abolish (p / n))`, `(clause h b)` | inspect or mutate clauses in the rulebase passed to the query |
-| Arithmetic | `(is ?x expr)`, `(=:= a b)`, `(=\= a b)`, `(< a b)`, `(=< a b)`, `(> a b)`, `(>= a b)` | evaluate arithmetic expressions and compare their numeric values |
-| Lists | `(member ?x list)`, `(append ?a ?b ?c)`, `(reverse ?a ?b)`, `(length ?l ?n)` | list relations in their supported proper-list modes |
-| Lisp guard | `(:when fn ?x...)` | call a Lisp predicate with solved values |
-
-Arithmetic expressions use prefix Lisp-shaped terms. Binary operators are `+`,
-`-`, `*`, `/`, `//`, `div`, `rem`, `mod`, `min`, `max`, `**`, and `^`. Unary
-operators are `+`, `-`, `abs`, `sign`, `truncate`, `round`, `ceiling`, `floor`,
-and `sqrt`.
-
-Collection and dynamic-database goals can be used like any other query:
+## Install
 
 ```lisp
-(query-prolog *family* '(findall ?child (parent tom ?child) ?children))
-;; => (((?CHILDREN BOB)))
-
-(query-prolog *family* '(assertz (parent tom eve)))
-(query-prolog *family* '(parent tom ?child))
-;; includes EVE
-
-(query-prolog (make-rulebase) '(is ?total (+ 20 (* 2 11))))
-;; => (((?TOTAL . 42)))
+(ql:quickload :cl-prolog)             ; via Quicklisp
 ```
-
-For explicit rulebase composition, `define-rulebase` creates a named rulebase
-and `extend-rulebase` returns a new rulebase with additional clauses, leaving the
-base object unchanged:
-
-```lisp
-(define-rulebase *base*
-  ((color apple red)))
-
-(defparameter *extended*
-  (extend-rulebase *base*
-    ((color lime green))))
-
-(query-prolog *extended* '(color ?fruit ?color))
-```
-
-In the `prolog` / `def-rule` DSL you write guards as expressions —
-`(:when (> ?n 10))` — and the macro compiles them to closures. The engine
-never evaluates user expressions at runtime.
-
-Extend the goal set with `define-foreign-predicate`. Foreign predicates use
-the engine's CPS solution protocol and dispatch by exact name and arity:
-
-```lisp
-(define-foreign-predicate (choose output) (rulebase environment depth emit)
-  (declare (ignore rulebase depth))
-  (dolist (value '(left right))
-    (multiple-value-bind (extended ok) (unify output value environment)
-      (when ok (funcall emit extended)))))
-```
-
-## DCG
-
-```lisp
-(def-dcg-rule noun (terminal :noun))
-(def-dcg-rule verb (terminal :verb))
-
-(def-dcg-rule sentence
-  (dcg-star noun)
-  (verb)
-  (brace (= 1 1)))          ; Lisp guard, like (:when ...)
-
-(phrase 'sentence '(:noun :noun :verb))
-;; => NIL, T   (remainder, matched-p)
-```
-
-Combinators: `dcg-alt`, `dcg-opt`, `dcg-star`, `dcg-plus`,
-`dcg-error-recovery`, plus token matchers `dcg-token-match` and
-`dcg-token-match-value`.
-
-## Semantics Notes
-
-- **Clause order**: facts are always tried before rules; within each group,
-  definition order is preserved.
-- **Cut** prunes the running clause's remaining choice points and the
-  predicate's remaining rule clauses.
-- **Optional depth bound**: rule resolution is unbounded by default.  Set
-  `:max-depth` to a non-negative integer to bound user-rule resolution;
-  exhaustion signals `prolog-depth-limit-exceeded` rather than masquerading
-  as logical failure.
-- **Occurs check** is always on; unification never builds cyclic terms.
-
-## Documentation
-
-- [API reference](docs/api-reference.md)
-- [Architecture](docs/architecture.md)
-- [Release checklist](docs/release-checklist.md)
-- [Troubleshooting](docs/troubleshooting.md)
-
-## Examples
 
 ```sh
-sbcl --script examples/quick-start.lisp
-sbcl --script examples/family-tree.lisp
-sbcl --script examples/relational-lists.lisp
+nix run github:takeokunn/cl-prolog    # cl-weave regression suite, via Nix
 ```
 
-## Testing
+See [Development](docs/src/development.md) for building from a local
+checkout, running the test suite, and previewing the documentation site.
+
+## Development
 
 ```sh
-nix run .
+nix develop
+nix run .          # cl-weave-backed ASDF regression suite
+nix flake check    # full verification suite
 ```
-
-### cl-weave Integration
-
-The `cl-prolog/tests` ASDF system depends on
-[cl-weave](https://github.com/takeokunn/cl-weave) and runs the complete
-regression suite, including isolated table cases, per-query cases, fixtures,
-and generated relational properties. Nix provides the self-contained runner:
-
-```sh
-nix run .
-```
-
-Pass any cl-weave CLI options after `--`; for example, to produce a JSON result:
-
-```sh
-nix run . -- --reporter json --output cl-prolog-weave-results.json
-```
-
-The full Nix verification suite is:
-
-```sh
-nix flake check
-```
-
-Release-level verification:
-
-```sh
-nix flake check
-```
-
-## Design Constraints
-
-- no runtime dependencies, SBCL-tested, ANSI-leaning core
-- a single canonical public API surface
 
 ## Project Policy
 

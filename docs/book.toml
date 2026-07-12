@@ -1,0 +1,9 @@
+[book]
+authors = ["cl-prolog contributors"]
+language = "en"
+src = "src"
+title = "cl-prolog"
+
+[output.html]
+git-repository-url = "https://github.com/takeokunn/cl-prolog"
+edit-url-template = "https://github.com/takeokunn/cl-prolog/edit/main/{path}"
