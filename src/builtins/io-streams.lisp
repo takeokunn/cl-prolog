@@ -41,25 +41,25 @@
 
 (%define-io-dual-builtin (read_term (term options) (term options) "READ_TERM")
     (rulebase environment depth emit)
-  (:current
-   (%io-read-term-goal
-    rulebase (%io-current-input-entry rulebase)
-    term options environment emit))
-  (:explicit
-   (%io-read-term-goal
-    rulebase (%io-stream-entry rulebase stream :input environment operation)
-    term options environment emit)))
+  :current
+  (%io-read-term-goal
+   rulebase (%io-current-input-entry rulebase)
+   term options environment emit)
+  :explicit
+  (%io-read-term-goal
+   rulebase (%io-stream-entry rulebase stream :input environment operation)
+   term options environment emit))
 
 (%define-io-dual-builtin (read (term) (term) "READ")
     (rulebase environment depth emit)
-  (:current
-   (%io-read-term-goal
-    rulebase (%io-current-input-entry rulebase)
-    term '() environment emit operation))
-  (:explicit
-   (%io-read-term-goal
-    rulebase (%io-stream-entry rulebase stream :input environment operation)
-    term '() environment emit operation)))
+  :current
+  (%io-read-term-goal
+   rulebase (%io-current-input-entry rulebase)
+   term '() environment emit operation)
+  :explicit
+  (%io-read-term-goal
+   rulebase (%io-stream-entry rulebase stream :input environment operation)
+   term '() environment emit operation))
 
 (defun %io-write-term-goal (entry term options environment emit
                             &optional (operation (%io-operation "WRITE_TERM")))
@@ -84,14 +84,14 @@
 
 (%define-io-dual-builtin (write_term (term options) (term options) "WRITE_TERM")
     (rulebase environment depth emit)
-  (:current
-   (%io-write-term-goal
-    (%io-current-output-entry rulebase)
-    term options environment emit))
-  (:explicit
-   (%io-write-term-goal
-    (%io-stream-entry rulebase stream :output environment operation)
-    term options environment emit)))
+  :current
+  (%io-write-term-goal
+   (%io-current-output-entry rulebase)
+   term options environment emit)
+  :explicit
+  (%io-write-term-goal
+   (%io-stream-entry rulebase stream :output environment operation)
+   term options environment emit))
 
 (defun %io-write-facade-goal (entry term quoted environment emit operation)
   (%io-write-term-goal
@@ -102,25 +102,25 @@
 
 (%define-io-dual-builtin (write (term) (term) "WRITE")
     (rulebase environment depth emit)
-  (:current
-   (%io-write-facade-goal
-    (%io-current-output-entry rulebase)
-    term nil environment emit operation))
-  (:explicit
-   (%io-write-facade-goal
-    (%io-stream-entry rulebase stream :output environment operation)
-    term nil environment emit operation)))
+  :current
+  (%io-write-facade-goal
+   (%io-current-output-entry rulebase)
+   term nil environment emit operation)
+  :explicit
+  (%io-write-facade-goal
+   (%io-stream-entry rulebase stream :output environment operation)
+   term nil environment emit operation))
 
 (%define-io-dual-builtin (writeq (term) (term) "WRITEQ")
     (rulebase environment depth emit)
-  (:current
-   (%io-write-facade-goal
-    (%io-current-output-entry rulebase)
-    term t environment emit operation))
-  (:explicit
-   (%io-write-facade-goal
-    (%io-stream-entry rulebase stream :output environment operation)
-    term t environment emit operation)))
+  :current
+  (%io-write-facade-goal
+   (%io-current-output-entry rulebase)
+   term t environment emit operation)
+  :explicit
+  (%io-write-facade-goal
+   (%io-stream-entry rulebase stream :output environment operation)
+   term t environment emit operation))
 
 (defun %io-write-canonical-goal (entry term environment emit operation)
   ;; ISO write_canonical/1,2: quoted, operator-free, no numbervars, so the
@@ -133,14 +133,14 @@
 
 (%define-io-dual-builtin (write_canonical (term) (term) "WRITE_CANONICAL")
     (rulebase environment depth emit)
-  (:current
-   (%io-write-canonical-goal
-    (%io-current-output-entry rulebase)
-    term environment emit operation))
-  (:explicit
-   (%io-write-canonical-goal
-    (%io-stream-entry rulebase stream :output environment operation)
-    term environment emit operation)))
+  :current
+  (%io-write-canonical-goal
+   (%io-current-output-entry rulebase)
+   term environment emit operation)
+  :explicit
+  (%io-write-canonical-goal
+   (%io-stream-entry rulebase stream :output environment operation)
+   term environment emit operation))
 
 (defun %io-newline (rulebase entry)
   (terpri (prolog-stream-stream
@@ -152,23 +152,23 @@
 
 (%define-io-dual-builtin (nl () () "NL")
     (rulebase environment depth emit)
-  (:current
-   (%io-newline-goal rulebase nil environment emit))
-  (:explicit
-   (%io-newline-goal
-    rulebase
-    (%io-stream-entry rulebase stream :output environment operation)
-    environment emit)))
+  :current
+  (%io-newline-goal rulebase nil environment emit)
+  :explicit
+  (%io-newline-goal
+   rulebase
+   (%io-stream-entry rulebase stream :output environment operation)
+   environment emit))
 
 (%define-io-dual-builtin (flush_output () () "FLUSH_OUTPUT")
     (rulebase environment depth emit)
-  (:current
-   (%io-flush-goal rulebase nil environment emit))
-  (:explicit
-   (%io-flush-goal
-    rulebase
-    (%io-stream-entry rulebase stream :output environment operation)
-    environment emit)))
+  :current
+  (%io-flush-goal rulebase nil environment emit)
+  :explicit
+  (%io-flush-goal
+   rulebase
+   (%io-stream-entry rulebase stream :output environment operation)
+   environment emit))
 
 (defun %io-flush (rulebase entry)
   (finish-output
@@ -199,35 +199,35 @@
 
 (%define-io-dual-builtin (get_char (character) (character) "GET_CHAR")
     (rulebase environment depth emit)
-  (:current
-   (%unify-emit character
-                (%io-character-input
-                 (%io-current-input-entry rulebase)
-                 environment operation)
-                environment emit))
-  (:explicit
-   (%unify-emit character
-                (%io-character-input
-                 (%io-stream-entry rulebase stream :input environment operation)
-                 environment operation)
-                environment emit)))
+  :current
+  (%unify-emit character
+               (%io-character-input
+                (%io-current-input-entry rulebase)
+                environment operation)
+               environment emit)
+  :explicit
+  (%unify-emit character
+               (%io-character-input
+                (%io-stream-entry rulebase stream :input environment operation)
+                environment operation)
+               environment emit))
 
 (%define-io-dual-builtin (peek_char (character) (character) "PEEK_CHAR")
     (rulebase environment depth emit)
-  (:current
-   (%unify-emit
-    character
-    (%io-character-input
-     (%io-current-input-entry rulebase)
-     environment operation :peek t)
-    environment emit))
-  (:explicit
-   (%unify-emit
-    character
-    (%io-character-input
-     (%io-stream-entry rulebase stream :input environment operation)
-     environment operation :peek t)
-    environment emit)))
+  :current
+  (%unify-emit
+   character
+   (%io-character-input
+    (%io-current-input-entry rulebase)
+    environment operation :peek t)
+   environment emit)
+  :explicit
+  (%unify-emit
+   character
+   (%io-character-input
+    (%io-stream-entry rulebase stream :input environment operation)
+    environment operation :peek t)
+   environment emit))
 
 (defun %io-write-character (entry term environment operation)
   (%io-require-stream-type entry :text environment operation)
@@ -266,38 +266,40 @@
 
 (%define-io-dual-builtin (put_char (character) (character) "PUT_CHAR")
     (rulebase environment depth emit)
-  (:current
-   (%io-write-character
-    (%io-current-output-entry rulebase)
-    character environment operation)
-   (funcall emit environment))
-  (:explicit
-   (%io-write-character
-    (%io-stream-entry rulebase stream :output environment operation)
-    character environment operation)
-   (funcall emit environment)))
+  :current
+  (progn
+    (%io-write-character
+     (%io-current-output-entry rulebase)
+     character environment operation)
+    (funcall emit environment))
+  :explicit
+  (progn
+    (%io-write-character
+     (%io-stream-entry rulebase stream :output environment operation)
+     character environment operation)
+    (funcall emit environment)))
 
 (%define-io-dual-builtin (get_byte (byte) (byte) "GET_BYTE")
     (rulebase environment depth emit)
-  (:current
-   (%io-byte-input-goal
-    (%io-current-input-entry rulebase)
-    byte environment emit operation nil))
-  (:explicit
-   (%io-byte-input-goal
-    (%io-stream-entry rulebase stream :input environment operation)
-    byte environment emit operation nil)))
+  :current
+  (%io-byte-input-goal
+   (%io-current-input-entry rulebase)
+   byte environment emit operation nil)
+  :explicit
+  (%io-byte-input-goal
+   (%io-stream-entry rulebase stream :input environment operation)
+   byte environment emit operation nil))
 
 (%define-io-dual-builtin (peek_byte (byte) (byte) "PEEK_BYTE")
     (rulebase environment depth emit)
-  (:current
-   (%io-byte-input-goal
-    (%io-current-input-entry rulebase)
-    byte environment emit operation t))
-  (:explicit
-   (%io-byte-input-goal
-    (%io-stream-entry rulebase stream :input environment operation)
-    byte environment emit operation t)))
+  :current
+  (%io-byte-input-goal
+   (%io-current-input-entry rulebase)
+   byte environment emit operation t)
+  :explicit
+  (%io-byte-input-goal
+   (%io-stream-entry rulebase stream :input environment operation)
+   byte environment emit operation t))
 
 (defun %io-write-byte-goal (entry byte environment emit operation)
   (%io-require-stream-type entry :binary environment operation)
@@ -306,14 +308,14 @@
   (funcall emit environment))
 (%define-io-dual-builtin (put_byte (byte) (byte) "PUT_BYTE")
     (rulebase environment depth emit)
-  (:current
-   (%io-write-byte-goal
-    (%io-current-output-entry rulebase)
-    byte environment emit operation))
-  (:explicit
-   (%io-write-byte-goal
-    (%io-stream-entry rulebase stream :output environment operation)
-    byte environment emit operation)))
+  :current
+  (%io-write-byte-goal
+   (%io-current-output-entry rulebase)
+   byte environment emit operation)
+  :explicit
+  (%io-write-byte-goal
+   (%io-stream-entry rulebase stream :output environment operation)
+   byte environment emit operation))
 
 (defun %io-at-end-p (entry environment operation)
   (ecase (prolog-stream-type entry)
@@ -324,13 +326,13 @@
 
 (%define-io-dual-builtin (at_end_of_stream () () "AT_END_OF_STREAM")
     (rulebase environment depth emit)
-  (:current
-   (when (%io-at-end-p
-          (%io-current-input-entry rulebase)
-          environment operation)
-     (funcall emit environment)))
-  (:explicit
-   (when (%io-at-end-p
-          (%io-stream-entry rulebase stream :input environment operation)
-          environment operation)
-     (funcall emit environment))))
+  :current
+  (when (%io-at-end-p
+         (%io-current-input-entry rulebase)
+         environment operation)
+    (funcall emit environment))
+  :explicit
+  (when (%io-at-end-p
+         (%io-stream-entry rulebase stream :input environment operation)
+         environment operation)
+    (funcall emit environment)))
