@@ -8,12 +8,12 @@
             (:constructor %make-prolog-module (name exports imports)))
   "One module declaration.  Predicate indicators use the parser AST (/ NAME ARITY)."
   (name +default-prolog-module+ :type symbol :read-only t)
-  (exports (make-hash-table :test #'equal) :type hash-table :read-only t)
-  (imports (make-hash-table :test #'equal) :type hash-table :read-only t))
+  (exports (%make-equal-hash-table) :type hash-table :read-only t)
+  (imports (%make-equal-hash-table) :type hash-table :read-only t))
 
 (defstruct (module-registry (:constructor %make-module-registry (modules)))
   "Mutable namespace registry owned by one rulebase."
-  (modules (make-hash-table :test #'eq) :type hash-table :read-only t))
+  (modules (%make-equal-hash-table) :type hash-table :read-only t))
 
 (define-condition prolog-module-error (error)
   ((operation :initarg :operation :reader prolog-module-error-operation)
@@ -45,11 +45,11 @@
 
 (defun make-module-registry ()
   "Create a registry containing the implicit USER module."
-  (let ((registry (%make-module-registry (make-hash-table :test #'eq))))
+  (let ((registry (%make-module-registry (%make-equal-hash-table))))
     (setf (gethash +default-prolog-module+ (module-registry-modules registry))
           (%make-prolog-module +default-prolog-module+
-                               (make-hash-table :test #'equal)
-                               (make-hash-table :test #'equal)))
+                               (%make-equal-hash-table)
+                               (%make-equal-hash-table)))
     registry))
 
 (defun %find-prolog-module (registry name operation)
@@ -64,7 +64,7 @@
     (%module-error "declare module" "module name must be an atom, got ~S" name))
   (when (gethash name (module-registry-modules registry))
     (%module-error "declare module" "module ~S is already declared" name))
-  (let ((export-table (make-hash-table :test #'equal)))
+  (let ((export-table (%make-equal-hash-table)))
     (dolist (indicator exports)
       (let ((key (%predicate-indicator-key indicator "declare module")))
         (when (gethash key export-table)
@@ -72,7 +72,7 @@
         (setf (gethash key export-table) t)))
     (setf (gethash name (module-registry-modules registry))
           (%make-prolog-module name export-table
-                               (make-hash-table :test #'equal)))))
+                               (%make-equal-hash-table)))))
 
 (defun module-registry-exported-p (registry module predicate arity)
   "Return true when MODULE publicly exports PREDICATE/ARITY."
@@ -151,11 +151,11 @@ imports; otherwise the unique import origin is returned."
 
 (defun module-registry-copy (registry)
   "Return a transaction-safe deep copy of REGISTRY."
-  (let ((copy (%make-module-registry (make-hash-table :test #'eq))))
+  (let ((copy (%make-module-registry (%make-equal-hash-table))))
     (maphash
      (lambda (name module)
-       (let ((exports (make-hash-table :test #'equal))
-             (imports (make-hash-table :test #'equal)))
+       (let ((exports (%make-equal-hash-table))
+             (imports (%make-equal-hash-table)))
          (maphash (lambda (key value) (setf (gethash key exports) value))
                   (prolog-module-exports module))
          (maphash (lambda (key value) (setf (gethash key imports) value))
@@ -164,3 +164,5 @@ imports; otherwise the unique import origin is returned."
                (%make-prolog-module name exports imports))))
      (module-registry-modules registry))
     copy))
+
+(defun %make-equal-hash-table () (make-hash-table :test #'equal))

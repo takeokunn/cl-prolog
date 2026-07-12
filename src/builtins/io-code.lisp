@@ -26,53 +26,46 @@
   (write-char (%io-code-character term environment operation)
               (prolog-stream-stream entry)))
 
-(define-builtin (get_code code) (rulebase environment depth emit)
-  (declare (ignore depth))
-  (%unify-emit code
-               (%io-read-code
-                (prolog-io-context-current-input (%io-context rulebase))
-                environment (%io-operation "GET_CODE"))
-               environment emit))
+(%define-io-dual-builtin
+    (get_code (code) (code) "GET_CODE")
+    (rulebase environment depth emit)
+  :current (%unify-emit code
+                        (%io-read-code
+                         (%io-current-input-entry rulebase)
+                         environment operation)
+                        environment emit)
+  :explicit (%unify-emit code
+                         (%io-read-code
+                          (%io-stream-entry rulebase stream :input environment operation)
+                          environment operation)
+                         environment emit))
 
-(define-builtin (get_code stream code) (rulebase environment depth emit)
-  (declare (ignore depth))
-  (let ((operation (%io-operation "GET_CODE")))
-    (%unify-emit code
-                 (%io-read-code
-                  (%io-stream-entry rulebase stream :input environment operation)
-                  environment operation)
-                 environment emit)))
+(%define-io-dual-builtin
+    (peek_code (code) (code) "PEEK_CODE")
+    (rulebase environment depth emit)
+  :current (%unify-emit
+            code
+            (%io-read-code
+             (%io-current-input-entry rulebase)
+             environment operation :peek t)
+            environment emit)
+  :explicit (%unify-emit
+             code
+             (%io-read-code
+              (%io-stream-entry rulebase stream :input environment operation)
+              environment operation :peek t)
+             environment emit))
 
-(define-builtin (peek_code code) (rulebase environment depth emit)
-  (declare (ignore depth))
-  (%unify-emit
-   code
-   (%io-read-code
-    (prolog-io-context-current-input (%io-context rulebase))
-    environment (%io-operation "PEEK_CODE") :peek t)
-   environment emit))
-
-(define-builtin (peek_code stream code) (rulebase environment depth emit)
-  (declare (ignore depth))
-  (let ((operation (%io-operation "PEEK_CODE")))
-    (%unify-emit
-     code
-     (%io-read-code
-      (%io-stream-entry rulebase stream :input environment operation)
-      environment operation :peek t)
-     environment emit)))
-
-(define-builtin (put_code code) (rulebase environment depth emit)
-  (declare (ignore depth))
-  (%io-write-code
-   (prolog-io-context-current-output (%io-context rulebase))
-   code environment (%io-operation "PUT_CODE"))
-  (funcall emit environment))
-
-(define-builtin (put_code stream code) (rulebase environment depth emit)
-  (declare (ignore depth))
-  (let ((operation (%io-operation "PUT_CODE")))
-    (%io-write-code
-     (%io-stream-entry rulebase stream :output environment operation)
-     code environment operation)
-    (funcall emit environment)))
+(%define-io-dual-builtin
+    (put_code (code) (code) "PUT_CODE")
+    (rulebase environment depth emit)
+  :current (progn
+             (%io-write-code
+              (%io-current-output-entry rulebase)
+              code environment operation)
+             (funcall emit environment))
+  :explicit (progn
+              (%io-write-code
+               (%io-stream-entry rulebase stream :output environment operation)
+               code environment operation)
+              (funcall emit environment)))

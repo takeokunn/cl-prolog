@@ -69,6 +69,13 @@
                    ?term ((cl-prolog::syntax_errors unsupported)))
                   :signals)))
 
+(deftest io-read-term-rejects-unsupported-options ()
+  (with-io-rulebase (rulebase input output) "ok."
+    (assert-query rulebase
+                  (cl-prolog::read_term
+                   ?term ((cl-prolog::bogus value)))
+                  :signals)))
+
 (deftest io-read-term-syntax-errors-are-catchable-iso-errors ()
   (with-io-rulebase (rulebase input output) "broken( ."
     (is
@@ -209,54 +216,51 @@
                   (cl-prolog::set_stream_position cl-prolog::user_input -1)
                   :signals)))
 
-(deftest io-character-lookahead-supports-current-and-explicit-streams ()
-  (dolist (explicitp '(nil t))
-    (with-io-rulebase (rulebase input output) "ab"
-      (if explicitp
-          (progn
-            (assert-query rulebase
-                          (cl-prolog::peek_char cl-prolog::user_input ?value)
-                          => (((?value . cl-prolog::|a|))))
-            (assert-query rulebase
-                          (cl-prolog::get_char cl-prolog::user_input ?value)
-                          => (((?value . cl-prolog::|a|)))))
-          (progn
-            (assert-query rulebase
-                          (cl-prolog::peek_char ?value)
-                          => (((?value . cl-prolog::|a|))))
-            (assert-query rulebase
-                          (cl-prolog::get_char ?value)
-                          => (((?value . cl-prolog::|a|)))))))))
+(deftest-io-variants io-character-lookahead-supports-current-and-explicit-streams
+    ((rulebase input output) "ab")
+  ("current stream"
+   (assert-query rulebase
+                 (cl-prolog::peek_char ?value)
+                 => (((?value . cl-prolog::|a|))))
+   (assert-query rulebase
+                 (cl-prolog::get_char ?value)
+                 => (((?value . cl-prolog::|a|)))))
+  ("explicit stream"
+   (assert-query rulebase
+                 (cl-prolog::peek_char cl-prolog::user_input ?value)
+                 => (((?value . cl-prolog::|a|))))
+   (assert-query rulebase
+                 (cl-prolog::get_char cl-prolog::user_input ?value)
+                 => (((?value . cl-prolog::|a|))))))
 
-(deftest io-read-write-facades-share-term-semantics ()
-  (dolist (explicitp '(nil t))
-    (with-io-rulebase (rulebase input output) "pair(X, X)."
-      (if explicitp
-          (progn
-            (assert-query rulebase
-                          (cl-prolog::read cl-prolog::user_input ?term)
-                          => (((?term . (cl-prolog::pair
-                                         cl-prolog::?x cl-prolog::?x)))))
-            (assert-query rulebase
-                          (cl-prolog::write cl-prolog::user_output
-                                            (cl-prolog::$var 0))
-                          :succeeds)
-            (assert-query rulebase
-                          (cl-prolog::writeq cl-prolog::user_output
-                                             cl-prolog::|Mary Jane|)
-                          :succeeds))
-          (progn
-            (assert-query rulebase
-                          (cl-prolog::read ?term)
-                          => (((?term . (cl-prolog::pair
-                                         cl-prolog::?x cl-prolog::?x)))))
-            (assert-query rulebase
-                          (cl-prolog::write (cl-prolog::$var 0))
-                          :succeeds)
-            (assert-query rulebase
-                          (cl-prolog::writeq cl-prolog::|Mary Jane|)
-                          :succeeds)))
-      (is-equal "A'Mary Jane'" (get-output-stream-string output)))))
+(deftest-io-variants io-read-write-facades-share-term-semantics
+    ((rulebase input output) "pair(X, X).")
+  ("current stream"
+   (assert-query rulebase
+                 (cl-prolog::read ?term)
+                 => (((?term . (cl-prolog::pair
+                                cl-prolog::?x cl-prolog::?x)))))
+   (assert-query rulebase
+                 (cl-prolog::write (cl-prolog::$var 0))
+                 :succeeds)
+   (assert-query rulebase
+                 (cl-prolog::writeq cl-prolog::|Mary Jane|)
+                 :succeeds)
+   (is-equal "A'Mary Jane'" (get-output-stream-string output)))
+  ("explicit stream"
+   (assert-query rulebase
+                 (cl-prolog::read cl-prolog::user_input ?term)
+                 => (((?term . (cl-prolog::pair
+                                cl-prolog::?x cl-prolog::?x)))))
+   (assert-query rulebase
+                 (cl-prolog::write cl-prolog::user_output
+                                   (cl-prolog::$var 0))
+                 :succeeds)
+   (assert-query rulebase
+                 (cl-prolog::writeq cl-prolog::user_output
+                                    cl-prolog::|Mary Jane|)
+                 :succeeds)
+   (is-equal "A'Mary Jane'" (get-output-stream-string output))))
 
 (defmacro with-binary-stream-rulebase
     ((rulebase context input-path output-path) input-bytes &body body)
@@ -382,12 +386,10 @@
                                           'cl-prolog.user-atoms::read '?stream)
                                     (list 'cl-prolog::open source
                                           'cl-prolog.user-atoms::read '?stream '())))
-                 (let ((solutions (query-prolog rulebase (list query))))
-                   (is (= 1 (length solutions))
-                       "open must bind exactly one stream")
-                   (let ((stream (solution-binding '?stream (first solutions))))
-                     (is (not (null stream)))
-                     (assert-query rulebase (cl-prolog::stream_property
-                                             ?stream (cl-prolog::mode ?mode))
-                                   :succeeds)))))))
-      (ignore-errors (delete-file path)))))
+                 (with-single-query-solution (solution solutions rulebase query)
+                   (is (not (null (solution-binding '?stream solution)))
+                       "open must bind a stream")
+                   (assert-query rulebase (cl-prolog::stream_property
+                                           ?stream (cl-prolog::mode ?mode))
+                                 :succeeds)))))))
+      (ignore-errors (delete-file path))))

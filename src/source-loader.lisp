@@ -71,6 +71,44 @@
          (%raise-type-error "ATOM" value environment operation
                             "Source must be an atom or proper list of atoms"))))))
 
+(defmacro with-prolog-source-errors ((environment operation) &body body)
+  "Translate source loading failures into operation-specific ISO errors."
+  `(handler-case
+       (progn ,@body)
+     (prolog-source-not-found (condition)
+       (%raise-existence-error
+        "SOURCE_SINK"
+        (%prolog-atom-symbol
+         (namestring (file-error-pathname condition))
+         :preserve-case t)
+        ,environment ,operation
+        "Source file does not exist"))
+     (prolog-parse-error (condition)
+       (%raise-syntax-error condition ,environment ,operation))))
+
+(defmacro with-prolog-loading-transaction ((rulebase transaction initializations)
+                                           &body body)
+  "Evaluate BODY against a copied RULEBASE and publish it on success."
+  `(let ((,transaction (%copy-rulebase ,rulebase))
+         (,initializations (list '())))
+     ,@body
+     (%run-source-initializations! ,initializations ,transaction)
+     (%replace-rulebase! ,rulebase ,transaction)))
+
+(progn
+  (defmacro with-source-loading-builtin ((environment operation emit) &body body)
+    "Run a source-loading builtin and publish EMIT after success."
+    `(with-prolog-source-errors (,environment ,operation)
+       ,@body
+       (funcall ,emit ,environment)))
+  (defmacro define-source-loading-builtin ((name &rest arguments) operation
+                                           &body body)
+    "Define a source-loading builtin with shared wrapper logic."
+    `(define-builtin (,name ,@arguments) (rulebase environment depth emit)
+       (declare (ignore depth))
+       (with-source-loading-builtin (environment ,operation emit)
+         ,@body))))
+
 (defun %read-source-term (stream operator-table)
   (let* ((source (%read-prolog-term-source stream))
          (parser (%parser (%tokenize-prolog source operator-table) operator-table)))
@@ -93,6 +131,17 @@
       (error "Invalid operator specifier ~S." specifier))
     keyword))
 
+(defun %record-source-operator-effect! (effect)
+  (when *current-prolog-source-record*
+    (push effect (%source-record-operators *current-prolog-source-record*))))
+
+(defun %record-source-predicate-property!
+    (module predicate arity property)
+  (when *current-prolog-source-record*
+    (push (list module predicate arity property)
+          (%source-record-predicate-properties
+           *current-prolog-source-record*))))
+
 (defun %apply-source-directive! (goal rulebase initializations module)
   (unless (consp goal)
     (error "Unknown Prolog directive ~S." goal))
@@ -105,12 +154,11 @@
        (let* ((keyword (%operator-specifier-keyword specifier))
               (previous (%operator-table-find
                          (rulebase-operator-table rulebase) operator keyword)))
-         (when *current-prolog-source-record*
-           (push (list operator keyword
-                       (and previous
-                            (operator-definition-priority (first previous)))
-                       priority)
-                 (%source-record-operators *current-prolog-source-record*)))
+         (%record-source-operator-effect!
+          (list operator keyword
+                (and previous
+                     (operator-definition-priority (first previous)))
+                priority))
          (setf (rulebase-operator-table rulebase)
                (%operator-table-define
                 (rulebase-operator-table rulebase)
@@ -121,10 +169,8 @@
      (multiple-value-bind (predicate arity)
          (%predicate-indicator-values (second goal) 'dynamic)
        (%set-rulebase-predicate-property! rulebase predicate arity :dynamic module)
-       (when *current-prolog-source-record*
-         (push (list module predicate arity :dynamic)
-               (%source-record-predicate-properties
-                *current-prolog-source-record*)))))
+       (%record-source-predicate-property!
+        module predicate arity :dynamic)))
     (use_module
      (unless (member (length goal) '(2 3))
        (error "USE_MODULE directive requires a module and optional imports."))
@@ -137,14 +183,14 @@
     ((consult ensure_loaded)
      (unless (= (length goal) 2)
        (error "~A directive requires one source argument." (first goal)))
-     (%load-prolog-pathnames-into-rulebase
+     (%load-prolog-source-into-rulebase
       (%source-file-pathnames (second goal) nil (first goal))
       rulebase initializations
       :if-loaded (if (eq (first goal) 'ensure_loaded) :skip :reload)))
     (load_files
      (unless (member (length goal) '(2 3))
        (error "LOAD_FILES directive requires sources and optional options."))
-     (%load-prolog-pathnames-into-rulebase
+     (%load-prolog-source-into-rulebase
       (%source-file-pathnames (second goal) nil 'load_files)
       rulebase initializations
       :if-loaded (if (= (length goal) 2)
@@ -219,10 +265,8 @@
        (rulebase-module-registry rulebase) module predicate arity)
       (unless (%rulebase-predicate-property rulebase predicate arity module)
         (%set-rulebase-predicate-property! rulebase predicate arity :static module)
-        (when *current-prolog-source-record*
-          (push (list module predicate arity :static)
-                (%source-record-predicate-properties
-                 *current-prolog-source-record*)))))
+        (%record-source-predicate-property!
+         module predicate arity :static)))
     (rulebase-insert-clause! rulebase clause :module module
                              :source *current-prolog-source*)))
 
@@ -375,34 +419,38 @@
     (%load-prolog-pathname-into-rulebase
      pathname rulebase initializations if-loaded)))
 
+(defun %load-prolog-source-into-rulebase
+    (source rulebase initializations &key (if-loaded :reload))
+  "Load SOURCE into RULEBASE, supporting strings, pathnames, and pathname lists."
+  (cond
+    ((pathnamep source)
+     (%load-prolog-pathnames-into-rulebase
+      (list source) rulebase initializations :if-loaded if-loaded))
+    ((and (listp source) (not (stringp source)))
+     (%load-prolog-pathnames-into-rulebase
+      source rulebase initializations :if-loaded if-loaded))
+    (t
+     (%call-with-prolog-source-stream
+      source
+      (lambda (stream)
+        (%load-prolog-source-transaction
+         stream rulebase initializations))))))
+
+(defun %load-prolog-source-into-rulebase/loaded-once
+    (source rulebase &key if-loaded)
+  "Load SOURCE into RULEBASE under one transaction with IF-LOADED policy."
+  (with-prolog-loading-transaction (rulebase transaction initializations)
+    (%load-prolog-source-into-rulebase
+     source transaction initializations :if-loaded if-loaded)))
+
 (defun consult-prolog (source &optional (rulebase (make-rulebase)))
   "Consult SOURCE and atomically replace RULEBASE after successful validation."
-  (let ((transaction (%copy-rulebase rulebase))
-        (initializations (list '())))
-    (cond
-      ((pathnamep source)
-       (%load-prolog-pathnames-into-rulebase
-        (list source) transaction initializations))
-      ((and (listp source) (not (stringp source)))
-       (%load-prolog-pathnames-into-rulebase source transaction initializations))
-      (t
-       (%call-with-prolog-source-stream
-        source
-        (lambda (stream)
-          (%load-prolog-source-transaction
-           stream transaction initializations)))))
-    (%run-source-initializations! initializations transaction)
-    (%replace-rulebase! rulebase transaction)))
+  (%load-prolog-source-into-rulebase/loaded-once source rulebase))
 
 (defun ensure-prolog-loaded (source &optional (rulebase (make-rulebase)))
   "Load existing pathname SOURCE once, atomically updating RULEBASE."
-  (let ((transaction (%copy-rulebase rulebase))
-        (initializations (list '())))
-    (%load-prolog-pathnames-into-rulebase
-     (if (listp source) source (list source))
-     transaction initializations :if-loaded :skip)
-    (%run-source-initializations! initializations transaction)
-    (%replace-rulebase! rulebase transaction)))
+  (%load-prolog-source-into-rulebase/loaded-once source rulebase
+                                                :if-loaded :skip))
 
 (defun %load-files-options (term environment operation)
   "Return a resolved proper option list, reporting ISO list errors."
@@ -454,65 +502,23 @@
                         "Exactly one if(not_loaded) option is required"))
       :skip)))
 
-(defun %consult-source-files (term environment rulebase emit operation)
-  (let ((pathnames (%source-file-pathnames term environment operation)))
-    (handler-case
-        (progn
-          (consult-prolog pathnames rulebase)
-          (funcall emit environment))
-      (prolog-source-not-found (condition)
-        (%raise-existence-error "SOURCE_SINK"
-                                (%prolog-atom-symbol
-                                 (namestring
-                                  (file-error-pathname condition))
-                                 :preserve-case t)
-                                environment operation
-                                "Source file does not exist"))
-      (prolog-parse-error (condition)
-        (%raise-syntax-error condition environment operation)))))
+(define-source-loading-builtin (consult source) 'consult
+  (consult-prolog (%source-file-pathnames source environment 'consult)
+                  rulebase))
 
-(define-builtin (consult source) (rulebase environment depth emit)
-  (declare (ignore depth))
-  (%consult-source-files source environment rulebase emit 'consult))
+(define-source-loading-builtin (load_files sources) 'load_files
+  (consult-prolog (%source-file-pathnames sources environment 'load_files)
+                  rulebase))
 
-(define-builtin (load_files sources) (rulebase environment depth emit)
-  (declare (ignore depth))
-  (%consult-source-files sources environment rulebase emit 'load_files))
+(define-source-loading-builtin (ensure_loaded sources) 'ensure_loaded
+  (ensure-prolog-loaded (%source-file-pathnames sources environment
+                                                'ensure_loaded)
+                        rulebase))
 
-(define-builtin (ensure_loaded sources) (rulebase environment depth emit)
-  (declare (ignore depth))
-  (let ((pathnames (%source-file-pathnames sources environment 'ensure_loaded)))
-    (handler-case
-        (progn
-          (ensure-prolog-loaded pathnames rulebase)
-          (funcall emit environment))
-      (prolog-source-not-found (condition)
-        (%raise-existence-error
-         "SOURCE_SINK"
-         (%prolog-atom-symbol (namestring (file-error-pathname condition))
-                              :preserve-case t)
-         environment 'ensure_loaded "Source file does not exist"))
-      (prolog-parse-error (condition)
-        (%raise-syntax-error condition environment 'ensure_loaded)))))
-
-(define-builtin (load_files sources options) (rulebase environment depth emit)
-  (declare (ignore depth))
+(define-source-loading-builtin (load_files sources options) 'load_files
   (let ((if-loaded (%load-files-if-loaded-policy
                     options environment 'load_files))
         (pathnames (%source-file-pathnames sources environment 'load_files)))
-    (handler-case
-        (let ((transaction (%copy-rulebase rulebase))
-              (initializations (list '())))
-          (%load-prolog-pathnames-into-rulebase
-           pathnames transaction initializations :if-loaded if-loaded)
-          (%run-source-initializations! initializations transaction)
-          (%replace-rulebase! rulebase transaction)
-          (funcall emit environment))
-      (prolog-source-not-found (condition)
-        (%raise-existence-error
-         "SOURCE_SINK"
-         (%prolog-atom-symbol (namestring (file-error-pathname condition))
-                              :preserve-case t)
-         environment 'load_files "Source file does not exist"))
-      (prolog-parse-error (condition)
-        (%raise-syntax-error condition environment 'load_files)))))
+    (with-prolog-loading-transaction (rulebase transaction initializations)
+      (%load-prolog-source-into-rulebase
+       pathnames transaction initializations :if-loaded if-loaded))))

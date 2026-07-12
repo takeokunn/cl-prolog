@@ -7,6 +7,8 @@ section at the top of the file.
 
 ## Unreleased
 
+## 0.4.0 - 2026-07-12
+
 ### Added
 
 - the remaining ISO 13211-1 built-ins: `open/3`, `write_canonical/1,2`,

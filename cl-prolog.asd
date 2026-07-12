@@ -32,6 +32,7 @@
                              (:file "atom")
                              (:file "operator")
                              (:file "io")
+                             (:file "io-streams")
                              (:file "io-code")))
                (:file "fd-store")
                (:file "builtins/fd")

@@ -74,6 +74,26 @@
    rulebase
    (read-prolog-term source (cl-prolog::rulebase-operator-table rulebase))))
 
+(defun %source-list-query-succeeds-p (rulebase sources query-format)
+  "Check that QUERY-FORMAT succeeds when SOURCES are rendered as a Prolog list."
+  (%source-query-succeeds-p
+   rulebase
+   (format nil query-format (%prolog-path-list sources))))
+
+(defmacro %source-queries-succeed-p (rulebase &rest sources)
+  "Assert that each source query succeeds against RULEBASE."
+  `(progn
+     ,@(mapcar (lambda (source)
+                 `(is (%source-query-succeeds-p ,rulebase ,source)))
+               sources)))
+
+(defmacro %source-queries-fail-p (rulebase &rest sources)
+  "Assert that each source query fails against RULEBASE."
+  `(progn
+     ,@(mapcar (lambda (source)
+                 `(is (not (%source-query-succeeds-p ,rulebase ,source))))
+               sources)))
+
 (defun %source-predicate-defined-p (rulebase name)
   (find name (rulebase-visible-clauses rulebase)
         :key (lambda (clause)
@@ -104,15 +124,19 @@
                     relation(a relates b).~%~
                     :- dynamic(started/1).~%~
                     :- initialization(assertz(started(ok)))."))))
-    (is (%source-query-succeeds-p rulebase "relation(a relates b)"))
-    (is (%source-query-succeeds-p rulebase "started(ok)"))))
+    (%source-queries-succeed-p
+     rulebase
+     "relation(a relates b)"
+     "started(ok)")))
 
 (deftest source-loader-dynamic-declarations-control-database-updates ()
   (let ((rulebase
           (consult-prolog
            ":- dynamic(mutable/1). mutable(initial). static.")))
-    (is (%source-query-succeeds-p rulebase "assertz(mutable(added))"))
-    (is (%source-query-succeeds-p rulebase "mutable(added)"))
+    (%source-queries-succeed-p
+     rulebase
+     "assertz(mutable(added))"
+     "mutable(added)")
     (signals-error
      (query-prolog rulebase (read-prolog-term "assertz(static)")))))
 
@@ -124,20 +148,24 @@
                     noun_phrase --> [the], noun.~%~
                     noun --> [cat] ; [dog].~%~
                     verb_phrase --> [sleeps]."))))
-    (is (%source-query-succeeds-p
-         rulebase "phrase(sentence, [the, cat, sleeps])"))
-    (is (%source-query-succeeds-p
-         rulebase "phrase(sentence, [the, dog, sleeps, today], [today])"))
-    (is (not (%source-query-succeeds-p
-              rulebase "phrase(sentence, [the, bird, sleeps])")))))
+    (%source-queries-succeed-p
+     rulebase
+     "phrase(sentence, [the, cat, sleeps])"
+     "phrase(sentence, [the, dog, sleeps, today], [today])")
+    (%source-queries-fail-p
+     rulebase
+     "phrase(sentence, [the, bird, sleeps])")))
 
 (deftest source-loader-supports-dcg-arguments-and-braced-goals ()
   (let ((rulebase
           (consult-prolog
            "token(X) --> [X], { X = accepted }.")))
-    (is (%source-query-succeeds-p rulebase "phrase(token(accepted), [accepted])"))
-    (is (not (%source-query-succeeds-p
-              rulebase "phrase(token(rejected), [rejected])")))))
+    (%source-queries-succeed-p
+     rulebase
+     "phrase(token(accepted), [accepted])")
+    (%source-queries-fail-p
+     rulebase
+     "phrase(token(rejected), [rejected])")))
 
 (deftest-table source-loader-rejects-non-consult-forms ()
   (:signals (consult-prolog "?- true.")
@@ -155,20 +183,21 @@
       (signals-error (consult-prolog source rulebase))
       (is-equal '() (rulebase-visible-clauses rulebase)))))
 
-(deftest source-loader-preserves-an-existing-rulebase-on-failure ()
-  (let ((rulebase (consult-prolog "original.")))
-    (signals-error (consult-prolog "temporary. ?- true." rulebase))
-    (is (%source-query-succeeds-p rulebase "original"))
-    (is (not (%source-predicate-defined-p rulebase 'cl-prolog::temporary)))))
+(defmacro deftest-source-loader-rolls-back (name source)
+  "Define NAME as a rollback regression test for SOURCE."
+  `(deftest ,name ()
+     (let ((rulebase (consult-prolog "original.")))
+       (signals-error (consult-prolog ,source rulebase))
+       (is (%source-query-succeeds-p rulebase "original"))
+       (is (not (%source-predicate-defined-p rulebase 'cl-prolog::temporary))))))
 
-(deftest source-loader-rolls-back-failed-initialization ()
-  (let ((rulebase (consult-prolog "original.")))
-    (signals-error
-     (consult-prolog
-      "temporary. :- initialization(fail)."
-      rulebase))
-    (is (%source-query-succeeds-p rulebase "original"))
-    (is (not (%source-predicate-defined-p rulebase 'cl-prolog::temporary)))))
+(deftest-source-loader-rolls-back
+  source-loader-preserves-an-existing-rulebase-on-failure
+  "temporary. ?- true.")
+
+(deftest-source-loader-rolls-back
+  source-loader-rolls-back-failed-initialization
+  "temporary. :- initialization(fail).")
 
 (deftest source-loader-rolls-back-io-context-changes ()
   (let* ((original-output (make-string-output-stream))
@@ -221,21 +250,20 @@
       ((declaration ":- op(500, xfx, precedes).")
        (usage "ordered(first precedes second)."))
     (let ((rulebase (make-rulebase)))
-      (is (%source-query-succeeds-p
+      (is (%source-list-query-succeeds-p
            rulebase
-           (format nil "consult(~A), ordered(precedes(first, second))"
-                   (%prolog-path-list (list declaration usage))))))))
+           (list declaration usage)
+           "consult(~A), ordered(precedes(first, second))")))))
 
 (deftest load-files-loads-each-source-in-its-list ()
   (with-temporary-prolog-files
       ((first "loaded_from(first).")
        (second "loaded_from(second)."))
     (let ((rulebase (make-rulebase)))
-      (is (%source-query-succeeds-p
+      (is (%source-list-query-succeeds-p
            rulebase
-           (format nil
-                   "load_files(~A), loaded_from(first), loaded_from(second)"
-                   (%prolog-path-list (list first second))))))))
+           (list first second)
+           "load_files(~A), loaded_from(first), loaded_from(second)")))))
 
 (deftest load-files-rolls-back-the-whole-list-on-late-failure ()
   (with-temporary-prolog-files
@@ -372,8 +400,10 @@
       (format output "second_loaded. :- ensure_loaded(~A)."
               (%prolog-path-atom first)))
     (let ((rulebase (ensure-prolog-loaded first)))
-      (is (%source-query-succeeds-p rulebase "first_loaded"))
-      (is (%source-query-succeeds-p rulebase "second_loaded"))
+      (%source-queries-succeed-p
+       rulebase
+       "first_loaded"
+       "second_loaded")
       (is-equal 2 (hash-table-count
                    (cl-prolog::rulebase-source-registry rulebase))))))
 
@@ -381,12 +411,12 @@
   (with-temporary-prolog-files
       ((first "first_once.")
        (second "second_once."))
-    (let ((rulebase (make-rulebase))
-          (sources (%prolog-path-list (list first second))))
-      (is (%source-query-succeeds-p
-           rulebase (format nil "load_files(~A, [if(not_loaded)])" sources)))
-      (is (%source-query-succeeds-p
-           rulebase (format nil "load_files(~A, [if(not_loaded)])" sources)))
+    (let ((rulebase (make-rulebase)))
+      (dotimes (_ 2)
+        (is (%source-list-query-succeeds-p
+             rulebase
+             (list first second)
+             "load_files(~A, [if(not_loaded)])")))
       (is-equal 2 (length (rulebase-visible-clauses rulebase))))))
 
 (deftest load-files-if-not-loaded-rolls-back-source-registry ()
@@ -463,8 +493,10 @@
                     scattered(two).~%~
                     :- multifile(shared/0).~%~
                     :- set_prolog_flag(double_quotes, codes)."))))
-    (is (%source-query-succeeds-p rulebase "scattered(one)"))
-    (is (%source-query-succeeds-p rulebase "scattered(two)"))
+    (%source-queries-succeed-p
+     rulebase
+     "scattered(one)"
+     "scattered(two)")
     (is (%source-query-succeeds-p rulebase
                                   "current_prolog_flag(double_quotes, codes)")))
   (signals-error (consult-prolog ":- discontiguous.")))
@@ -478,14 +510,18 @@
                     kact(one).~%~
                     'kwoted'(two)."))))
     ;; kact reads as fact under the conversion; quoted atoms are exempt.
-    (is (%source-query-succeeds-p rulebase "fact(one)"))
-    (is (%source-query-succeeds-p rulebase "'kwoted'(two)"))))
+    (%source-queries-succeed-p
+     rulebase
+     "fact(one)"
+     "'kwoted'(two)")))
 
 (deftest source-loader-include-splices-terms-into-the-including-unit ()
   (with-temporary-prolog-files ((included "included(fact)."))
-    (let ((rulebase
-            (consult-prolog
-             (format nil ":- include(~A).~%outer(fact)."
-                     (%prolog-path-atom included)))))
-      (is (%source-query-succeeds-p rulebase "included(fact)"))
-      (is (%source-query-succeeds-p rulebase "outer(fact)")))))
+      (let ((rulebase
+              (consult-prolog
+               (format nil ":- include(~A).~%outer(fact)."
+                       (%prolog-path-atom included)))))
+      (%source-queries-succeed-p
+       rulebase
+       "included(fact)"
+       "outer(fact)"))))

@@ -110,13 +110,6 @@
   ((cl-prolog::|=..| ?term (value))
    => (((?term . value)))))
 
-(defun normalize-iso-error-data (term)
-  (typecase term
-    (null nil)
-    (symbol (symbol-name term))
-    (cons (mapcar #'normalize-iso-error-data term))
-    (t term)))
-
 (defun term-builtin-error-summary (goal)
   (handler-case
       (progn
@@ -124,7 +117,7 @@
         nil)
     (prolog-runtime-error (condition)
       (list (type-of condition)
-            (normalize-iso-error-data
+            (normalize-error-data
              (second (prolog-exception-term condition)))))))
 
 (deftest-table term-builtins-report-iso-errors ()

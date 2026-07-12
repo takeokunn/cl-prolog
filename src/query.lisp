@@ -47,6 +47,30 @@
        (%decode-query-options ,options)
      ,@body))
 
+(defun %map-prolog-solutions* (function rulebase query max-depth environment project limit)
+  (unless (typep limit '(or null (integer 1)))
+    (error "MAP-PROLOG-SOLUTIONS: :LIMIT must be NIL or a positive integer, got ~S."
+           limit))
+  (%with-logic-variable-order
+    (let ((remaining limit)
+          (cut-tag (%make-cut-tag)))
+      (block search
+        (cl:catch cut-tag
+          (%prove-goals/k
+           (%normalize-query query)
+           (%make-proof-state rulebase environment max-depth
+                              +default-prolog-module+
+                              (%make-rulebase-table-session rulebase)
+                              cut-tag)
+           (lambda (state)
+             (let ((bindings (proof-state-bindings state)))
+               (funcall function (if project
+                                     (%project-bindings query bindings)
+                                     bindings)))
+             (when (and remaining (zerop (decf remaining)))
+               (return-from search))))))
+      nil)))
+
 (defun map-prolog-solutions (function rulebase query &rest options)
   "Prove QUERY against RULEBASE, calling FUNCTION once per solution.
 
@@ -55,28 +79,8 @@ default) FUNCTION receives an alist of query-variable bindings; otherwise
 it receives the raw environment.  LIMIT, when non-NIL, stops the search
 after that many solutions.  Returns NIL."
   (%with-query-options (options max-depth environment project limit)
-    (unless (typep limit '(or null (integer 1)))
-      (error "MAP-PROLOG-SOLUTIONS: :LIMIT must be NIL or a positive integer, got ~S."
-             limit))
-    (%with-logic-variable-order
-      (let ((remaining limit)
-            (cut-tag (%make-cut-tag)))
-        (block search
-          (cl:catch cut-tag
-            (%prove-goals/k
-             (%normalize-query query)
-             (%make-proof-state rulebase environment max-depth
-                                +default-prolog-module+
-                                (%make-rulebase-table-session rulebase)
-                                cut-tag)
-             (lambda (state)
-               (let ((bindings (proof-state-bindings state)))
-                 (funcall function (if project
-                                       (%project-bindings query bindings)
-                                       bindings)))
-               (when (and remaining (zerop (decf remaining)))
-                 (return-from search))))))
-        nil))))
+    (%map-prolog-solutions* function rulebase query
+                            max-depth environment project limit)))
 
 (defun query-prolog (rulebase query &rest options)
   "Return the list of solutions for QUERY against RULEBASE.
@@ -85,12 +89,9 @@ Each solution is an alist of query-variable bindings (or a raw environment
 when PROJECT is NIL).  LIMIT bounds the number of solutions returned."
   (%with-query-options (options max-depth environment project limit)
     (let ((solutions '()))
-      (map-prolog-solutions (lambda (solution) (push solution solutions))
-                            rulebase query
-                            :max-depth max-depth
-                            :environment environment
-                            :project project
-                            :limit limit)
+      (%map-prolog-solutions* (lambda (solution) (push solution solutions))
+                              rulebase query
+                              max-depth environment project limit)
       (nreverse solutions))))
 
 (defun query-prolog-first (rulebase query &rest options)
@@ -98,14 +99,10 @@ when PROJECT is NIL).  LIMIT bounds the number of solutions returned."
   (%with-query-options (options max-depth environment project limit)
     (declare (cl:ignore limit))
     (block first-solution
-      (map-prolog-solutions
-       (lambda (solution)
-         (return-from first-solution solution))
-       rulebase query
-       :max-depth max-depth
-       :environment environment
-       :project project
-       :limit 1)
+      (%map-prolog-solutions* (lambda (solution)
+                                (return-from first-solution solution))
+                              rulebase query
+                              max-depth environment project 1)
       nil)))
 
 (defun prolog-succeeds-p (rulebase query &key (max-depth *max-prolog-depth*))

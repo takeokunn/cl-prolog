@@ -81,6 +81,14 @@
   "Return true when NAME is exported from PACKAGE-NAME."
   (eq :external (nth-value 1 (find-symbol name package-name))))
 
+(defun normalize-error-data (term)
+  "Normalize nested Prolog error payloads for structural comparison."
+  (typecase term
+    (null nil)
+    (symbol (symbol-name term))
+    (cons (mapcar #'normalize-error-data term))
+    (t term)))
+
 (defun %symbol-export-assertion (name package-name exported-p)
   "Compile a package export assertion for NAME in PACKAGE-NAME."
   (let ((message (if exported-p
@@ -142,6 +150,15 @@
         (:not-ok
          `(is (not (nth-value 1 ,unify-form))))))))
 
+(defmacro %deftest-table-from-specs (name specs compiler)
+  "Define NAME as a cl-weave test with one case per SPEC, compiled via COMPILER."
+  `(cl-weave:describe-sequential ,(string-downcase (symbol-name name))
+     ,@(loop for spec in specs
+             for index from 1
+             collect `(cl-weave:it ,(format nil "case ~D: ~S" index spec)
+                        (cl-weave:expect-has-assertions)
+                        ,(funcall (symbol-function compiler) spec)))))
+
 (defmacro deftest-table (name () &body specs)
   "Define NAME as a test composed entirely from table SPECS.
 
@@ -153,12 +170,20 @@ Supported spec forms:
   (:signals FORM [MESSAGE])
   (:exported NAME PACKAGE-NAME)
   (:not-exported NAME PACKAGE-NAME)"
-  `(cl-weave:describe-sequential ,(string-downcase (symbol-name name))
-     ,@(loop for spec in specs
-             for index from 1
-             collect `(cl-weave:it ,(format nil "case ~D: ~S" index spec)
-                        (cl-weave:expect-has-assertions)
-                        ,(%table-spec-assertion spec)))))
+  `(%deftest-table-from-specs ,name ,specs %table-spec-assertion))
+
+(defmacro deftest-io-variants (name ((rulebase input output) input-text) &body cases)
+  "Define NAME as an IO test with one case per current/explicit variant.
+
+Each CASE is (LABEL &body BODY).  The LABEL is descriptive only; BODY is run
+inside a fresh WITH-IO-RULEBASE setup."
+  `(deftest ,name ()
+     ,@(mapcar (lambda (case)
+                 (destructuring-bind (label &rest body) case
+                   (declare (ignore label))
+                   `(with-io-rulebase (,rulebase ,input ,output) ,input-text
+                      ,@body)))
+               cases)))
 
 (defmacro deftest-unification (name &body specs)
   "Define NAME as a test composed from unification table SPECS.
@@ -168,12 +193,7 @@ Supported spec forms:
   (:fails LEFT RIGHT [:initial-env ENV])
   (:ok LEFT RIGHT [:initial-env ENV])
   (:not-ok LEFT RIGHT [:initial-env ENV])"
-  `(cl-weave:describe-sequential ,(string-downcase (symbol-name name))
-     ,@(loop for spec in specs
-             for index from 1
-             collect `(cl-weave:it ,(format nil "case ~D: ~S" index spec)
-                        (cl-weave:expect-has-assertions)
-                        ,(%unification-spec-assertion spec)))))
+  `(%deftest-table-from-specs ,name ,specs %unification-spec-assertion))
 
 (defun %tree-target-form (target)
   "Compile TARGET syntax into a form producing the fragment to search for."

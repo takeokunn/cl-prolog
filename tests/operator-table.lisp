@@ -63,6 +63,17 @@
     (signals-error (cl-prolog::%operator-table-find table "alpha"))
     (signals-error (cl-prolog::%operator-table-find table 'alpha :unknown))))
 
+(deftest operator-table-breaks-ties-by-package-then-symbol-name ()
+  (let* ((empty (cl-prolog::%make-operator-table '()))
+         (table (cl-prolog::%operator-table-define empty 'cl-prolog::zeta 500 :yfx))
+         (table (cl-prolog::%operator-table-define table 'cl-prolog.tests::alpha 500 :yfx))
+         (table (cl-prolog::%operator-table-define table 'cl-prolog.tests::beta 500 :yfx)))
+    (is-equal '((500 :yfx cl-prolog::zeta)
+                (500 :yfx cl-prolog.tests::alpha)
+                (500 :yfx cl-prolog.tests::beta))
+              (mapcar #'operator-summary
+                      (cl-prolog::%operator-table-current table)))))
+
 (deftest standard-operator-table-is-self-contained ()
   (let ((before (cl-prolog::%operator-table-current
                  cl-prolog::*standard-operator-table*)))

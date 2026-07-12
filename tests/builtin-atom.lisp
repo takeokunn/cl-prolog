@@ -2,6 +2,23 @@
 
 (in-package #:cl-prolog.tests)
 
+(defmacro deftest-bidirectional-queries (name (rulebase-form) &body cases)
+  "Define NAME from paired query cases that share a predicate shape.
+
+Each case is (PREDICATE FORWARD-INPUT FORWARD-OUTPUT FORWARD-EXPECTED
+                     REVERSE-INPUT REVERSE-OUTPUT REVERSE-EXPECTED).
+The macro expands each case into two DEFTEST-QUERIES specs."
+  `(deftest-queries ,name (,rulebase-form)
+     ,@(loop for case in cases
+             append (destructuring-bind (predicate forward-input forward-output
+                                          forward-expected reverse-input
+                                          reverse-output reverse-expected)
+                        case
+                      `(((,predicate ,forward-input ,forward-output)
+                         => ,forward-expected)
+                        ((,predicate ,reverse-input ,reverse-output)
+                         => ,reverse-expected))))))
+
 (deftest-queries atom-builtins ((make-rulebase))
   ((cl-prolog::atom_length cl-prolog::hello ?length) => (((?length . 5))))
   ((cl-prolog::atom_length cl-prolog::hello 5) :succeeds)
@@ -18,22 +35,29 @@
   ((cl-prolog::sub_atom cl-prolog::abc ?before ?length ?after ?sub)
    :succeeds :limit 10)
   ((cl-prolog::sub_atom cl-prolog::abc 1 1 ?after ?sub)
-   => (((?after . 1) (?sub . cl-prolog::b))))
-  ((cl-prolog::atom_chars cl-prolog::abc ?chars)
-   => (((?chars cl-prolog::a cl-prolog::b cl-prolog::c))))
-  ((cl-prolog::atom_chars ?atom
-                          (cl-prolog::a cl-prolog::b cl-prolog::c))
-   => (((?atom . cl-prolog::abc))))
-  ((cl-prolog::atom_codes cl-prolog::abc ?codes) => (((?codes 65 66 67))))
-  ((cl-prolog::atom_codes ?atom (65 66 67)) => (((?atom . cl-prolog::abc))))
-  ((cl-prolog::char_code cl-prolog::a ?code) => (((?code . 65))))
-  ((cl-prolog::char_code ?character 65) => (((?character . cl-prolog::a))))
-  ((cl-prolog::number_chars 42 ?chars)
-   => (((?chars cl-prolog::|4| cl-prolog::|2|))))
-  ((cl-prolog::number_chars ?number (cl-prolog::|4| cl-prolog::|2|))
-   => (((?number . 42))))
-  ((cl-prolog::number_codes -17 ?codes) => (((?codes 45 49 55))))
-  ((cl-prolog::number_codes ?number (45 49 55)) => (((?number . -17)))))
+   => (((?after . 1) (?sub . cl-prolog::b)))))
+
+(deftest-bidirectional-queries atom-builtins-text ((make-rulebase))
+  (cl-prolog::atom_chars cl-prolog::abc ?chars
+   (((?chars cl-prolog::a cl-prolog::b cl-prolog::c)))
+   ?atom (cl-prolog::a cl-prolog::b cl-prolog::c)
+   (((?atom . cl-prolog::abc))))
+  (cl-prolog::atom_codes cl-prolog::abc ?codes
+   (((?codes 65 66 67)))
+   ?atom (65 66 67)
+   (((?atom . cl-prolog::abc))))
+  (cl-prolog::char_code cl-prolog::a ?code
+   (((?code . 65)))
+   ?character 65
+   (((?character . cl-prolog::a))))
+  (cl-prolog::number_chars 42 ?chars
+   (((?chars cl-prolog::|4| cl-prolog::|2|)))
+   ?number (cl-prolog::|4| cl-prolog::|2|)
+   (((?number . 42))))
+  (cl-prolog::number_codes -17 ?codes
+   (((?codes 45 49 55)))
+   ?number (45 49 55)
+   (((?number . -17)))))
 
 (defun parse-number-codes (codes)
   (let ((solutions (query-prolog
@@ -97,19 +121,12 @@
         (declare (ignore condition))
         (is t "Cyclic lists must raise a Prolog type error")))))
 
-(defun normalize-atom-error-data (term)
-  (typecase term
-    (null nil)
-    (symbol (symbol-name term))
-    (cons (mapcar #'normalize-atom-error-data term))
-    (t term)))
-
 (defun atom-builtin-error-summary (goal)
   (handler-case
       (progn (query-prolog (make-rulebase) goal) nil)
     (prolog-runtime-error (condition)
       (list (type-of condition)
-            (normalize-atom-error-data
+            (normalize-error-data
              (second (prolog-exception-term condition)))))))
 
 (deftest-table atom-builtins-report-iso-errors ()

@@ -69,25 +69,29 @@ Priority zero removes the matching NAME and SPECIFIER definition."
   (or (position specifier +operator-specifiers+ :test #'eq)
       (error "Unknown operator specifier ~S." specifier)))
 
+(defun %operator-definition-less-tail-p (left-priority right-priority left right)
+  (cond
+    ((/= left-priority right-priority)
+     (< left-priority right-priority))
+    ((/= (%operator-specifier-rank (operator-definition-specifier left))
+         (%operator-specifier-rank (operator-definition-specifier right)))
+     (< (%operator-specifier-rank (operator-definition-specifier left))
+        (%operator-specifier-rank (operator-definition-specifier right))))
+    (t
+     (let ((left-package (symbol-package (operator-definition-name left)))
+           (right-package (symbol-package (operator-definition-name right))))
+       (let ((left-package-name (and left-package (package-name left-package)))
+             (right-package-name (and right-package (package-name right-package))))
+         (if (equal left-package-name right-package-name)
+             (string< (symbol-name (operator-definition-name left))
+                      (symbol-name (operator-definition-name right)))
+             (string< (or left-package-name "")
+                      (or right-package-name ""))))))))
+
 (defun %operator-definition-less-p (left right)
   (let ((left-priority (operator-definition-priority left))
         (right-priority (operator-definition-priority right)))
-    (cond
-      ((/= left-priority right-priority) (< left-priority right-priority))
-      ((/= (%operator-specifier-rank (operator-definition-specifier left))
-           (%operator-specifier-rank (operator-definition-specifier right)))
-       (< (%operator-specifier-rank (operator-definition-specifier left))
-          (%operator-specifier-rank (operator-definition-specifier right))))
-      (t
-       (let ((left-package (symbol-package (operator-definition-name left)))
-             (right-package (symbol-package (operator-definition-name right))))
-         (let ((left-package-name (and left-package (package-name left-package)))
-               (right-package-name (and right-package (package-name right-package))))
-           (if (equal left-package-name right-package-name)
-               (string< (symbol-name (operator-definition-name left))
-                        (symbol-name (operator-definition-name right)))
-               (string< (or left-package-name "")
-                        (or right-package-name "")))))))))
+    (%operator-definition-less-tail-p left-priority right-priority left right)))
 
 (defun %operator-table-current (table)
   "Return a fresh, deterministically ordered list of TABLE's definitions."
