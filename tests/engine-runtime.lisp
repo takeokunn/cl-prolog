@@ -154,6 +154,55 @@
     (is-equal '(((?x . old)) ((?x . new)))
               (query-prolog rulebase '(value ?x)))))
 
+(deftest predicate-index-excludes-unrelated-clauses-and-preserves-order ()
+  (let ((rulebase (prolog
+                    ((noise before))
+                    ((indexed first))
+                    ((indexed first extra))
+                    ((other between))
+                    ((indexed second))
+                    ((noise after)))))
+    (is-equal '(((?x . first)) ((?x . second)))
+              (query-prolog rulebase '(indexed ?x)))
+    (multiple-value-bind (revision entries)
+        (cl-prolog::%rulebase-predicate-entries
+         rulebase cl-prolog::+default-prolog-module+ 'indexed 1)
+      (declare (cl:ignore revision))
+      (is-equal '((indexed first) (indexed second))
+                (mapcar (lambda (entry)
+                          (clause-head
+                           (cl-prolog::%stored-clause-clause entry)))
+                        entries)))))
+
+(deftest predicate-index-keeps-logical-update-history ()
+  (let ((rulebase (make-rulebase)))
+    (assert-query rulebase (assertz (indexed first)) :succeeds)
+    (assert-query rulebase (assertz (indexed second)) :succeeds)
+    (let ((snapshot (cl-prolog::rulebase-revision rulebase)))
+      (assert-query rulebase (asserta (indexed zeroth)) :succeeds)
+      (assert-query rulebase (retract (indexed first)) :succeeds)
+      (is-equal '(((?x . zeroth)) ((?x . second)))
+                (query-prolog rulebase '(indexed ?x)))
+      (is-equal '((indexed first) (indexed second))
+                (mapcar
+                 (lambda (entry)
+                   (clause-head (cl-prolog::%stored-clause-clause entry)))
+                 (cl-prolog::%rulebase-predicate-entries-at-revision
+                  rulebase cl-prolog::+default-prolog-module+
+                  'indexed 1 snapshot)))
+      (assert-query rulebase (abolish (/ indexed 1)) :succeeds)
+      (is-equal '()
+                (cl-prolog::%rulebase-predicate-entries-at-revision
+                 rulebase cl-prolog::+default-prolog-module+ 'indexed 1
+                 (cl-prolog::rulebase-revision rulebase)))
+      (is-equal '((indexed first) (indexed second))
+                (mapcar
+                 (lambda (entry)
+                   (clause-head (cl-prolog::%stored-clause-clause entry)))
+                 (cl-prolog::%rulebase-predicate-entries-at-revision
+                  rulebase cl-prolog::+default-prolog-module+
+                  'indexed 1 snapshot))))))
+
 (deftest ordinary-predicates-are-not-replayed-for-tabling ()
   (let ((rulebase (prolog
                     ((run-once) (assertz marker)))))

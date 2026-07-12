@@ -128,15 +128,30 @@ caller's clause alternatives, as ISO requires.")
           (setf (gethash key (%table-session-module-entries session))
                 (%rulebase-module-entries rulebase module))))))
 
+(defun %proof-predicate-entries (goal state
+                                 &optional (module (proof-state-module state)))
+  "Return one revision-stable indexed snapshot for GOAL's predicate."
+  (let* ((rulebase (proof-state-rulebase state))
+         (session (proof-state-table-session state))
+         (revision (rulebase-revision rulebase))
+         (predicate (first goal))
+         (arity (length (rest goal)))
+         (key (list revision module predicate arity)))
+    (multiple-value-bind (entries present-p)
+        (gethash key (%table-session-predicate-entries session))
+      (if present-p
+          entries
+          (setf (gethash key (%table-session-predicate-entries session))
+                (%rulebase-predicate-entries-at-revision
+                 rulebase module predicate arity revision))))))
+
 (defun %rulebase-defines-goal-p (state module goal)
   "True when RULEBASE contains or declares GOAL's predicate."
   (let ((rulebase (proof-state-rulebase state))
         (predicate (first goal))
         (arity (length (rest goal))))
     (or (%rulebase-predicate-property rulebase predicate arity module)
-        (some (lambda (entry)
-                (%clause-defines-goal-p (%stored-clause-clause entry) goal))
-              (%proof-module-entries state module)))))
+        (not (null (%proof-predicate-entries goal state module))))))
 
 (defun %qualified-goal-p (goal)
   (and (consp goal) (= (length goal) 3)
@@ -279,7 +294,7 @@ body throws here, abandoning the remaining clause alternatives."
   (let* ((cut-tag (%make-cut-tag))
          (state (%state-with-cut-tag state cut-tag)))
     (cl:catch cut-tag
-      (dolist (entry (%proof-module-entries state))
+      (dolist (entry (%proof-predicate-entries goal state))
         (let ((clause (%stored-clause-clause entry)))
           (if (null (clause-body clause))
               (%continue-matching-fact goal clause state succeed)
