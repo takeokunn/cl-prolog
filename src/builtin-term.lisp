@@ -2,22 +2,20 @@
 
 (in-package #:cl-prolog)
 
+(defmacro %define-term-unary-predicate (name predicate succeeds-when-match-p)
+  `(define-builtin (,name term) (rulebase environment depth emit)
+     (declare (cl:ignore rulebase depth))
+     (let ((matches (,predicate (logic-substitute term environment))))
+       (when (if ,succeeds-when-match-p matches (not matches))
+         (funcall emit environment)))))
+
 (declaim (ftype (function (t t &optional hash-table) integer) %compare-terms))
 
-(define-builtin (var term) (rulebase environment depth emit)
-  (declare (cl:ignore rulebase depth))
-  (when (logic-var-p (logic-substitute term environment))
-    (funcall emit environment)))
+(%define-term-unary-predicate var logic-var-p t)
 
-(define-builtin (nonvar term) (rulebase environment depth emit)
-  (declare (cl:ignore rulebase depth))
-  (unless (logic-var-p (logic-substitute term environment))
-    (funcall emit environment)))
+(%define-term-unary-predicate nonvar logic-var-p nil)
 
-(define-builtin (atom term) (rulebase environment depth emit)
-  (declare (cl:ignore rulebase depth))
-  (when (%term-atom-p (logic-substitute term environment))
-    (funcall emit environment)))
+(%define-term-unary-predicate atom %term-atom-p t)
 
 (define-builtin (atomic term) (rulebase environment depth emit)
   (declare (cl:ignore rulebase depth))
@@ -25,20 +23,11 @@
     (when (or (%term-atom-p resolved-term) (%prolog-number-p resolved-term))
       (funcall emit environment))))
 
-(define-builtin (number term) (rulebase environment depth emit)
-  (declare (cl:ignore rulebase depth))
-  (when (%prolog-number-p (logic-substitute term environment))
-    (funcall emit environment)))
+(%define-term-unary-predicate number %prolog-number-p t)
 
-(define-builtin (integer term) (rulebase environment depth emit)
-  (declare (cl:ignore rulebase depth))
-  (when (integerp (logic-substitute term environment))
-    (funcall emit environment)))
+(%define-term-unary-predicate integer integerp t)
 
-(define-builtin (float term) (rulebase environment depth emit)
-  (declare (cl:ignore rulebase depth))
-  (when (floatp (logic-substitute term environment))
-    (funcall emit environment)))
+(%define-term-unary-predicate float floatp t)
 
 (progn
   (defmacro %define-term-relation (name comparison succeeds-when-match-p)
