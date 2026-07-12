@@ -5,7 +5,7 @@
 
 (defpackage #:cl-prolog
   (:use #:cl)
-  (:shadow #:! #:catch #:throw)
+  (:shadow #:! #:assert #:catch #:throw)
   (:documentation
    "A small, dependency-free Prolog engine.
 
@@ -102,6 +102,7 @@ is extensible (see DEFINE-FOREIGN-PREDICATE).")
    #:false
    #:|\\+|
    #:asserta
+   #:assert
    #:assertz
    #:retract
    #:retractall

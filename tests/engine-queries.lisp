@@ -245,7 +245,7 @@
               (solution-binding
                '?bag
                (query-prolog-first
-                rulebase '(findall ?value (edge missing ?value) ?bag tail))))))
+                rulebase '(findall ?value (edge missing ?value) ?bag tail)))))
 
 (deftest-queries sorting-builtins ((make-rulebase))
   ((sort (3 1 2 1) ?sorted) => (((?sorted 1 2 3))))
@@ -293,7 +293,7 @@
       (let ((sorted (solution-binding '?sorted solution)))
         (is (= 2 (length sorted)))
         (is (not (eq (second (first sorted))
-                     (second (second sorted)))))))))
+                     (second (second sorted))))))))
 
 (deftest dynamic-database-builtins ()
   (let ((rulebase (make-rulebase)))
@@ -303,6 +303,7 @@
                   => (((?value . first)) ((?value . second))))
     (assert-query rulebase (assertz (color apple red)) :succeeds)
     (assert-query rulebase (assertz (color apple blue)) :succeeds)
+    (assert-query rulebase (assert (color banana yellow)) :succeeds)
     (assert-query rulebase (asserta (color apple green)) :succeeds)
     (assert-query rulebase (color apple ?shade)
                   => (((?shade . green)) ((?shade . red)) ((?shade . blue))))
@@ -324,6 +325,12 @@
                   :succeeds)
     (assert-query rulebase (predicate_property (color ?fruit ?shade) user)
                   :succeeds)
+    (assert-query rulebase (predicate_property (color ?fruit ?shade) defined)
+                  :succeeds)
+    (assert-query rulebase
+                  (predicate_property (color ?fruit ?shade)
+                                      (number_of_clauses 4))
+                  :succeeds)
     (assert-query rulebase (predicate_property (ordered ?value) static)
                   :succeeds)
     (assert-query rulebase (predicate_property (ordered ?value) user)
@@ -335,7 +342,10 @@
     (assert-query rulebase (predicate_property (missing ?value) ?property)
                   :fails)
     (assert-query rulebase (predicate_property (color ?fruit ?shade) ?property)
-                  => (((?property . dynamic)) ((?property . user))))
+                  => (((?property . dynamic))
+                      ((?property . user))
+                      ((?property . defined))
+                      ((?property number_of_clauses 4))))
     (assert-query rulebase (retractall (color apple ?shade)) :succeeds)
     (assert-query rulebase (color apple ?shade) :fails)
     (assert-query rulebase (retractall (color apple ?shade)) :succeeds)
@@ -469,6 +479,16 @@
                rulebase 'temporary 1)))
     (assert-query rulebase (assertz (temporary second)) :succeeds)
     (assert-query rulebase (temporary ?value) => (((?value . second))))))
+
+(deftest abolish-removes-table-declarations ()
+  (let ((rulebase (make-rulebase)))
+    (assert-query rulebase (assertz (tabled-dynamic value)) :succeeds)
+    (cl-prolog::%add-rulebase-table-declaration!
+     rulebase 'tabled-dynamic 1 :runtime)
+    (is (cl-prolog::%rulebase-tabled-p rulebase 'tabled-dynamic 1))
+    (assert-query rulebase (abolish (/ tabled-dynamic 1)) :succeeds)
+    (is (not (cl-prolog::%rulebase-tabled-p
+              rulebase 'tabled-dynamic 1)))))
 
 (deftest current-predicate-includes-empty-dynamic-procedures ()
   (let ((rulebase (make-rulebase)))

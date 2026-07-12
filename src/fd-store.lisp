@@ -189,3 +189,21 @@
              (when (equal before (fd-store-domains current))
                (return (values current t))))
         finally (return (values current t))))
+
+(defun %fd-store-active-p (&optional (store *fd-store*))
+  "Return true when STORE contains finite-domain state."
+  (or (fd-store-domains store)
+      (fd-store-constraints store)))
+
+(defun %fd-after-unify (environment emit)
+  "Propagate the active FD store after unification and emit consistent states."
+  (if (%fd-store-active-p)
+      (multiple-value-bind (store successp)
+          (%fd-propagate *fd-store* environment)
+        (when successp
+          (let ((*fd-store* store))
+            (funcall emit environment))))
+      (funcall emit environment)))
+
+(setf *constraint-post-unify-hook* #'%fd-after-unify
+      *constraints-active-p-hook* #'%fd-store-active-p)

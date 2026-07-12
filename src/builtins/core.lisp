@@ -13,6 +13,15 @@
     (when ok
       (funcall emit extended))))
 
+(defun %constraint-unify-emit (left right environment emit)
+  "Unify LEFT and RIGHT, then propagate any active constraint store."
+  (multiple-value-bind (extended ok)
+      (unify left right environment)
+    (when ok
+      (if *constraint-post-unify-hook*
+          (funcall *constraint-post-unify-hook* extended emit)
+          (funcall emit extended)))))
+
 (defun %proper-list-p (value)
   "True when VALUE is a finite proper list."
   (loop with seen = (make-hash-table :test #'eq)

@@ -15,6 +15,10 @@
 (defvar *call-depth-limit-remaining* nil)
 (defvar *call-depth-limit-used* 0)
 (defvar *depth-limited-search-p* nil)
+(defvar *constraint-post-unify-hook* nil
+  "Function called after builtin =/2 extends an environment.")
+(defvar *constraints-active-p-hook* nil
+  "Function reporting whether a dynamically scoped constraint store is active.")
 
 (define-condition %call-depth-limit-exceeded (error)
   ((token :initarg :token :reader %call-depth-limit-exceeded-token)))
@@ -370,6 +374,8 @@ body throws here, abandoning the remaining clause alternatives."
 (defun %prove-clauses/k (goal state succeed)
   "Prove GOAL, tabling declared predicates and detected left recursion."
   (if (or *depth-limited-search-p*
+          (and *constraints-active-p-hook*
+               (funcall *constraints-active-p-hook*))
           (not (or (%rulebase-tabled-p
                     (proof-state-rulebase state) (first goal)
                     (length (rest goal)) (proof-state-module state))

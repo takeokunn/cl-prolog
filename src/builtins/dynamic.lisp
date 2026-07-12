@@ -11,7 +11,7 @@
                              :module *current-prolog-module*)
     (funcall emit environment)))
 
-(define-builtin (assertz clause) (rulebase environment depth emit)
+(define-builtin ((assert assertz) clause) (rulebase environment depth emit)
   (let* ((goal (list 'assertz clause))
          (entry (%clause-term-entry (logic-substitute clause environment)
                                     rulebase goal environment)))
@@ -118,11 +118,20 @@
                     (%builtin-predicate-p (second resolved) (third resolved)))
             (funcall emit environment))))))
 
+(defun %predicate-clause-count (rulebase predicate arity module)
+  (count-if
+   (lambda (stored)
+     (multiple-value-bind (entry-predicate entry-arity)
+         (%entry-predicate-arity (%stored-clause-clause stored))
+       (and (eq predicate entry-predicate)
+            (= arity entry-arity))))
+   (%rulebase-module-entries rulebase module)))
+
 (defun %predicate-properties (rulebase predicate arity module)
   "Return the supported reflection properties for PREDICATE/ARITY."
   (cond
     ((%builtin-predicate-p predicate arity)
-     '(built_in))
+     '(built_in defined))
     (t
      (let ((declared (%rulebase-predicate-property
                       rulebase predicate arity module))
@@ -130,7 +139,11 @@
                      rulebase predicate arity module)))
        (when (or declared defined)
          (list (if (eq declared :dynamic) 'dynamic 'static)
-               'user))))))
+               'user
+               'defined
+               (list 'number_of_clauses
+                     (%predicate-clause-count rulebase predicate arity
+                                              module))))))))
 
 (define-builtin (predicate_property head property)
     (rulebase environment depth emit)
@@ -141,10 +154,12 @@
          (predicate (first callable))
          (arity (length (rest callable))))
     (unless (or (logic-var-p resolved-property)
-                (symbolp resolved-property))
-      (%raise-type-error "ATOM" resolved-property environment
+                (symbolp resolved-property)
+                (and (%proper-list-p resolved-property)
+                     (symbolp (first resolved-property))))
+      (%raise-type-error "CALLABLE" resolved-property environment
                          'predicate_property
-                         "predicate property must be an atom"))
+                         "predicate property must be an atom or compound term"))
     (dolist (candidate
              (%predicate-properties rulebase predicate arity
                                     *current-prolog-module*))
@@ -215,6 +230,8 @@
                    (eq predicate entry-predicate) (= arity entry-arity))))
           entries)))
       (%remove-rulebase-predicate-property!
+       rulebase predicate arity *current-prolog-module*)
+      (%remove-rulebase-table-declarations!
        rulebase predicate arity *current-prolog-module*))
     (funcall emit environment)))
 

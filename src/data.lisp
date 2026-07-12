@@ -293,6 +293,14 @@ source registrations, flags, and character conversions are copied as well."
             (%next-rulebase-revision! rulebase))))
     rulebase))
 
+(defun %remove-rulebase-table-declarations! (rulebase predicate arity
+                                              &optional (module +default-prolog-module+))
+  "Remove every table declaration for PREDICATE/ARITY in MODULE."
+  (let ((key (list module predicate arity)))
+    (when (remhash key (rulebase-table-declarations rulebase))
+      (%next-rulebase-revision! rulebase))
+    rulebase))
+
 (defun %rulebase-predicate-property (rulebase predicate arity
                                      &optional (module +default-prolog-module+))
   (gethash (list module predicate arity) (rulebase-predicate-properties rulebase)))

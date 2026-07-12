@@ -2,7 +2,7 @@
 
 (defpackage #:cl-prolog.tests
   (:use #:cl #:cl-prolog)
-  (:shadowing-import-from #:cl-prolog #:catch #:throw)
+  (:shadowing-import-from #:cl-prolog #:assert #:catch #:throw)
   (:export #:deftest
            #:deftest-table
            #:deftest-io-variants

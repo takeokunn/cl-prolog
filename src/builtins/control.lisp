@@ -9,7 +9,7 @@
   (declare (cl:ignore rulebase environment depth emit)))
 
 (define-builtin (= left right) (rulebase environment depth emit)
-  (%unify-emit left right environment emit))
+  (%constraint-unify-emit left right environment emit))
 
 (define-builtin (unify_with_occurs_check left right)
     (rulebase environment depth emit)

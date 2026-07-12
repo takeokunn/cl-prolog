@@ -27,6 +27,25 @@
         (labeling () (?x ?y)))
    => (((?x . 1) (?y . 2)) ((?x . 1) (?y . 3)) ((?x . 2) (?y . 3)))))
 
+(deftest-queries finite-domain-unification-propagation ((make-rulebase))
+  ((and (in ?x (1 |..| 2)) (|#>| ?x 1) (= ?x 1)) :fails)
+  ((and (in ?x (1 |..| 2)) (|#>| ?x 1) (= ?x 2))
+   => (((?x . 2))))
+  ((and (in ?x (1 |..| 2)) (|#>| ?x 1) (= ?x ?y) (= ?y 1)) :fails))
+
+(deftest finite-domain-context-bypasses-tabling ()
+  (let ((rulebase
+          (prolog
+            ((fd-tabled ?value) (= ?value 1))
+            ((fd-tabled ?value) (= ?value 2)))))
+    (cl-prolog::%add-rulebase-table-declaration!
+     rulebase 'fd-tabled 1 :test)
+    (assert-query
+     rulebase
+     (or (and (in ?value (1 |..| 1)) (fd-tabled ?value))
+         (and (in ?value (2 |..| 2)) (fd-tabled ?value)))
+     => (((?value . 1)) ((?value . 2))))))
+
 (deftest-queries finite-domain-ins-and-indomain ((make-rulebase))
   ((and (ins (?x ?y) (2 |..| 4)) (|#<| ?x ?y)
         (indomain ?x) (indomain ?y))
