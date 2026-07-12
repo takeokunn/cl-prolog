@@ -114,6 +114,14 @@
 (defmacro %define-io-dual-builtin ((name current-arguments explicit-arguments operation)
                                    (rulebase environment depth emit)
                                    &body clauses)
+  ;; CLAUSES is a flat (:current FORM :explicit FORM) plist; a NIL lookup
+  ;; would silently compile a builtin whose body always fails, so reject
+  ;; malformed clauses at macroexpansion time.
+  (unless (and (= (length clauses) 4)
+               (eq (first clauses) :current)
+               (eq (third clauses) :explicit))
+    (error "~S expects (:CURRENT form :EXPLICIT form), got ~S for ~S"
+           '%define-io-dual-builtin clauses name))
   (let ((current-form (getf clauses :current))
         (explicit-form (getf clauses :explicit)))
     `(progn
