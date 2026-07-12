@@ -69,13 +69,30 @@
      rulebase
      "phrase(token(rejected), [rejected])")))
 
-(deftest-table source-loader-rejects-non-consult-forms ()
-  (:signals (consult-prolog "?- true.")
-            "Queries are not consultable source forms")
-  (:signals (consult-prolog ":- unsupported_directive(value).")
-            "Unknown directives must not be ignored")
-  (:signals (consult-prolog ":- op(1300, xfx, invalid).")
-            "Invalid directives fail during validation"))
+(progn
+  (defun %apply-source-directive-for-test (goal)
+    (cl-prolog::%apply-source-directive!
+     goal (make-rulebase) (list nil) cl-prolog::+default-prolog-module+))
+
+  (deftest-table source-loader-rejects-non-consult-forms ()
+    (:signals (consult-prolog "?- true.")
+              "Queries are not consultable source forms")
+    (:signals (consult-prolog ":- unsupported_directive(value).")
+              "Unknown directives must not be ignored")
+    (:signals (consult-prolog ":- op(1300, xfx, invalid).")
+              "Invalid directives fail during validation")
+    (:signals (%apply-source-directive-for-test (quote (cl-prolog::op)))
+              "OP requires three arguments")
+    (:signals (%apply-source-directive-for-test (quote (cl-prolog::dynamic)))
+              "DYNAMIC requires an indicator")
+    (:signals (%apply-source-directive-for-test (quote (cl-prolog::table)))
+              "TABLE requires an indicator")
+    (:signals (%apply-source-directive-for-test (quote (cl-prolog::use_module)))
+              "USE_MODULE requires a module")
+    (:signals (%apply-source-directive-for-test (quote (cl-prolog::initialization)))
+              "INITIALIZATION requires a goal")
+    (:signals (%apply-source-directive-for-test (quote (cl-prolog::include)))
+              "INCLUDE requires a source")))
 
 (deftest source-loader-validation-is-atomic ()
   (dolist (source '("kept. ?- kept."
