@@ -117,13 +117,6 @@ caller's clause alternatives, as ISO requires.")
   "Return the ISO predicate indicator for normalized GOAL."
   (list '/ (first goal) (length (rest goal))))
 
-(defun %clause-defines-goal-p (clause goal)
-  "True when CLAUSE defines the same predicate and arity as GOAL."
-  (let ((head (clause-head clause)))
-    (and (consp head)
-         (eq (first head) (first goal))
-         (= (length (rest head)) (length (rest goal))))))
-
 (defun %proof-module-entries (state &optional (module (proof-state-module state)))
   "Return one revision-stable module snapshot shared by the current query."
   (let* ((rulebase (proof-state-rulebase state))

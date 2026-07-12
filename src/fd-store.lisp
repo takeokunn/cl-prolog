@@ -13,9 +13,6 @@
 (defun %fd-domain (values)
   (sort (remove-duplicates (copy-list values)) #'<))
 
-(defun %fd-interval (lower upper)
-  (and (<= lower upper) (loop for value from lower to upper collect value)))
-
 (defun %fd-domain-of (store variable)
   (cdr (assoc variable (fd-store-domains store) :test #'eq)))
 
