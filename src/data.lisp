@@ -188,12 +188,21 @@
      (make-hash-table :test #'eql)
      (make-hash-table :test #'equal))))
 
-(defun %copy-rulebase (rulebase)
-  "Return a detached mutable copy suitable for transactional updates."
+(defun %copy-clause (clause)
+  "Copy CLAUSE while preserving repeated logic-variable identities."
+  (make-clause (copy-tree (clause-head clause))
+               (copy-tree (clause-body clause))))
+
+(defun %copy-rulebase (rulebase &optional (copy-clause #'identity))
+  "Return a detached mutable copy suitable for transactional updates.
+
+COPY-CLAUSE maps each stored clause into the copy; the default shares clause
+terms because transactional updates never mutate them in place."
   (let ((entries
           (mapcar (lambda (entry)
                     (let ((copy (%make-stored-clause
-                                 (%stored-clause-clause entry)
+                                 (funcall copy-clause
+                                          (%stored-clause-clause entry))
                                  (%stored-clause-module entry)
                                  (%stored-clause-born-revision entry)
                                  (%stored-clause-source entry))))
@@ -228,9 +237,13 @@
        copy))))
 
 (defun copy-rulebase (rulebase)
-  "Return a detached copy of RULEBASE, including its complete runtime state."
+  "Return a detached copy of RULEBASE, including its complete runtime state.
+
+Stored clauses and their cons-based terms are copied, so mutating terms
+reachable from one rulebase never affects the other. Immutable atoms and
+persistent metadata such as operator tables may be shared."
   (check-type rulebase rulebase)
-  (%copy-rulebase rulebase))
+  (%copy-rulebase rulebase #'%copy-clause))
 
 (defun rulebase-extend (rulebase clauses)
   "Return a detached copy of RULEBASE shadow-extended by CLAUSES.

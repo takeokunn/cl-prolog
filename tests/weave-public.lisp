@@ -3,8 +3,12 @@
 (defpackage #:cl-prolog.weave.tests
   (:use #:cl)
   (:import-from #:cl-prolog
+   #:copy-rulebase
    #:invalid-max-depth-error
-   #:prolog)
+   #:make-clause
+   #:prolog
+   #:query-prolog
+   #:rulebase-insert-clause!)
   (:import-from #:cl-prolog/weave
    #:assert-query
    #:deftest-queries))
@@ -49,3 +53,52 @@
       '(((?x . one) (?y . two)))
       '(((?y . two) (?x . one))))
      :to-be-falsy)))
+
+(cl-weave:describe-sequential "copy-rulebase"
+  (cl-weave:it "isolates dynamic facts from the original rulebase"
+    (let* ((original (make-weave-rulebase))
+           (copy (copy-rulebase original)))
+      (rulebase-insert-clause! copy (make-clause '(parent alice dave)))
+      (cl-weave:expect
+       (length (query-prolog copy '(parent alice ?child)))
+       :to-be 3)
+      (cl-weave:expect
+       (length (query-prolog original '(parent alice ?child)))
+       :to-be 2)))
+
+  (cl-weave:it "copies nested clause terms while preserving variable aliases"
+    (let* ((variable '?item)
+           (original
+             (cl-prolog:make-rulebase
+              :clauses
+              (list (make-clause
+                     (list 'linked variable (list 'node variable))
+                     (list (list 'seen (list 'node variable)))))))
+           (copy (copy-rulebase original))
+           (original-clause
+             (first (cl-prolog:rulebase-visible-clauses original)))
+           (copied-clause
+             (first (cl-prolog:rulebase-visible-clauses copy)))
+           (original-head (cl-prolog:clause-head original-clause))
+           (copied-head (cl-prolog:clause-head copied-clause))
+           (original-body (cl-prolog:clause-body original-clause))
+           (copied-body (cl-prolog:clause-body copied-clause)))
+      (cl-weave:expect (eq original-clause copied-clause) :to-be-falsy)
+      (cl-weave:expect
+       (eq (second copied-head)
+           (second (third copied-head)))
+       :to-be-truthy)
+      (cl-weave:expect
+       (eq (second copied-head)
+           (second (second (first copied-body))))
+       :to-be-truthy)
+      (setf (first (third copied-head)) 'copied-node
+            (first (second (first original-body))) 'original-node)
+      (cl-weave:expect (first (third original-head)) :to-be 'node)
+      (cl-weave:expect (first (third copied-head)) :to-be 'copied-node)
+      (cl-weave:expect
+       (first (second (first original-body)))
+       :to-be 'original-node)
+      (cl-weave:expect
+       (first (second (first copied-body)))
+       :to-be 'node))))
