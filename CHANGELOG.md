@@ -11,6 +11,7 @@ section at the top of the file.
 
 - Refactor term predicates, finite-domain helpers, and I/O definitions around reusable macros.
 - Split parser, source-loader, prover-state, I/O, and engine test support into focused files.
+- Split query-engine tests into collection, arithmetic, flag, and core suites.
 - Remove unused internal helpers and add Paredit-driven structural refactoring support.
 - Update the cl-weave test runner input to v0.6.0.
 
