@@ -74,6 +74,17 @@
     (cl-prolog::%apply-source-directive!
      goal (make-rulebase) (list nil) cl-prolog::+default-prolog-module+))
 
+  (defun %consult-included-source-for-test (included-source)
+    (with-temporary-prolog-files ((included included-source))
+      (consult-prolog
+       (format nil ":- include(~A)." (%prolog-path-atom included)))))
+
+  (defun %invalid-source-forms-signal-p (&rest sources)
+    (every (lambda (source)
+             (handler-case (progn (consult-prolog source) nil)
+               (error () t)))
+           sources))
+
   (deftest-table source-loader-rejects-non-consult-forms ()
     (:signals (consult-prolog "?- true.")
               "Queries are not consultable source forms")
@@ -92,7 +103,17 @@
     (:signals (%apply-source-directive-for-test (quote (cl-prolog::initialization)))
               "INITIALIZATION requires a goal")
     (:signals (%apply-source-directive-for-test (quote (cl-prolog::include)))
-              "INCLUDE requires a source")))
+              "INCLUDE requires a source")
+    (:signals (%consult-included-source-for-test "?- true.")
+              "Included source cannot contain queries")
+    (:signals (%consult-included-source-for-test ":- module(nested, []).")
+              "Included source cannot declare a module")
+    (:signals (consult-prolog "before. :- module(late, []).")
+              "Module declarations must be the first source form")
+    (:signals (consult-prolog ":- module(first, []). :- module(second, []).")
+              "A source unit can declare only one module")
+    (:is (%invalid-source-forms-signal-p "42." "42 :- true.")
+         "Numeric terms and numeric clause heads are invalid")))
 
 (deftest source-loader-validation-is-atomic ()
   (dolist (source '("kept. ?- kept."
