@@ -1,5 +1,4 @@
 ;;;; Atom, character, and numeric text conversion builtins.
-
 (in-package #:cl-prolog)
 
 (defun %ensure-atom-value (value environment operation argument)
@@ -42,4 +41,3 @@
            (%raise-instantiation-error
             environment operation (format nil "~A must be instantiated" argument)))
          (setf tail (cdr tail)))))))
-

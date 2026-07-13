@@ -1,5 +1,4 @@
 ;;;; Atom, character, and numeric text conversion builtins.
-
 (in-package #:cl-prolog)
 
 (defun %emit-pairs (pairs environment emit)
@@ -79,4 +78,3 @@
                                           (subseq text candidate-before
                                                   (+ candidate-before candidate-length)))))
                          environment emit))))))
-

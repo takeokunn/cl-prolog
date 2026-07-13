@@ -1,5 +1,4 @@
 ;;;; Atom, character, and numeric text conversion builtins.
-
 (in-package #:cl-prolog)
 
 (defmacro define-atom-list-conversion (name list-to-text atom-to-list)
@@ -20,6 +19,7 @@
                                       "one argument must be instantiated"))))))
 
 (define-atom-list-conversion atom_chars %character-list-text %atom-character-list)
+
 (define-atom-list-conversion atom_codes %code-list-text %atom-code-list)
 
 (define-builtin (char_code character code) (rulebase environment depth emit)
@@ -43,4 +43,3 @@
       (t
        (%raise-instantiation-error environment operation
                                    "char_code/2 requires one instantiated argument")))))
-

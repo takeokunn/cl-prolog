@@ -1,5 +1,4 @@
 ;;;; Atom, character, and numeric text conversion builtins.
-
 (in-package #:cl-prolog)
 
 (defun %atom-text (atom)
@@ -131,4 +130,3 @@
                             (expt 10 (* exponent-sign exponent)))))
             (coerce scaled 'double-float))
           (* sign integer-part)))))
-
