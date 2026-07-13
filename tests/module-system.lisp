@@ -1,23 +1,59 @@
 (in-package #:cl-prolog.tests)
 
-(deftest module-registry-declaration-and-resolution ()
-  (let ((registry (cl-prolog::make-module-registry)))
-    (cl-prolog::module-registry-declare!
-     registry 'lists '((/ member 2) (/ append 3)))
-    (cl-prolog::module-registry-declare! registry 'client '())
-    (cl-prolog::module-registry-import! registry 'client 'lists '((/ member 2)))
-    (is (cl-prolog::module-registry-exported-p registry 'lists 'member 2))
-    (is (not (cl-prolog::module-registry-exported-p registry 'lists 'member 3)))
-    (is-equal 'lists
+(deftest-table module-registry-declaration-and-validation ()
+  (:is
+   (let ((registry (cl-prolog::make-module-registry)))
+     (cl-prolog::module-registry-declare!
+      registry 'lists '((/ member 2) (/ append 3)))
+     (cl-prolog::module-registry-declare! registry 'client '())
+     (cl-prolog::module-registry-import! registry 'client 'lists '((/ member 2)))
+     (and (cl-prolog::module-registry-exported-p registry 'lists 'member 2)
+          (not (cl-prolog::module-registry-exported-p registry 'lists 'member 3))
+          (eq 'lists
               (cl-prolog::module-registry-resolve
                registry 'client 'member 2
                (lambda (module predicate arity)
                  (declare (ignore module predicate arity)) nil)))
-    (is-equal 'client
+          (eq 'client
               (cl-prolog::module-registry-resolve
                registry 'client 'member 2
                (lambda (module predicate arity)
-                 (declare (ignore predicate arity)) (eq module 'client))))))
+                 (declare (ignore predicate arity)) (eq module 'client)))))))
+  (:signals
+   (cl-prolog::module-registry-declare!
+    (cl-prolog::make-module-registry) 42 '()))
+  (:signals
+   (let ((registry (cl-prolog::make-module-registry)))
+     (cl-prolog::module-registry-declare! registry 'redeclared '())
+     (cl-prolog::module-registry-declare! registry 'redeclared '())))
+  (:signals
+   (cl-prolog::module-registry-declare!
+    (cl-prolog::make-module-registry)
+    'duplicate '((/ member 2) (/ member 2))))
+  (:signals
+   (cl-prolog::module-registry-declare!
+    (cl-prolog::make-module-registry) 'malformed '((member 2))))
+  (:signals
+   (cl-prolog::module-registry-declare!
+    (cl-prolog::make-module-registry) 'wrong-operator '((* member 2))))
+  (:signals
+   (cl-prolog::module-registry-declare!
+    (cl-prolog::make-module-registry) 'non-symbol-predicate '((/ 42 2))))
+  (:signals
+   (cl-prolog::module-registry-declare!
+    (cl-prolog::make-module-registry) 'negative-arity '((/ member -1))))
+  (:is
+   (let ((registry (cl-prolog::make-module-registry)))
+     (cl-prolog::module-registry-declare! registry 'library '((/ public 1)))
+     (cl-prolog::module-registry-declare! registry 'client '())
+     (cl-prolog::module-registry-import! registry 'client 'library)
+     (cl-prolog::module-registry-import! registry 'client 'library)
+     (eq 'library
+         (cl-prolog::module-registry-resolve
+          registry 'client 'public 1
+          (lambda (module predicate arity)
+            (declare (ignore module predicate arity)) nil))))))
+
 
 (deftest module-registry-qualified-resolution ()
   (let ((registry (cl-prolog::make-module-registry)))
