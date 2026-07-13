@@ -219,40 +219,28 @@
                             term)))))))))
       (evaluate resolved))))
 
-(define-builtin (is result expression) (rulebase environment depth emit)
-  (%unify-emit result
-               (%evaluate-arithmetic-expression expression environment)
-               environment emit))
+(progn
+  (define-builtin (is result expression) (rulebase environment depth emit)
+    (%unify-emit result
+                 (%evaluate-arithmetic-expression expression environment)
+                 environment emit))
+  (defmacro define-arithmetic-comparison (name predicate)
+    `(define-builtin (,name left right) (rulebase environment depth emit)
+       (when (,predicate (%evaluate-arithmetic-expression left environment)
+                         (%evaluate-arithmetic-expression right environment))
+         (funcall emit environment)))))
 
-(define-builtin (|=:=| left right) (rulebase environment depth emit)
-  (when (= (%evaluate-arithmetic-expression left environment)
-           (%evaluate-arithmetic-expression right environment))
-    (funcall emit environment)))
+(define-arithmetic-comparison |=:=| =)
 
-(define-builtin (|=\\=| left right) (rulebase environment depth emit)
-  (unless (= (%evaluate-arithmetic-expression left environment)
-             (%evaluate-arithmetic-expression right environment))
-    (funcall emit environment)))
+(define-arithmetic-comparison |=\\=| /=)
 
-(define-builtin (< left right) (rulebase environment depth emit)
-  (when (< (%evaluate-arithmetic-expression left environment)
-           (%evaluate-arithmetic-expression right environment))
-    (funcall emit environment)))
+(define-arithmetic-comparison < <)
 
-(define-builtin (=< left right) (rulebase environment depth emit)
-  (when (<= (%evaluate-arithmetic-expression left environment)
-            (%evaluate-arithmetic-expression right environment))
-    (funcall emit environment)))
+(define-arithmetic-comparison =< <=)
 
-(define-builtin (> left right) (rulebase environment depth emit)
-  (when (> (%evaluate-arithmetic-expression left environment)
-           (%evaluate-arithmetic-expression right environment))
-    (funcall emit environment)))
+(define-arithmetic-comparison > >)
 
-(define-builtin (>= left right) (rulebase environment depth emit)
-  (when (>= (%evaluate-arithmetic-expression left environment)
-            (%evaluate-arithmetic-expression right environment))
-    (funcall emit environment)))
+(define-arithmetic-comparison >= >=)
 
 (define-builtin (between low high value) (rulebase environment depth emit)
   (declare (cl:ignore rulebase depth))

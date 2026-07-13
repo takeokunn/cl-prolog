@@ -1,26 +1,9 @@
 ;;;; Atom, character, and numeric text conversion builtins.
 (in-package #:cl-prolog)
 
-(defmacro define-atom-list-conversion (name list-to-text atom-to-list)
-  `(define-builtin (,name atom list) (rulebase environment depth emit)
-     (declare (cl:ignore rulebase depth))
-     (let* ((operation (%iso-atom ,(string-upcase (symbol-name name))))
-            (resolved-atom (logic-substitute atom environment))
-            (resolved-list (logic-substitute list environment)))
-       (cond
-         ((not (logic-var-p resolved-atom))
-          (%ensure-atom-value resolved-atom environment operation "first argument")
-          (%unify-emit list (,atom-to-list resolved-atom) environment emit))
-         ((not (logic-var-p resolved-list))
-          (%unify-emit atom (%text-atom (,list-to-text resolved-list environment operation))
-                       environment emit))
-         (t
-          (%raise-instantiation-error environment operation
-                                      "one argument must be instantiated"))))))
+(define-list-conversion atom_chars atom %character-list-text %atom-character-list)
 
-(define-atom-list-conversion atom_chars %character-list-text %atom-character-list)
-
-(define-atom-list-conversion atom_codes %code-list-text %atom-code-list)
+(define-list-conversion atom_codes atom %code-list-text %atom-code-list)
 
 (define-builtin (char_code character code) (rulebase environment depth emit)
   (declare (cl:ignore rulebase depth))
