@@ -7,6 +7,55 @@ section at the top of the file.
 
 ## Unreleased
 
+## 0.6.0 - 2026-07-19
+
+### Added
+
+- parser resource limits exported as configurable specials
+  (`*max-prolog-source-characters*`, `*max-prolog-tokens*`,
+  `*max-prolog-parser-depth*`, `*max-prolog-delimiter-depth*`,
+  `*max-prolog-identifier-length*`, `*max-prolog-quoted-lexeme-length*`,
+  `*max-prolog-numeric-lexeme-length*`, `*max-prolog-interned-symbols*`)
+  with a new `prolog-parser-resource-error` condition, surfaced to Prolog
+  code as catchable ISO `resource_error/1` terms
+
+### Changed
+
+- quoted `?`-prefixed atoms such as `'?x'` are now real atoms interned in
+  `cl-prolog.user-atoms` instead of being misread as logic variables
+- goal dispatch validates goals per ISO: variable goals raise
+  `instantiation_error` and non-callable or improper-list goals raise
+  `type_error`
+- untrusted input no longer permanently interns symbols: syntax-error
+  descriptions, missing-source pathnames, stream handles, operator
+  specifiers, and arithmetic operator keys use uninterned symbols or table
+  lookups; exponentiation results are bounded
+- unification environments are hash-indexed and substitution is iterative,
+  `assertz` and tabled-answer deduplication are O(1), left recursion is
+  detected via strongly connected components, `bagof`/`setof` grouping is
+  O(n log n), and `all_different` uses augmenting-path matching
+- documentation matches the shipped API: real install/run instructions
+  (cl-prolog is not on Quicklisp), accurate `phrase`/`phrase-all` and
+  `unify` contracts, the complete exported-symbol reference, Linux-only
+  flake outputs stated explicitly, and concrete security-reporting and
+  code-of-conduct procedures
+
+### Fixed
+
+- parsed finite-domain ranges work: `X in 1..5` produced the prefix term
+  `('..' 1 5)`, which the finite-domain store rejected; both the parsed
+  prefix and Lisp-shaped infix range forms are now accepted
+- closing the stream selected as `current_input`/`current_output` resets
+  the selection to `user_input`/`user_output` instead of leaving a dangling
+  stream entry
+- `member/2` and `append/3` terminate on cyclic lists, and cyclic source
+  lists passed to `consult`/`load_files` raise a resource error instead of
+  looping
+- a `.` inside `{...}` no longer ends a clause early during source
+  splitting
+- finite-domain arithmetic expressions no longer raise program errors from
+  an outdated internal call site
+
 ## 0.5.0 - 2026-07-13
 
 ### Added
