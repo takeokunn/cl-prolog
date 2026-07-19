@@ -20,8 +20,16 @@ have confirmed the impact.
 
 Instead, report the issue through one of these channels:
 
-- GitHub Security Advisories for this repository
-- a private maintainer contact method already established for this project
+- the repository's [private vulnerability report form](https://github.com/takeokunn/cl-prolog/security/advisories/new),
+  when GitHub makes that form available
+- if the form is unavailable, a private contact method explicitly published on
+  the [maintainer's GitHub profile](https://github.com/takeokunn), initially
+  sharing only enough information to request a secure reporting channel
+
+Private vulnerability reporting is not guaranteed to be enabled at all times.
+If neither private route is available, do not disclose vulnerability details in
+a public issue. You may open a public issue containing no sensitive details to
+ask the maintainer to enable a private reporting channel.
 
 Include as much concrete detail as possible:
 
@@ -32,12 +40,18 @@ Include as much concrete detail as possible:
 
 ## Response Expectations
 
-Maintainers aim to:
+This is a best-effort, volunteer-maintained project. Maintainers aim to:
 
-- acknowledge the report
-- reproduce or reject the issue based on evidence
+- acknowledge receipt within 7 days
+- provide an initial evidence-based assessment within 14 days
+- provide a progress update at least every 30 days while a confirmed report
+  remains unresolved
 - prepare a fix or mitigation when the report is valid
 - publish the fix through the normal repository workflow
+
+These targets are service goals, not guarantees. Complex reports, incomplete
+reproductions, or maintainer availability may extend them; the maintainer will
+communicate revised expectations through the private reporting channel.
 
 Because `cl-prolog` is a library, coordinated disclosure may require checking
 downstream compatibility before a fix is released. Reports without a reliable

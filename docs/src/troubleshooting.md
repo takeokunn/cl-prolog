@@ -29,14 +29,16 @@ Inspect the whole solution first:
 (first (query-prolog rulebase '(ancestor tom ?who)))
 ```
 
-## `unify` returned `:unify-fail`
+## `unify` returned `nil`, `nil`
 
 `unify` returns two values.
 
-- first value: environment or `:unify-fail`
+- first value: extended environment on success, or `nil` on failure
 - second value: success flag
 
-Ground success therefore looks like `nil` plus `t`, not an empty alist.
+Failure is `(values nil nil)`. Ground success is `(values nil t)`, so callers
+must inspect the second value rather than treating a `nil` environment as
+failure.
 
 ## `:max-depth 0` rejected a derived rule
 
@@ -83,7 +85,7 @@ nix run .
 ```
 
 The packaged Nix runner is Linux-only. On Darwin, skip this smoke step and
-use Quicklisp or ASDF directly for local library work.
+use ASDF directly for local library work.
 
 ## What To Include In A Bug Report
 

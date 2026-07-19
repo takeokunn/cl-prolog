@@ -2,17 +2,30 @@
 
 ## Environment
 
+The flake defines outputs for `x86_64-linux` and `aarch64-linux` only. On
+Linux, enter the reproducible development environment with:
+
 ```sh
 nix develop        # sbcl, cl-weave, paredit-cli, nixpkgs-fmt, mdbook
 ```
 
+On Darwin and other platforms, the flake does not expose a development shell,
+package, check, or app. Load the local checkout with ASDF instead and use CI as
+the authoritative Linux Nix verification path.
+
 ## Examples
 
 ```sh
-sbcl --script examples/quick-start.lisp
-sbcl --script examples/family-tree.lisp
-sbcl --script examples/relational-lists.lisp
+sbcl --non-interactive \
+  --eval '(require :asdf)' \
+  --eval '(asdf:load-asd (truename "cl-prolog.asd"))' \
+  --eval '(asdf:load-system :cl-prolog/examples)'
 ```
+
+Run this from the repository root. Loading `cl-prolog/examples` loads the
+library first and then executes all three example files. The example files are
+not standalone scripts, so invoking them directly with `sbcl --script` does
+not load the `cl-prolog` package.
 
 ## Testing
 
@@ -25,9 +38,9 @@ and generated relational properties. Nix provides the self-contained runner:
 nix run .
 ```
 
-The packaged Nix app is supported on Linux only. On Darwin, use the Quicklisp
-or ASDF workflow for library development and rely on `nix flake check` in CI
-for the Linux verification path.
+All flake outputs, including the packaged Nix app and checks, are supported on
+Linux only. On Darwin, use the ASDF workflow for library development and rely
+on CI for the Linux `nix flake check` verification path.
 
 Pass any cl-weave CLI options after `--`; for example, to produce a JSON
 result:
@@ -36,7 +49,7 @@ result:
 nix run . -- --reporter json --output cl-prolog-weave-results.json
 ```
 
-The full Nix verification suite is:
+The full Linux Nix verification suite is:
 
 ```sh
 nix flake check
@@ -90,6 +103,9 @@ Use `assert-query` inside an existing cl-weave case when a table is not needed:
 nix build .#docs   # rendered site in ./result
 mdbook serve docs  # live-reloading preview from the dev shell
 ```
+
+The Nix build is Linux-only. On other systems with mdBook installed, use
+`mdbook build docs` or `mdbook serve docs` directly.
 
 ## Design Constraints
 
