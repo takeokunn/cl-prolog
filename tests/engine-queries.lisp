@@ -375,7 +375,33 @@
       (let ((sorted (solution-binding '?sorted solution)))
         (is (= 2 (length sorted)))
         (is (not (eq (second (first sorted))
-                     (second (second sorted)))))))))
+                     (second (second sorted))))))))
+  (let* ((representative (list 'same))
+         (equivalent (list 'same))
+         (other (list 'z))
+         (groups
+           (cl-prolog::%partition-solution-groups
+            (list (cons other 'last)
+                  (cons representative 'first)
+                  (cons equivalent 'second))))
+         (same-group (find representative groups :key #'car :test #'eq))
+         (other-group (find other groups :key #'car :test #'eq)))
+    (is (= 2 (length groups)))
+    (is (eq representative (car same-group)))
+    (is-equal '(first second) (cdr same-group))
+    (is-equal '(last) (cdr other-group)))
+  (let ((first-cycle (list 'cycle))
+        (second-cycle (list 'cycle)))
+    (setf (cdr first-cycle) first-cycle
+          (cdr second-cycle) second-cycle)
+    (let* ((groups
+             (cl-prolog::%partition-solution-groups
+              (list (cons first-cycle 'first)
+                    (cons second-cycle 'second))))
+           (group (first groups)))
+      (is (= 1 (length groups)))
+      (is (eq first-cycle (car group)))
+      (is-equal '(first second) (cdr group)))))
 
 (deftest dynamic-database-builtins ()
   (let ((rulebase (make-rulebase)))
@@ -688,24 +714,67 @@
   ((length ?xs not-a-number)     :signals))
 
 (deftest cyclic-list-builtins-terminate ()
-  (let ((circular (list 'a))
-        (rulebase (make-rulebase)))
-    (setf (cdr circular) circular)
-    (flet ((fails-without-looping (predicate &rest arguments)
-             (let ((emitted nil))
-               (funcall (cl-prolog::%goal-solver predicate (length arguments))
-                        (cons predicate arguments) rulebase nil nil
-                        (lambda (environment)
-                          (declare (ignore environment))
-                          (setf emitted t)))
-               (is (not emitted)))))
-      (fails-without-looping 'cl-prolog::is_list circular)
-      (fails-without-looping 'cl-prolog::memberchk 'missing circular)
-      (fails-without-looping 'cl-prolog::select 'missing circular '?rest)
-      (fails-without-looping 'cl-prolog::nth0 8 circular '?item)
-      (fails-without-looping 'cl-prolog::nth1 8 circular '?item)
-      (fails-without-looping 'cl-prolog::last circular '?item)
-      (fails-without-looping 'cl-prolog::length circular '?length))))
+  (let* ((self-cycle (list 'a))
+         (two-node-cycle (list 'a 'b))
+         (shared-tail (list 'b 'c))
+         (shared-list (cons 'a shared-tail))
+         (rulebase (make-rulebase)))
+    (setf (cdr self-cycle) self-cycle
+          (cddr two-node-cycle) two-node-cycle)
+    (labels ((solutions (predicate &rest arguments)
+               (let ((environments '()))
+                 (funcall (cl-prolog::%goal-solver predicate (length arguments))
+                          (cons predicate arguments) rulebase nil nil
+                          (lambda (environment)
+                            (push environment environments)))
+                 (nreverse environments)))
+             (fails-without-looping (predicate &rest arguments)
+               (is (null (apply #'solutions predicate arguments))))
+             (check-cycle (cycle)
+               (fails-without-looping 'cl-prolog::is_list cycle)
+               (fails-without-looping 'cl-prolog::member 'missing cycle)
+               (fails-without-looping 'cl-prolog::memberchk 'missing cycle)
+               (fails-without-looping
+                'cl-prolog::select 'missing cycle
+                (cl-prolog:fresh-logic-variable "?REST"))
+               (fails-without-looping
+                'cl-prolog::nth0 8 cycle
+                (cl-prolog:fresh-logic-variable "?ITEM"))
+               (fails-without-looping
+                'cl-prolog::nth1 8 cycle
+                (cl-prolog:fresh-logic-variable "?ITEM"))
+               (fails-without-looping
+                'cl-prolog::last cycle
+                (cl-prolog:fresh-logic-variable "?ITEM"))
+               (fails-without-looping
+                'cl-prolog::append cycle nil
+                (cl-prolog:fresh-logic-variable "?RESULT"))
+               (fails-without-looping
+                'cl-prolog::reverse cycle
+                (cl-prolog:fresh-logic-variable "?REVERSED"))
+               (fails-without-looping
+                'cl-prolog::length cycle
+                (cl-prolog:fresh-logic-variable "?LENGTH"))))
+      (let ((item (cl-prolog:fresh-logic-variable "?ITEM")))
+        (is-equal '(a a b)
+                  (mapcar (lambda (environment)
+                            (cl-prolog:logic-substitute item environment))
+                          (solutions 'cl-prolog::member item '(a a b)))))
+      (is-equal 1 (length (solutions 'cl-prolog::member 'a self-cycle)))
+      (is-equal 1 (length (solutions 'cl-prolog::member 'a two-node-cycle)))
+      (is-equal 1 (length (solutions 'cl-prolog::member 'b two-node-cycle)))
+      (check-cycle self-cycle)
+      (check-cycle two-node-cycle)
+      (is-equal 1 (length (solutions 'cl-prolog::member 'c shared-list)))
+      (is-equal 1 (length (solutions 'cl-prolog::memberchk 'c shared-list)))
+      (is-equal 1 (length (solutions 'cl-prolog::select 'a shared-list shared-tail)))
+      (is-equal 1 (length (solutions 'cl-prolog::nth0 2 shared-list 'c)))
+      (is-equal 1 (length (solutions 'cl-prolog::nth1 3 shared-list 'c)))
+      (is-equal 1 (length (solutions 'cl-prolog::last shared-list 'c)))
+      (is-equal 1 (length (solutions 'cl-prolog::is_list shared-list)))
+      (is-equal 1 (length (solutions 'cl-prolog::append shared-list nil shared-list)))
+      (is-equal 1 (length (solutions 'cl-prolog::reverse shared-list '(c b a))))
+      (is-equal 1 (length (solutions 'cl-prolog::length shared-list 3))))))
 
 (deftest cyclic-copy-helpers-preserve-cycles-and-sharing ()
   (cl-prolog::%with-logic-variable-order
@@ -826,9 +895,38 @@
   ((is ?x (|/\\| 1.0 1))        :signals)
   ((is ?x (|<<| 1 1.5))         :signals))
 
-(deftest arithmetic-rejects-host-only-ratio-input ()
-  (signals-error
-    (query-prolog (make-rulebase) (list 'is '?result 1/2))))
+(progn
+  (deftest arithmetic-rejects-host-only-ratio-input ()
+    (signals-error
+      (query-prolog (make-rulebase) (list 'is '?result 1/2))))
+
+  (deftest arithmetic-operator-lookup-does-not-intern-untrusted-names ()
+    (labels ((keyword-symbol-count ()
+               (let ((count 0)
+                     (package (find-package :keyword)))
+                 (do-symbols (symbol package count)
+                   (when (eq (symbol-package symbol) package)
+                     (incf count))))))
+      (let ((before (keyword-symbol-count)))
+        (is (eq :sqrt
+                (cl-prolog::%arithmetic-operator-key
+                 (make-symbol "SQRT")
+                 cl-prolog::*unary-arithmetic-functions*)))
+        (is (= pi
+               (cl-prolog::%evaluate-arithmetic-expression
+                (make-symbol "PI") nil)))
+        (loop for index below 128
+              for name = (format nil
+                                 "CL-PROLOG-INVALID-ARITHMETIC-~D" index)
+              for operator = (make-symbol name)
+              do (is (null (find-symbol name :keyword)))
+                 (signals-condition prolog-type-error
+                   (cl-prolog::%require-arithmetic-function
+                    operator 1 (list operator 1) nil))
+                 (signals-condition prolog-type-error
+                   (cl-prolog::%evaluate-arithmetic-expression operator nil))
+                 (is (null (find-symbol name :keyword))))
+        (is-equal before (keyword-symbol-count))))))
 
 (defun arithmetic-type-error-formal (expression)
   (handler-case

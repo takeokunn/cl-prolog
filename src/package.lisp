@@ -1,7 +1,7 @@
 (defpackage #:cl-prolog.user-atoms
   (:use)
   (:documentation
-   "Interned Prolog atoms whose names would otherwise resolve to inherited Common Lisp symbols."))
+   "Interned Prolog atoms kept separate from CL-PROLOG symbols, including inherited Common Lisp names and quoted names reserved for logic-variable syntax."))
 
 (defpackage #:cl-prolog
   (:use #:cl)
@@ -62,6 +62,19 @@ is extensible (see DEFINE-FOREIGN-PREDICATE).")
    #:prolog-succeeds-p
    #:solution-binding
    ;; text parser
+   #:prolog-parser-resource-error
+   #:prolog-parser-resource-error-resource
+   #:prolog-parser-resource-error-limit
+   #:prolog-parser-resource-error-observed
+   #:prolog-parser-resource-error-position
+   #:*max-prolog-source-characters*
+   #:*max-prolog-delimiter-depth*
+   #:*max-prolog-parser-depth*
+   #:*max-prolog-tokens*
+   #:*max-prolog-identifier-length*
+   #:*max-prolog-quoted-lexeme-length*
+   #:*max-prolog-numeric-lexeme-length*
+   #:*max-prolog-interned-symbols*
    #:read-prolog-term
    #:read-prolog-clause
    #:write-prolog-term

@@ -96,6 +96,7 @@
           (is (member lexeme (cl-prolog::%symbolic-token-lexemes)
                       :test #'string=))))))
 
+(progn
 (deftest operator-lexeme-generation-does-not-mutate-delimiters ()
   (dotimes (index 20)
     (declare (ignore index))
@@ -105,7 +106,25 @@
   (is-equal 3
             (length (parse-prolog
                      "fact(a). rule(X) :- fact(X). ?- rule(X)."))))
+(deftest quoted-question-atoms-use-distinct-atom-namespace ()
+  (let* ((atom (read-prolog-term "'?x'."))
+         (printed (prolog-term-string atom))
+         (round-trip
+           (read-prolog-term (concatenate 'string printed "."))))
+    (is (eq (find-package '#:cl-prolog.user-atoms)
+            (symbol-package atom)))
+    (is (not (logic-var-p atom)))
+    (is (not (eq atom 'cl-prolog::?x)))
+    (is-equal "'?x'" printed)
+    (is (eq atom round-trip)))
+  (let* ((rulebase (consult-prolog "p('?x')."))
+         (atom-query (read-prolog-term "p('?x')."))
+         (other-query (read-prolog-term "p(a).")))
+    (is-equal '(nil) (query-prolog rulebase atom-query))
+    (is (prolog-succeeds-p rulebase atom-query))
+    (is (not (prolog-succeeds-p rulebase other-query))))))
 
+(progn
 (deftest prolog-source-parser-and-consult ()
   (let* ((source (format nil "% family~% parent(tom,bob). /* rule */~% child(X) :- parent(tom,X).~% ?- child(X)."))
          (forms (parse-prolog source)))
@@ -120,3 +139,181 @@
   (let ((rulebase (make-rulebase)))
     (signals-error (consult-prolog "kept. ?- kept." rulebase))
     (is-equal '() (rulebase-visible-clauses rulebase))))
+
+(defun %parser-resource-condition (thunk)
+  (handler-case
+      (progn
+        (funcall thunk)
+        nil)
+    (prolog-parser-resource-error (condition)
+      condition)))
+
+(defun %prolog-parse-error-p (thunk)
+  (handler-case
+      (progn
+        (funcall thunk)
+        nil)
+    (cl-prolog::prolog-parse-error ()
+      t)))
+
+(deftest prolog-parser-enforces-source-and-token-limits ()
+  (let ((*max-prolog-source-characters* 1))
+    (is-equal (quote cl-prolog::a)
+              (read-prolog-term "a")))
+  (let* ((*max-prolog-source-characters* 1)
+         (condition
+           (%parser-resource-condition
+            (lambda () (read-prolog-term "ab")))))
+    (is condition)
+    (is-equal "SOURCE_CHARACTERS"
+              (prolog-parser-resource-error-resource condition))
+    (is-equal 1 (prolog-parser-resource-error-limit condition))
+    (is-equal 2 (prolog-parser-resource-error-observed condition))
+    (is-equal 2 (prolog-parser-resource-error-position condition)))
+  (with-input-from-string (stream "a.")
+    (let ((*max-prolog-source-characters* 2))
+      (is-equal (quote cl-prolog::a)
+                (read-prolog-term stream))))
+  (with-input-from-string (stream "a.")
+    (let* ((*max-prolog-source-characters* 1)
+           (condition
+             (%parser-resource-condition
+              (lambda () (read-prolog-term stream)))))
+      (is condition)
+      (is-equal "SOURCE_CHARACTERS"
+                (prolog-parser-resource-error-resource condition))
+      (is-equal 2 (prolog-parser-resource-error-position condition))))
+  (let ((*max-prolog-tokens* 1))
+    (is-equal (quote cl-prolog::a)
+              (read-prolog-term "a")))
+  (let* ((*max-prolog-tokens* 0)
+         (condition
+           (%parser-resource-condition
+            (lambda () (read-prolog-term "a")))))
+    (is condition)
+    (is-equal "TOKEN_COUNT"
+              (prolog-parser-resource-error-resource condition))
+    (is-equal 0 (prolog-parser-resource-error-limit condition))
+    (is-equal 1 (prolog-parser-resource-error-observed condition))
+    (is-equal 0 (prolog-parser-resource-error-position condition))))
+
+(deftest prolog-parser-enforces-lexeme-limits ()
+  (let ((*max-prolog-identifier-length* 3))
+    (is-equal (quote cl-prolog::abc)
+              (read-prolog-term "abc")))
+  (let* ((*max-prolog-identifier-length* 2)
+         (condition
+           (%parser-resource-condition
+            (lambda () (read-prolog-term "abc")))))
+    (is condition)
+    (is-equal "IDENTIFIER_LENGTH"
+              (prolog-parser-resource-error-resource condition))
+    (is-equal 3 (prolog-parser-resource-error-observed condition))
+    (is-equal 2 (prolog-parser-resource-error-position condition)))
+  (let ((source (format nil "~Cabc~C" (code-char 39) (code-char 39))))
+    (let ((*max-prolog-quoted-lexeme-length* 3))
+      (let ((term (read-prolog-term source)))
+        (is-equal "abc" (symbol-name term))
+        (is (eq (find-package "CL-PROLOG")
+                (symbol-package term)))))
+    (let* ((*max-prolog-quoted-lexeme-length* 2)
+           (condition
+             (%parser-resource-condition
+              (lambda () (read-prolog-term source)))))
+      (is condition)
+      (is-equal "QUOTED_LEXEME_LENGTH"
+                (prolog-parser-resource-error-resource condition))
+      (is-equal 3 (prolog-parser-resource-error-observed condition))))
+  (let ((*max-prolog-numeric-lexeme-length* 3))
+    (is-equal 123 (read-prolog-term "123")))
+  (let* ((*max-prolog-numeric-lexeme-length* 2)
+         (condition
+           (%parser-resource-condition
+            (lambda () (read-prolog-term "123")))))
+    (is condition)
+    (is-equal "NUMERIC_LEXEME_LENGTH"
+              (prolog-parser-resource-error-resource condition))
+    (is-equal 3 (prolog-parser-resource-error-observed condition))
+    (is-equal 2 (prolog-parser-resource-error-position condition))))
+
+(deftest prolog-parser-enforces-structural-limits ()
+  (let ((*max-prolog-delimiter-depth* 1))
+    (is-equal (quote cl-prolog::a)
+              (read-prolog-term "(a)")))
+  (let* ((*max-prolog-delimiter-depth* 1)
+         (condition
+           (%parser-resource-condition
+            (lambda () (read-prolog-term "((a))")))))
+    (is condition)
+    (is-equal "DELIMITER_DEPTH"
+              (prolog-parser-resource-error-resource condition))
+    (is-equal 2 (prolog-parser-resource-error-observed condition)))
+  (let ((*max-prolog-parser-depth* 1))
+    (is-equal (quote cl-prolog::a)
+              (read-prolog-term "a")))
+  (let* ((*max-prolog-delimiter-depth* nil)
+         (*max-prolog-parser-depth* 1)
+         (condition
+           (%parser-resource-condition
+            (lambda () (read-prolog-term "(a)")))))
+    (is condition)
+    (is-equal "PARSER_DEPTH"
+              (prolog-parser-resource-error-resource condition))
+    (is-equal 2 (prolog-parser-resource-error-observed condition)))
+  (dolist (source (list "(a]" ")"))
+    (is (%prolog-parse-error-p
+         (lambda () (read-prolog-term source)))))
+  (dolist (source (list "(a]" ")"))
+    (with-input-from-string (stream source)
+      (is (%prolog-parse-error-p
+           (lambda () (read-prolog-term stream)))))))
+
+(deftest prolog-parser-bounds-interning-and-operator-caches ()
+  (let ((cl-prolog::*parser-interned-symbols*
+          (make-hash-table :test (function equal)))
+        (*max-prolog-interned-symbols* 1))
+    (read-prolog-term "security_parser_atom_7f41a")
+    (let ((condition
+            (%parser-resource-condition
+             (lambda ()
+               (read-prolog-term "security_parser_atom_7f41b")))))
+      (is condition)
+      (is-equal "INTERNED_SYMBOLS"
+                (prolog-parser-resource-error-resource condition))))
+  (let ((cl-prolog::*parser-interned-symbols*
+          (make-hash-table :test (function equal)))
+        (*max-prolog-interned-symbols* 1))
+    (read-prolog-term "SecurityParserVar7f41a")
+    (let ((condition
+            (%parser-resource-condition
+             (lambda ()
+               (read-prolog-term "SecurityParserVar7f41b")))))
+      (is condition)
+      (is-equal "INTERNED_SYMBOLS"
+                (prolog-parser-resource-error-resource condition))))
+  (let ((name "security_unknown_operator_7f41a"))
+    (is (null (nth-value
+               1
+               (find-symbol (string-upcase name)
+                            (find-package "CL-PROLOG")))))
+    (is (null
+         (cl-prolog::%operator-definition-for-token
+          (cl-prolog::%parser #() cl-prolog::*standard-operator-table*)
+          (cl-prolog::%token :operator name 0)
+          (list :xfx))))
+    (is (null (nth-value
+               1
+               (find-symbol (string-upcase name)
+                            (find-package "CL-PROLOG"))))))
+  (let ((cl-prolog::*operator-lexeme-cache*
+          (make-hash-table :test (function eq))))
+    (dotimes (index 20)
+      (declare (ignore index))
+      (cl-prolog::%operator-table-lexemes
+       (cl-prolog::%make-operator-table (list))))
+    (is-equal 0
+              (hash-table-count cl-prolog::*operator-lexeme-cache*))
+    (cl-prolog::%operator-table-lexemes
+     cl-prolog::*standard-operator-table*)
+    (is-equal 1
+              (hash-table-count cl-prolog::*operator-lexeme-cache*)))))

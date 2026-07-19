@@ -46,12 +46,9 @@
                           "Stream mode must be read, write, or append"))))
 
 (defun %next-prolog-stream-handle (context)
-  (loop
-    for number = (incf (prolog-io-context-next-handle context))
-    for handle = (%io-context-atom (format nil "$stream_~D" number)
-                                   :preserve-case t)
-    unless (gethash handle (prolog-io-context-streams context))
-      return handle))
+  (make-symbol
+   (format nil "$stream_~D"
+           (incf (prolog-io-context-next-handle context)))))
 
 (defun %register-prolog-stream! (context stream mode
                                  &key alias (owned-p t) source (type :text)
@@ -140,6 +137,12 @@
        (and handle (gethash handle (prolog-io-context-streams context)))))))
 
 (defun %forget-prolog-stream! (context entry)
+  (when (eq entry (prolog-io-context-current-input context))
+    (setf (prolog-io-context-current-input context)
+          (%find-prolog-stream context (%io-context-atom "user_input"))))
+  (when (eq entry (prolog-io-context-current-output context))
+    (setf (prolog-io-context-current-output context)
+          (%find-prolog-stream context (%io-context-atom "user_output"))))
   (remhash (prolog-stream-handle entry) (prolog-io-context-streams context))
   (when (prolog-stream-alias entry)
     (remhash (prolog-stream-alias entry) (prolog-io-context-aliases context))))

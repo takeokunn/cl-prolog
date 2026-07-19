@@ -2,10 +2,53 @@
 
 (in-package #:cl-prolog)
 
-(defun %atom-text (atom)
-  (symbol-name atom))
+(progn
+  (defparameter *max-prolog-derived-atom-candidates*
+    *max-prolog-numeric-lexeme-length*
+    "Maximum number of atom candidates a single relational builtin may derive.")
 
-(defun %text-atom (text)
+  (defun %check-resource-limit
+      (actual limit resource environment operation message)
+    (when (> actual limit)
+      (%raise-resource-error resource environment operation message))
+    actual)
+
+  (defun %check-text-resource-limit
+      (text limit resource environment operation message)
+    (%check-resource-limit (length text) limit resource environment operation message)
+    text)
+
+  (defun %check-atom-text-limit (atom environment operation)
+    (%check-text-resource-limit
+     (%atom-text atom) *max-prolog-quoted-lexeme-length* "ATOM_LENGTH"
+     environment operation "atom text exceeds the configured length limit"))
+
+  (defun %integer-within-decimal-digit-limit-p (integer digit-limit)
+    (let* ((magnitude (abs integer))
+           (bit-limit (ceiling (* digit-limit 3322) 1000))
+           (bits (integer-length magnitude)))
+      (or (zerop magnitude)
+          (< bits bit-limit)
+          (and (= bits bit-limit)
+               (< magnitude (expt 10 digit-limit))))))
+
+  (defun %check-integer-text-limit (integer environment operation)
+    (let ((digit-limit (- *max-prolog-numeric-lexeme-length*
+                          (if (minusp integer) 1 0))))
+      (unless (and (plusp digit-limit)
+                   (%integer-within-decimal-digit-limit-p integer digit-limit))
+        (%raise-resource-error
+         "INTEGER_SIZE" environment operation
+         "integer decimal representation exceeds the configured length limit")))
+    integer)
+
+  (defun %atom-text (atom)
+    (symbol-name atom)))
+
+(defun %text-atom (text &optional environment (operation (%iso-atom "ATOM")))
+  (%check-text-resource-limit
+   text *max-prolog-quoted-lexeme-length* "ATOM_LENGTH" environment operation
+   "atom text exceeds the configured length limit")
   (%prolog-atom-symbol text :preserve-case t))
 
 (defun %character-atom-p (term)
@@ -30,12 +73,17 @@
                            (format nil "~A must not be negative" argument))))
   value)
 
-(defun %ensure-proper-instantiated-list (value environment operation argument)
+(defun %ensure-proper-instantiated-list
+    (value environment operation argument
+     &key element-checker
+          (limit *max-prolog-quoted-lexeme-length*)
+          (resource "LIST_LENGTH"))
   (let ((visited (make-hash-table :test #'eq))
-        (tail value))
+        (tail value)
+        (count 0))
     (loop
       (cond
-        ((null tail) (return value))
+        ((null tail) (return count))
         ((logic-var-p tail)
          (%raise-instantiation-error
           environment operation (format nil "~A must be instantiated" argument)))
@@ -50,23 +98,53 @@
          (when (logic-var-p (car tail))
            (%raise-instantiation-error
             environment operation (format nil "~A must be instantiated" argument)))
+         (when element-checker
+           (funcall element-checker (car tail)))
+         (incf count)
+         (%check-resource-limit
+          count limit resource environment operation
+          "list exceeds the configured length limit")
          (setf tail (cdr tail)))))))
 
-(defun %atom-character-list (atom)
-  (map 'list (lambda (character) (%text-atom (string character)))
-       (%atom-text atom)))
+(defun %atom-character-list
+    (atom environment operation
+     &optional (limit *max-prolog-quoted-lexeme-length*) (resource "ATOM_LENGTH"))
+  (let ((text (%atom-text atom)))
+    (%check-text-resource-limit
+     text limit resource environment operation
+     "atom text exceeds the configured length limit")
+    (map 'list (lambda (character)
+                 (%text-atom (string character) environment operation))
+         text)))
 
-(defun %atom-code-list (atom)
-  (map 'list #'char-code (%atom-text atom)))
+(defun %atom-code-list
+    (atom environment operation
+     &optional (limit *max-prolog-quoted-lexeme-length*) (resource "ATOM_LENGTH"))
+  (let ((text (%atom-text atom)))
+    (%check-text-resource-limit
+     text limit resource environment operation
+     "atom text exceeds the configured length limit")
+    (map 'list #'char-code text)))
 
-(defun %character-list-text (characters environment operation)
-  (%ensure-proper-instantiated-list characters environment operation "character list")
-  (with-output-to-string (text)
-    (dolist (character characters)
-      (unless (%character-atom-p character)
-        (%raise-type-error "CHARACTER" character environment operation
-                           "atom_chars/2 and number_chars/2 require character atoms"))
-      (write-char (char (%atom-text character) 0) text))))
+(defun %character-list-text
+    (characters environment operation
+     &optional (limit *max-prolog-quoted-lexeme-length*) (resource "LIST_LENGTH"))
+  (let* ((count
+           (%ensure-proper-instantiated-list
+            characters environment operation "character list"
+            :limit limit
+            :resource resource
+            :element-checker
+            (lambda (character)
+              (unless (%character-atom-p character)
+                (%raise-type-error
+                 "CHARACTER" character environment operation
+                 "atom_chars/2 and number_chars/2 require character atoms")))))
+         (text (make-string count)))
+    (loop for character in characters
+          for index from 0
+          do (setf (char text index) (char (%atom-text character) 0)))
+    text))
 
 (defun %code-character (code environment operation)
   (unless (integerp code)
@@ -79,18 +157,34 @@
       (%raise-domain-error "CHARACTER_CODE" code environment operation
                            "integer is not a character code")))
 
-(defun %code-list-text (codes environment operation)
-  (%ensure-proper-instantiated-list codes environment operation "code list")
-  (with-output-to-string (text)
-    (dolist (code codes)
-      (write-char (%code-character code environment operation) text))))
+(defun %code-list-text
+    (codes environment operation
+     &optional (limit *max-prolog-quoted-lexeme-length*) (resource "LIST_LENGTH"))
+  (let* ((count
+           (%ensure-proper-instantiated-list
+            codes environment operation "code list"
+            :limit limit
+            :resource resource
+            :element-checker
+            (lambda (code) (%code-character code environment operation))))
+         (text (make-string count)))
+    (loop for code in codes
+          for index from 0
+          do (setf (char text index)
+                   (%code-character code environment operation)))
+    text))
 
 (defun %number-text (number environment operation)
   (cond
     ((integerp number)
+     (%check-integer-text-limit number environment operation)
      (write-to-string number :base 10 :radix nil :readably t))
     ((floatp number)
      (let ((text (write-to-string number :base 10 :radix nil :readably t)))
+       (%check-text-resource-limit
+        text *max-prolog-numeric-lexeme-length* "NUMBER_TEXT_LENGTH"
+        environment operation
+        "numeric text exceeds the configured length limit")
        (map-into text
                  (lambda (character)
                    (if (find character "sSfFdDlL") #\e character))
@@ -106,10 +200,19 @@
                         "first argument must be a Prolog integer or float"))))
 
 (defun %raise-syntax-number-error (text environment operation)
-  (%raise-domain-error "NUMBER_TEXT" (%text-atom text) environment operation
-                       "text is not a valid number"))
+  (let* ((length (length text))
+         (culprit-text
+           (if (<= length 64)
+               text
+               (format nil "~A...<~D characters>" (subseq text 0 32) length))))
+    (%raise-domain-error "NUMBER_TEXT" (make-symbol culprit-text)
+                         environment operation
+                         "text is not a valid number")))
 
 (defun %text-number (text environment operation)
+  (%check-text-resource-limit
+   text *max-prolog-numeric-lexeme-length* "NUMBER_TEXT_LENGTH"
+   environment operation "numeric text exceeds the configured length limit")
   (let* ((length (length text))
          (position 0)
          (sign 1)
@@ -120,6 +223,7 @@
          (exponent 0)
          (exponent-sign 1)
          (exponent-digits 0)
+         (exponent-too-large-p nil)
          (decimal-p nil)
          (exponent-p nil))
     (labels ((current-character ()
@@ -158,19 +262,38 @@
               (setf exponent-sign -1))
             (incf position)))
         (setf exponent-digits
-              (consume-digits (lambda (digit)
-                                (setf exponent (+ (* exponent 10) digit))))))
+              (consume-digits
+               (lambda (digit)
+                 (unless exponent-too-large-p
+                   (if (> exponent
+                          (floor (- *max-prolog-numeric-lexeme-length* digit) 10))
+                       (setf exponent-too-large-p t)
+                       (setf exponent (+ (* exponent 10) digit))))))))
       (when (or (zerop integer-digits)
                 (and decimal-p (zerop fraction-digits))
                 (and exponent-p (zerop exponent-digits))
                 (/= position length))
         (invalid))
+      (when exponent-too-large-p
+        (%raise-resource-error
+         "EXPONENT_MAGNITUDE" environment operation
+         "numeric exponent exceeds the configured magnitude limit"))
       (if (or decimal-p exponent-p)
-          (let* ((fraction-scale (expt 10 fraction-digits))
-                 (significand (+ integer-part (/ fraction-part fraction-scale)))
-                 (scaled (* sign significand
-                            (expt 10 (* exponent-sign exponent)))))
-            (coerce scaled 'double-float))
+          (let* ((signed-exponent (* exponent-sign exponent))
+                 (positive-exponent (max 0 signed-exponent))
+                 (negative-exponent (max 0 (- signed-exponent))))
+            (when (or (> (+ integer-digits fraction-digits positive-exponent)
+                         *max-prolog-numeric-lexeme-length*)
+                      (> (+ fraction-digits negative-exponent)
+                         *max-prolog-numeric-lexeme-length*))
+              (%raise-resource-error
+               "NUMBER_SIZE" environment operation
+               "numeric value exceeds the configured exact-size limit"))
+            (let* ((fraction-scale (expt 10 fraction-digits))
+                   (significand (+ integer-part (/ fraction-part fraction-scale)))
+                   (scaled (* sign significand
+                              (expt 10 signed-exponent))))
+              (coerce scaled 'double-float)))
           (* sign integer-part)))))
 
 (defun %emit-pairs (pairs environment emit)
@@ -192,6 +315,7 @@
     (%ensure-atom-value resolved-atom environment operation "atom_length/2 atom")
     (%ensure-nonnegative-integer-or-variable
      resolved-length environment operation "atom_length/2 length")
+    (%check-atom-text-limit resolved-atom environment operation)
     (%unify-emit length (length (%atom-text resolved-atom)) environment emit)))
 
 (define-builtin (atom_concat left right whole) (rulebase environment depth emit)
@@ -204,20 +328,73 @@
       (unless (or (logic-var-p value) (%term-atom-p value))
         (%raise-type-error "ATOM" value environment operation
                            "atom_concat/3 arguments must be atoms")))
+    (dolist (value (list resolved-left resolved-right resolved-whole))
+      (unless (logic-var-p value)
+        (%check-atom-text-limit value environment operation)))
     (cond
       ((not (logic-var-p resolved-whole))
-       (let ((text (%atom-text resolved-whole)))
-         (loop for split from 0 to (length text)
-               do (%emit-pairs
-                   (list (cons left (%text-atom (subseq text 0 split)))
-                         (cons right (%text-atom (subseq text split))))
-                   environment emit))))
+       (let* ((whole-text (%atom-text resolved-whole))
+              (whole-size (length whole-text)))
+         (cond
+           ((and (not (logic-var-p resolved-left))
+                 (not (logic-var-p resolved-right)))
+            (let* ((left-text (%atom-text resolved-left))
+                   (right-text (%atom-text resolved-right))
+                   (left-size (length left-text))
+                   (right-size (length right-text)))
+              (when (and (= (+ left-size right-size) whole-size)
+                         (string= left-text whole-text :end2 left-size)
+                         (string= right-text whole-text :start2 left-size))
+                (funcall emit environment))))
+           ((not (logic-var-p resolved-left))
+            (let* ((left-text (%atom-text resolved-left))
+                   (left-size (length left-text)))
+              (when (and (<= left-size whole-size)
+                         (string= left-text whole-text :end2 left-size))
+                (%unify-emit
+                 right
+                 (%text-atom (subseq whole-text left-size) environment operation)
+                 environment emit))))
+           ((not (logic-var-p resolved-right))
+            (let* ((right-text (%atom-text resolved-right))
+                   (right-size (length right-text))
+                   (split (- whole-size right-size)))
+              (when (and (not (minusp split))
+                         (string= right-text whole-text :start2 split))
+                (%unify-emit
+                 left
+                 (%text-atom (subseq whole-text 0 split) environment operation)
+                 environment emit))))
+           (t
+            (%check-resource-limit
+             (1+ whole-size) *max-prolog-derived-atom-candidates*
+             "ATOM_CANDIDATES" environment operation
+             "atom_concat/3 candidate count exceeds the configured limit")
+            (loop for split from 0 to whole-size
+                  do (%emit-pairs
+                      (list
+                       (cons left
+                             (%text-atom
+                              (subseq whole-text 0 split)
+                              environment operation))
+                       (cons right
+                             (%text-atom
+                              (subseq whole-text split)
+                              environment operation)))
+                      environment emit))))))
       ((and (not (logic-var-p resolved-left))
             (not (logic-var-p resolved-right)))
-       (%unify-emit whole
-                    (%text-atom (concatenate 'string (%atom-text resolved-left)
-                                             (%atom-text resolved-right)))
-                    environment emit))
+       (let* ((left-text (%atom-text resolved-left))
+              (right-text (%atom-text resolved-right))
+              (combined-size (+ (length left-text) (length right-text))))
+         (%check-resource-limit
+          combined-size *max-prolog-quoted-lexeme-length* "ATOM_LENGTH"
+          environment operation "derived atom exceeds the configured length limit")
+         (%unify-emit
+          whole
+          (%text-atom
+           (concatenate 'string left-text right-text) environment operation)
+          environment emit)))
       (t
        (%raise-instantiation-error environment operation
                                    "atom_concat/3 requires the whole atom or both parts")))))
@@ -231,25 +408,96 @@
          (resolved-after (%term-resolve after environment))
          (resolved-sub (%term-resolve sub environment)))
     (%ensure-atom-value resolved-atom environment operation "sub_atom/5 atom")
-    (%ensure-nonnegative-integer-or-variable resolved-before environment operation "before")
-    (%ensure-nonnegative-integer-or-variable resolved-length environment operation "length")
-    (%ensure-nonnegative-integer-or-variable resolved-after environment operation "after")
+    (%ensure-nonnegative-integer-or-variable
+     resolved-before environment operation "before")
+    (%ensure-nonnegative-integer-or-variable
+     resolved-length environment operation "length")
+    (%ensure-nonnegative-integer-or-variable
+     resolved-after environment operation "after")
     (unless (or (logic-var-p resolved-sub) (%term-atom-p resolved-sub))
       (%raise-type-error "ATOM" resolved-sub environment operation
                          "sub_atom/5 subterm must be an atom"))
+    (%check-atom-text-limit resolved-atom environment operation)
+    (unless (logic-var-p resolved-sub)
+      (%check-atom-text-limit resolved-sub environment operation))
     (let* ((text (%atom-text resolved-atom))
-           (size (length text)))
-      (loop for candidate-before from 0 to size
-            do (loop for candidate-length from 0 to (- size candidate-before)
-                     for candidate-after = (- size candidate-before candidate-length)
-                     do (%emit-pairs
-                         (list (cons before candidate-before)
-                               (cons length candidate-length)
-                               (cons after candidate-after)
-                               (cons sub (%text-atom
-                                          (subseq text candidate-before
-                                                  (+ candidate-before candidate-length)))))
-                         environment emit))))))
+           (size (length text))
+           (sub-bound-p (not (logic-var-p resolved-sub)))
+           (sub-text (and sub-bound-p (%atom-text resolved-sub)))
+           (sub-size (and sub-bound-p (length sub-text)))
+           (fixed-length
+             (cond
+               ((not (logic-var-p resolved-length)) resolved-length)
+               (sub-bound-p sub-size)
+               ((and (not (logic-var-p resolved-before))
+                     (not (logic-var-p resolved-after)))
+                (- size resolved-before resolved-after))))
+           (fixed-before
+             (cond
+               ((not (logic-var-p resolved-before)) resolved-before)
+               ((and (not (logic-var-p resolved-after))
+                     (integerp fixed-length))
+                (- size resolved-after fixed-length)))))
+      (labels ((bound-integer-matches-p (value candidate)
+                 (or (logic-var-p value) (= value candidate)))
+               (emit-candidate (candidate-before candidate-length)
+                 (let ((candidate-after
+                         (- size candidate-before candidate-length)))
+                   (when
+                       (and (not (minusp candidate-before))
+                            (not (minusp candidate-length))
+                            (not (minusp candidate-after))
+                            (bound-integer-matches-p
+                             resolved-before candidate-before)
+                            (bound-integer-matches-p
+                             resolved-length candidate-length)
+                            (bound-integer-matches-p
+                             resolved-after candidate-after)
+                            (or (not sub-bound-p)
+                                (and (= sub-size candidate-length)
+                                     (string=
+                                      sub-text text
+                                      :start2 candidate-before
+                                      :end2 (+ candidate-before
+                                               candidate-length)))))
+                     (%emit-pairs
+                      (list
+                       (cons before candidate-before)
+                       (cons length candidate-length)
+                       (cons after candidate-after)
+                       (cons sub
+                             (if sub-bound-p
+                                 resolved-sub
+                                 (%text-atom
+                                  (subseq
+                                   text candidate-before
+                                   (+ candidate-before candidate-length))
+                                  environment operation))))
+                      environment emit)))))
+        (cond
+          ((and (integerp fixed-before) (integerp fixed-length))
+           (emit-candidate fixed-before fixed-length))
+          ((integerp fixed-before)
+           (loop for candidate-length from 0 to (- size fixed-before)
+                 do (emit-candidate fixed-before candidate-length)))
+          ((integerp fixed-length)
+           (loop for candidate-before from 0 to (- size fixed-length)
+                 do (emit-candidate candidate-before fixed-length)))
+          ((not (logic-var-p resolved-after))
+           (loop for candidate-before from 0 to (- size resolved-after)
+                 for candidate-length = (- size resolved-after candidate-before)
+                 do (emit-candidate candidate-before candidate-length)))
+          (t
+           (%check-resource-limit
+            (/ (* (1+ size) (+ size 2)) 2)
+            *max-prolog-derived-atom-candidates*
+            "ATOM_CANDIDATES" environment operation
+            "sub_atom/5 candidate count exceeds the configured limit")
+           (loop for candidate-before from 0 to size
+                 do (loop
+                      for candidate-length from 0 to (- size candidate-before)
+                      do (emit-candidate
+                          candidate-before candidate-length)))))))))
 
 (defmacro define-atom-list-conversion (name list-to-text atom-to-list)
   `(define-builtin (,name atom list) (rulebase environment depth emit)
@@ -260,10 +508,16 @@
        (cond
          ((not (logic-var-p resolved-atom))
           (%ensure-atom-value resolved-atom environment operation "first argument")
-          (%unify-emit list (,atom-to-list resolved-atom) environment emit))
+          (%unify-emit
+           list (,atom-to-list resolved-atom environment operation)
+           environment emit))
          ((not (logic-var-p resolved-list))
-          (%unify-emit atom (%text-atom (,list-to-text resolved-list environment operation))
-                       environment emit))
+          (%unify-emit
+           atom
+           (%text-atom
+            (,list-to-text resolved-list environment operation)
+            environment operation)
+           environment emit))
          (t
           (%raise-instantiation-error environment operation
                                       "one argument must be instantiated"))))))
@@ -288,7 +542,9 @@
                     environment emit))
       ((not (logic-var-p resolved-code))
        (let ((value (%code-character resolved-code environment operation)))
-         (%unify-emit character (%text-atom (string value)) environment emit)))
+         (%unify-emit
+          character (%text-atom (string value) environment operation)
+          environment emit)))
       (t
        (%raise-instantiation-error environment operation
                                    "char_code/2 requires one instantiated argument")))))
@@ -304,15 +560,24 @@
           (unless (realp resolved-number)
             (%raise-type-error "NUMBER" resolved-number environment operation
                                "first argument must be a number"))
-          (%unify-emit list (,text-to-list
-                             (%text-atom
-                              (%number-text resolved-number environment operation)))
-                       environment emit))
+          (%unify-emit
+           list
+           (,text-to-list
+            (%text-atom
+             (%number-text resolved-number environment operation)
+             environment operation)
+            environment operation
+            *max-prolog-numeric-lexeme-length* "NUMBER_TEXT_LENGTH")
+           environment emit))
          ((not (logic-var-p resolved-list))
-          (%unify-emit number
-                       (%text-number (,list-to-text resolved-list environment operation)
-                                     environment operation)
-                       environment emit))
+          (%unify-emit
+           number
+           (%text-number
+            (,list-to-text
+             resolved-list environment operation
+             *max-prolog-numeric-lexeme-length* "NUMBER_TEXT_LENGTH")
+            environment operation)
+           environment emit))
          (t
           (%raise-instantiation-error environment operation
                                       "one argument must be instantiated"))))))
@@ -330,6 +595,8 @@
     (unless (or (logic-var-p resolved-number) (realp resolved-number))
       (%raise-type-error "NUMBER" resolved-number environment operation
                          "second argument must be a number"))
+    (unless (logic-var-p resolved-atom)
+      (%check-atom-text-limit resolved-atom environment operation))
     (cond
       ((not (logic-var-p resolved-atom))
        ;; Unlike number_chars/2 and number_codes/2, invalid atom text fails.
@@ -340,9 +607,12 @@
                         environment emit)
          (prolog-domain-error () nil)))
       ((not (logic-var-p resolved-number))
-       (%unify-emit atom
-                    (%text-atom (%number-text resolved-number environment operation))
-                    environment emit))
+       (%unify-emit
+        atom
+        (%text-atom
+         (%number-text resolved-number environment operation)
+         environment operation)
+        environment emit))
       (t
        (%raise-instantiation-error environment operation
                                    "one argument must be instantiated")))))

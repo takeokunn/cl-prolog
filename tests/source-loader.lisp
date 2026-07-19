@@ -189,7 +189,19 @@
      (let ((rulebase (consult-prolog "original.")))
        (signals-error (consult-prolog ,source rulebase))
        (is (%source-query-succeeds-p rulebase "original"))
-       (is (not (%source-predicate-defined-p rulebase 'cl-prolog::temporary))))))
+       (is (not (%source-predicate-defined-p rulebase 'cl-prolog::temporary)))
+       (is (%source-query-succeeds-p rulebase "assertz(after_rollback)"))
+       (is (%source-query-succeeds-p rulebase "after_rollback"))
+       (is (eq (last (cl-prolog::rulebase-entries rulebase))
+               (cl-prolog::rulebase-entries-tail rulebase)))
+       (is (loop for predicate-key being the hash-keys
+                   of (cl-prolog::rulebase-predicate-index rulebase)
+                   using (hash-value entries)
+                 always
+                 (eq (last entries)
+                     (gethash predicate-key
+                              (cl-prolog::rulebase-predicate-tails
+                               rulebase))))))))
 
 (deftest-source-loader-rolls-back
   source-loader-preserves-an-existing-rulebase-on-failure
@@ -554,6 +566,8 @@
      "fact(one)"
      "'kwoted'(two)")))
 
+(progn
+(progn
 (deftest source-loader-include-splices-terms-into-the-including-unit ()
   (with-temporary-prolog-files ((included "included(fact)."))
       (let ((rulebase
@@ -564,3 +578,92 @@
        rulebase
        "included(fact)"
        "outer(fact)"))))
+(deftest source-loader-operator-specifiers-do-not-intern-keywords ()
+  (dolist (entry '(("FX" :fx) ("FY" :fy) ("XF" :xf) ("YF" :yf)
+                   ("XFX" :xfx) ("XFY" :xfy) ("YFX" :yfx)))
+    (is (eq (second entry)
+            (cl-prolog::%operator-specifier-keyword
+             (make-symbol (first entry))))))
+  (labels ((owned-symbol-count ()
+             (let ((package (find-package '#:keyword)))
+               (loop for symbol being each symbol of package
+                     count (eq package (symbol-package symbol))))))
+    (let ((before (owned-symbol-count)))
+      (dotimes (index 128)
+        (let* ((name (format nil "INVALID-OPERATOR-~D" index))
+               (specifier (make-symbol name)))
+          (is (null (nth-value 1 (find-symbol name '#:keyword))))
+          (signals-error
+           (cl-prolog::%operator-specifier-keyword specifier))
+          (is (null (nth-value 1 (find-symbol name '#:keyword))))))
+      (is-equal before (owned-symbol-count)))))
+
+(deftest source-loader-missing-pathnames-do-not-intern-culprits ()
+  (let* ((pathname (%temporary-prolog-pathname))
+         (resolved (cl-prolog::%resolve-prolog-source-pathname pathname))
+         (name (namestring resolved)))
+    (is (null (nth-value 1 (find-symbol name '#:cl-prolog))))
+    (handler-case
+        (progn
+          (cl-prolog::with-prolog-source-errors (nil (cl-prolog::%iso-atom "CONSULT")) (consult-prolog pathname))
+          (error "Expected a missing source error."))
+      (prolog-existence-error (condition)
+        (let ((culprit
+                (third (second (prolog-exception-term condition)))))
+          (is (null (symbol-package culprit)))
+          (is-equal name (symbol-name culprit))
+          (is-equal (%prolog-path-atom resolved)
+                    (prolog-term-string culprit)))))
+    (is (null (nth-value 1 (find-symbol name '#:cl-prolog))))))
+
+(deftest source-loader-syntax-descriptions-do-not-intern-culprits ()
+  (labels ((owned-symbol-count ()
+             (let ((package (find-package '#:cl-prolog)))
+               (loop for symbol being each symbol of package
+                     count (eq package (symbol-package symbol))))))
+    (let ((before (owned-symbol-count)))
+      (dotimes (index 32)
+        (let ((description
+                (format nil "Unexpected generated token ~D." index)))
+          (handler-case
+              (cl-prolog::%raise-syntax-error
+               (make-condition 'cl-prolog::prolog-parse-error
+                               :description description)
+               nil 'cl-prolog::consult)
+            (cl-prolog::prolog-syntax-error (condition)
+              (let ((culprit
+                      (second (second
+                               (prolog-exception-term condition)))))
+                (is (null (symbol-package culprit)))
+                (is-equal description (symbol-name culprit)))))))
+      (is-equal before (owned-symbol-count))))))
+
+(deftest source-loader-preserves-parser-resource-errors-for-direct-api ()
+  (with-temporary-prolog-files ((source "toolong."))
+    (let ((*max-prolog-identifier-length* 1))
+      (handler-case
+          (progn
+            (consult-prolog source)
+            (error "Expected a parser resource error."))
+        (prolog-parser-resource-error (condition)
+          (is-equal "IDENTIFIER_LENGTH"
+                    (prolog-parser-resource-error-resource condition)))))))
+
+(deftest source-loader-translates-parser-resource-errors-for-consult ()
+  (with-temporary-prolog-files ((source "toolong."))
+    (let* ((rulebase (make-rulebase))
+           (query
+             (read-prolog-term
+              (format nil
+                      "catch(consult(~A), error(resource_error(identifier_length), _), true)."
+                      (%prolog-path-atom source))
+              (cl-prolog::rulebase-operator-table rulebase))))
+      (let ((*max-prolog-identifier-length* 1))
+        (is (prolog-succeeds-p rulebase query)))))))
+
+(deftest source-loader-rejects-cyclic-source-lists ()
+  (let ((sources (list (cl-prolog::%prolog-atom-symbol "cycle.pl"
+                                                       :preserve-case t))))
+    (setf (cdr sources) sources)
+    (signals-error
+     (cl-prolog::%source-file-pathnames sources nil 'cl-prolog::consult))))

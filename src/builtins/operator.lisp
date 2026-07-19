@@ -30,8 +30,10 @@
        (%raise-type-error "ATOM" value environment operation
                           "operator specifier must be an atom"))
       (t
-       (let ((specifier (intern (symbol-name value) :keyword)))
-         (unless (%valid-operator-specifier-p specifier)
+       (let ((specifier
+               (find (symbol-name value) +operator-specifiers+
+                     :key #'symbol-name :test #'string-equal)))
+         (unless specifier
            (%raise-domain-error "OPERATOR_SPECIFIER" value environment operation
                                 "unknown operator specifier"))
          specifier)))))

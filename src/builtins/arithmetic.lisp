@@ -37,14 +37,49 @@
     (%raise-type-error "NUMBER" value nil (%iso-atom "ARITHMETIC")
                        "real operand required")))
 
-(defun %check-nonzero-divisor (expression divisor)
-  (when (zerop divisor)
-    (%raise-evaluation-error "ZERO_DIVISOR" nil (%iso-atom "ARITHMETIC")
-                             (format nil "division by zero in ~S" expression))))
+(progn
+  (defparameter *max-prolog-arithmetic-exponent-magnitude*
+    *max-prolog-numeric-lexeme-length*
+    "Maximum absolute exponent accepted by Prolog arithmetic.")
+  (defparameter *max-prolog-arithmetic-result-bits*
+    (ceiling (* *max-prolog-numeric-lexeme-length* 3322) 1000)
+    "Maximum estimated bit length of an integer arithmetic result.")
+  (defun %check-nonzero-divisor (expression divisor)
+    (when (zerop divisor)
+      (%raise-evaluation-error "ZERO_DIVISOR" nil (%iso-atom "ARITHMETIC")
+                               (format nil "division by zero in ~S" expression))))
+  (defun %bounded-expt (base exponent expression)
+    (declare (ignore expression))
+    (when (and (realp exponent)
+               (> (abs exponent)
+                  *max-prolog-arithmetic-exponent-magnitude*))
+      (%raise-resource-error
+       "EXPONENT_MAGNITUDE" nil (%iso-atom "ARITHMETIC")
+       "arithmetic exponent exceeds the configured magnitude limit"))
+    (when (and (integerp base)
+               (integerp exponent)
+               (not (zerop exponent))
+               (> (abs base) 1))
+      (let* ((base-bits (integer-length (abs base)))
+             (power (abs exponent))
+             (growth-bits (max 1 (1- base-bits))))
+        (when (or (> base-bits *max-prolog-arithmetic-result-bits*)
+                  (> power
+                     (floor *max-prolog-arithmetic-result-bits*
+                            growth-bits)))
+          (%raise-resource-error
+           "INTEGER_SIZE" nil (%iso-atom "ARITHMETIC")
+           "arithmetic result exceeds the configured size limit"))))
+    (expt base exponent)))
 
-(defun %arithmetic-operator-key (operator)
-  (and (symbolp operator)
-       (intern (symbol-name operator) :keyword)))
+(defun %arithmetic-operator-key (operator table)
+  (when (symbolp operator)
+    (let ((entry
+            (find (symbol-name operator) table
+                  :key (lambda (candidate)
+                         (symbol-name (car candidate)))
+                  :test #'string-equal)))
+      (and entry (car entry)))))
 
 (defmacro define-arithmetic-table (name arity &body definitions)
   `(defparameter ,name
@@ -123,8 +158,8 @@
     (mod left right))
   (:min (left right expression) (min left right))
   (:max (left right expression) (max left right))
-  (:** (left right expression) (expt left right))
-  (:^ (left right expression) (expt left right))
+  (:** (left right expression) (%bounded-expt left right expression))
+  (:^ (left right expression) (%bounded-expt left right expression))
   (:|/\\| (left right expression)
     (%require-integer left) (%require-integer right)
     (logand left right))
@@ -155,7 +190,8 @@
 
 (defun %require-arithmetic-function (operator arity expression environment)
   (let* ((table (%arithmetic-function-table arity))
-         (entry (and table (assoc (%arithmetic-operator-key operator) table))))
+         (entry (and table
+                     (assoc (%arithmetic-operator-key operator table) table))))
     (unless entry
       (%raise-type-error
        "EVALUABLE" (%iso-term "/" operator arity) environment
@@ -184,24 +220,30 @@
   "Evaluate a ground arithmetic EXPRESSION after applying ENVIRONMENT."
   (let ((resolved (logic-substitute expression environment)))
     (labels ((evaluate (term)
-             (cond
+             (let ((constant-entry
+                     (assoc (%arithmetic-operator-key
+                             term *arithmetic-constants*)
+                            *arithmetic-constants*)))
+               (cond
                  ((numberp term)
                   (%require-prolog-number term environment)
                   term)
-                 ((assoc (%arithmetic-operator-key term) *arithmetic-constants*)
-                  (cdr (assoc (%arithmetic-operator-key term)
-                              *arithmetic-constants*)))
-                  ((logic-var-p term)
-                   (%raise-instantiation-error environment (%iso-atom "ARITHMETIC")
-                                               "arithmetic expression is not ground"))
-                  ((not (consp term))
-                   (%raise-type-error "EVALUABLE" term environment
-                                      (%iso-atom "ARITHMETIC")
-                                      "number or arithmetic expression required"))
+                 (constant-entry
+                  (cdr constant-entry))
+                 ((logic-var-p term)
+                  (%raise-instantiation-error
+                   environment (%iso-atom "ARITHMETIC")
+                   "arithmetic expression is not ground"))
+                 ((not (consp term))
+                  (%raise-type-error
+                   "EVALUABLE" term environment
+                   (%iso-atom "ARITHMETIC")
+                   "number or arithmetic expression required"))
                  ((not (%proper-list-p term))
-                   (%raise-type-error "EVALUABLE" term environment
-                                      (%iso-atom "ARITHMETIC")
-                                      "proper arithmetic expression required"))
+                  (%raise-type-error
+                   "EVALUABLE" term environment
+                   (%iso-atom "ARITHMETIC")
+                   "proper arithmetic expression required"))
                  (t
                   (let ((operator (first term))
                         (arguments (rest term)))
@@ -216,7 +258,7 @@
                             entry
                             (evaluate (first arguments))
                             (evaluate (second arguments))
-                            term)))))))))
+                            term))))))))))
       (evaluate resolved))))
 
 (define-builtin (is result expression) (rulebase environment depth emit)

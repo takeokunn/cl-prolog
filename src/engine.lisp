@@ -136,20 +136,34 @@ Deliberately not a PROLOG-EXCEPTION: catch/3 must not intercept it."))
                     (%iso-term "EVALUATION_ERROR" (%iso-atom reason))
                     environment operation message))
 
-(defun %raise-resource-error (resource environment operation message &key condition-type goal)
-  (let ((term (%iso-error-term (%iso-term "RESOURCE_ERROR" (%iso-atom resource))
-                               operation message)))
-    (if condition-type
-        (error condition-type :term term :environment environment :goal goal)
-        (error 'prolog-resource-error :term term :environment environment))))
+(progn
+  (defun %raise-resource-error
+      (resource environment operation message &key condition-type goal)
+    (let ((term (%iso-error-term
+                 (%iso-term "RESOURCE_ERROR" (%iso-atom resource))
+                 operation message)))
+      (if condition-type
+          (error condition-type
+                 :term term
+                 :environment environment
+                 :goal goal)
+          (error 'prolog-resource-error
+                 :term term
+                 :environment environment))))
+  (defun %raise-parser-resource-error (condition environment operation)
+    "Raise parser CONDITION as a catchable ISO resource_error/1 term."
+    (%raise-resource-error
+     (prolog-parser-resource-error-resource condition)
+     environment
+     operation
+     (princ-to-string condition))))
 
 (defun %raise-syntax-error (condition environment operation)
   "Raise parser CONDITION as a catchable ISO syntax_error/1 term."
   (let ((description (prolog-parse-error-description condition)))
     (%raise-iso-error
      'prolog-syntax-error
-     (%iso-term "SYNTAX_ERROR"
-                (%prolog-atom-symbol description :preserve-case t))
+     (%iso-term "SYNTAX_ERROR" (make-symbol description))
      environment operation description)))
 
 (defun %raise-prolog-exception (term environment)

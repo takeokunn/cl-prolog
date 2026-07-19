@@ -84,15 +84,27 @@
       ((loop-forever ?n) (loop-forever (s ?n)))))
   ((loop-forever zero) :signals :max-depth 16))
 
-(deftest-queries variant-tabling-terminates-left-recursion
-    ((prolog
-      ((path ?x ?y) (path ?x ?z) (edge ?z ?y))
-      ((path ?x ?y) (edge ?x ?y))
-      ((edge a b))
-      ((edge b c))
-      ((edge c d))))
-  ((path a ?who)
-   => (((?who . b)) ((?who . c)) ((?who . d)))))
+(deftest variant-tabling-terminates-left-recursion ()
+  (let* ((edge-count 128)
+         (rulebase
+           (make-rulebase
+            :clauses
+            (append
+             (list
+              (make-clause
+               (quote (path ?x ?y))
+               (quote ((path ?x ?z) (edge ?z ?y))))
+              (make-clause
+               (quote (path ?x ?y))
+               (quote ((edge ?x ?y)))))
+             (loop for source below edge-count
+                   collect (make-clause
+                            (list (quote edge) source (1+ source)))))))
+         (solutions (query-prolog rulebase (quote (path 0 ?who)))))
+    (is-equal
+     (loop for target from 1 to edge-count
+           collect (list (cons (quote ?who) target)))
+     solutions)))
 
 (deftest-queries variant-tabling-deduplicates-answers
     ((prolog
@@ -121,6 +133,45 @@
       ((cycle-c ?x) (cycle-a ?x))
       ((cycle-c c))))
   ((cycle-a ?x) => (((?x . c)) ((?x . a)))))
+
+(deftest tabled-predicate-preserves-and-deduplicates-cyclic-answer (:timeout 2)
+  (let* ((cycle-a (cons 'loop nil))
+         (cycle-b (cons 'loop nil))
+         (rulebase (make-rulebase)))
+    (setf (cdr cycle-a) cycle-a
+          (cdr cycle-b) cycle-b)
+    (rulebase-insert-clause!
+     rulebase (make-clause (list 'cyclic-answer cycle-a)))
+    (rulebase-insert-clause!
+     rulebase (make-clause (list 'cyclic-answer cycle-b)))
+    (cl-prolog::%add-rulebase-table-declaration!
+     rulebase 'cyclic-answer 1 :test)
+    (let* ((solutions (query-prolog rulebase '(cyclic-answer ?answer)))
+           (answer (solution-binding '?answer (first solutions))))
+      (is-equal 1 (length solutions))
+      (is (consp answer))
+      (is (eq answer (cdr answer)))
+      (is-equal 'loop (car answer)))))
+
+(deftest left-recursion-through-leading-builtins-and-control-terminates
+    (:timeout 2)
+  (let ((rulebase
+          (prolog
+           ((builtin-direct ?x) true (builtin-direct ?x))
+           ((builtin-direct direct-base))
+           ((builtin-indirect-p ?x) (= ?x ?y) (builtin-indirect-q ?y))
+           ((builtin-indirect-p p-base))
+           ((builtin-indirect-q ?x) true (builtin-indirect-p ?x))
+           ((builtin-indirect-q q-base))
+           ((control-direct ?x)
+            (call (and true (control-direct ?x))))
+           ((control-direct control-base)))))
+    (is-equal '(((?x . direct-base)))
+              (query-prolog rulebase '(builtin-direct ?x)))
+    (is-same-set '(((?x . p-base)) ((?x . q-base)))
+                 (query-prolog rulebase '(builtin-indirect-p ?x)))
+    (is-equal '(((?x . control-base)))
+              (query-prolog rulebase '(control-direct ?x)))))
 
 (deftest builtin-proof-search-inherits-table-session ()
   (let ((*observed-table-session* nil))
@@ -155,27 +206,63 @@
               (query-prolog rulebase '(value ?x)))))
 
 (deftest predicate-index-excludes-unrelated-clauses-and-preserves-order ()
-  (let ((rulebase (prolog
-                    ((noise before))
-                    ((indexed first))
-                    ((indexed first extra))
-                    ((other between))
-                    ((indexed second))
-                    ((noise after)))))
-    (is-equal '(((?x . first)) ((?x . second)))
-              (query-prolog rulebase '(indexed ?x)))
+  (let* ((rulebase (make-rulebase))
+         (index (cl-prolog::rulebase-predicate-index rulebase))
+         (tails (cl-prolog::rulebase-predicate-tails rulebase))
+         (key (list cl-prolog::+default-prolog-module+ 'indexed 1)))
+    (is (null (cl-prolog::rulebase-entries rulebase)))
+    (is (null (cl-prolog::rulebase-entries-tail rulebase)))
+    (is-equal 0 (hash-table-count index))
+    (is-equal 0 (hash-table-count tails))
+    (rulebase-insert-clause! rulebase (make-clause '(indexed first))
+                             :position :first)
+    (is (eq (cl-prolog::rulebase-entries rulebase)
+            (cl-prolog::rulebase-entries-tail rulebase)))
+    (is (eq (gethash key index) (gethash key tails)))
+    (let ((first-indexed-tail (gethash key tails)))
+      (rulebase-insert-clause! rulebase (make-clause '(other between)))
+      (is (eq first-indexed-tail (gethash key tails))))
+    (rulebase-insert-clause! rulebase (make-clause '(indexed second)))
+    (let ((global-tail (cl-prolog::rulebase-entries-tail rulebase))
+          (indexed-tail (gethash key tails)))
+      (rulebase-insert-clause! rulebase (make-clause '(indexed zeroth))
+                               :position :first)
+      (is (eq global-tail (cl-prolog::rulebase-entries-tail rulebase)))
+      (is (eq indexed-tail (gethash key tails))))
+    (is-equal '((indexed zeroth)
+                (indexed first)
+                (other between)
+                (indexed second))
+              (mapcar (lambda (entry)
+                        (clause-head
+                         (cl-prolog::%stored-clause-clause entry)))
+                      (cl-prolog::rulebase-entries rulebase)))
     (multiple-value-bind (revision entries)
         (cl-prolog::%rulebase-predicate-entries
          rulebase cl-prolog::+default-prolog-module+ 'indexed 1)
       (declare (cl:ignore revision))
-      (is-equal '((indexed first) (indexed second))
+      (is-equal '((indexed zeroth) (indexed first) (indexed second))
                 (mapcar (lambda (entry)
                           (clause-head
                            (cl-prolog::%stored-clause-clause entry)))
-                        entries)))))
+                        entries)))
+    (is (eq (last (cl-prolog::rulebase-entries rulebase))
+            (cl-prolog::rulebase-entries-tail rulebase)))
+    (is (loop for predicate-key being the hash-keys of index
+                using (hash-value entries)
+              always
+              (and (eq (last entries) (gethash predicate-key tails))
+                   (equal entries
+                          (remove-if-not
+                           (lambda (entry)
+                             (equal predicate-key
+                                    (cl-prolog::%stored-clause-predicate-key
+                                     entry)))
+                           (cl-prolog::rulebase-entries rulebase))))))))
 
 (deftest predicate-index-keeps-logical-update-history ()
-  (let ((rulebase (make-rulebase)))
+  (let* ((rulebase (make-rulebase))
+         (key (list cl-prolog::+default-prolog-module+ 'indexed 1)))
     (assert-query rulebase (assertz (indexed first)) :succeeds)
     (assert-query rulebase (assertz (indexed second)) :succeeds)
     (let ((snapshot (cl-prolog::rulebase-revision rulebase)))
@@ -183,6 +270,24 @@
       (assert-query rulebase (retract (indexed first)) :succeeds)
       (is-equal '(((?x . zeroth)) ((?x . second)))
                 (query-prolog rulebase '(indexed ?x)))
+      (assert-query rulebase (assertz (indexed third)) :succeeds)
+      (is-equal '(((?x . zeroth)) ((?x . second)) ((?x . third)))
+                (query-prolog rulebase '(indexed ?x)))
+      (let ((entries
+              (gethash key
+                       (cl-prolog::rulebase-predicate-index rulebase))))
+        (is-equal '((indexed zeroth)
+                    (indexed first)
+                    (indexed second)
+                    (indexed third))
+                  (mapcar
+                   (lambda (entry)
+                     (clause-head
+                      (cl-prolog::%stored-clause-clause entry)))
+                   entries))
+        (is (eq (last entries)
+                (gethash key
+                         (cl-prolog::rulebase-predicate-tails rulebase)))))
       (is-equal '((indexed first) (indexed second))
                 (mapcar
                  (lambda (entry)
@@ -226,7 +331,22 @@
 
 (deftest predicate-index-copy-is-independent ()
   (let* ((rulebase (prolog ((indexed original))))
-         (copy (cl-prolog::%copy-rulebase rulebase)))
+         (copy (cl-prolog::%copy-rulebase rulebase))
+         (key (list cl-prolog::+default-prolog-module+ 'indexed 1)))
+    (is (not (eq (cl-prolog::rulebase-entries rulebase)
+                 (cl-prolog::rulebase-entries copy))))
+    (is (not (eq (cl-prolog::rulebase-entries-tail rulebase)
+                 (cl-prolog::rulebase-entries-tail copy))))
+    (is (not (eq (cl-prolog::rulebase-predicate-index rulebase)
+                 (cl-prolog::rulebase-predicate-index copy))))
+    (is (not (eq (gethash key
+                          (cl-prolog::rulebase-predicate-index rulebase))
+                 (gethash key
+                          (cl-prolog::rulebase-predicate-index copy)))))
+    (is (not (eq (gethash key
+                          (cl-prolog::rulebase-predicate-tails rulebase))
+                 (gethash key
+                          (cl-prolog::rulebase-predicate-tails copy)))))
     (rulebase-insert-clause! copy (make-clause '(indexed copied)))
     (is-equal '((indexed original))
               (mapcar (lambda (entry)
@@ -243,11 +363,34 @@
                       (nth-value
                        1 (cl-prolog::%rulebase-predicate-entries
                           copy cl-prolog::+default-prolog-module+
-                          'indexed 1))))))
+                          'indexed 1))))
+    (rulebase-insert-clause! rulebase
+                             (make-clause '(indexed original-added)))
+    (is-equal '((indexed original) (indexed original-added))
+              (mapcar (lambda (entry)
+                        (clause-head
+                         (cl-prolog::%stored-clause-clause entry)))
+                      (nth-value
+                       1 (cl-prolog::%rulebase-predicate-entries
+                          rulebase cl-prolog::+default-prolog-module+
+                          'indexed 1))))
+    (is-equal '((indexed original) (indexed copied))
+              (mapcar (lambda (entry)
+                        (clause-head
+                         (cl-prolog::%stored-clause-clause entry)))
+                      (nth-value
+                       1 (cl-prolog::%rulebase-predicate-entries
+                          copy cl-prolog::+default-prolog-module+
+                          'indexed 1))))
+    (is (eq (last (cl-prolog::rulebase-entries rulebase))
+            (cl-prolog::rulebase-entries-tail rulebase)))
+    (is (eq (last (cl-prolog::rulebase-entries copy))
+            (cl-prolog::rulebase-entries-tail copy)))))
 
 (deftest predicate-index-replace-reflects-transaction ()
   (let* ((rulebase (prolog ((indexed original))))
-         (transaction (cl-prolog::%copy-rulebase rulebase)))
+         (transaction (cl-prolog::%copy-rulebase rulebase))
+         (key (list cl-prolog::+default-prolog-module+ 'indexed 1)))
     (rulebase-insert-clause! transaction (make-clause '(indexed committed)))
     (cl-prolog::%replace-rulebase! rulebase transaction)
     (is-equal '((indexed original) (indexed committed))
@@ -257,7 +400,28 @@
                       (nth-value
                        1 (cl-prolog::%rulebase-predicate-entries
                           rulebase cl-prolog::+default-prolog-module+
-                          'indexed 1))))))
+                          'indexed 1))))
+    (let ((discarded (cl-prolog::%copy-rulebase rulebase)))
+      (rulebase-insert-clause! discarded
+                               (make-clause '(indexed rolled-back))))
+    (rulebase-insert-clause! rulebase
+                             (make-clause '(indexed after-rollback)))
+    (is-equal '((indexed original)
+                (indexed committed)
+                (indexed after-rollback))
+              (mapcar (lambda (entry)
+                        (clause-head
+                         (cl-prolog::%stored-clause-clause entry)))
+                      (nth-value
+                       1 (cl-prolog::%rulebase-predicate-entries
+                          rulebase cl-prolog::+default-prolog-module+
+                          'indexed 1))))
+    (is (eq (last (cl-prolog::rulebase-entries rulebase))
+            (cl-prolog::rulebase-entries-tail rulebase)))
+    (is (eq (last (gethash key
+                           (cl-prolog::rulebase-predicate-index rulebase)))
+            (gethash key
+                     (cl-prolog::rulebase-predicate-tails rulebase))))))
 
 (deftest predicate-index-proof-cache-follows-rulebase-revisions ()
   (let* ((rulebase (prolog ((indexed original))))
@@ -537,7 +701,71 @@
                 (query-prolog (make-rulebase) '((42 x)))
                 (error "Expected an INVALID-GOAL-ERROR"))
             (invalid-goal-error (condition)
-              (invalid-goal-error-goal condition)))))
+              (invalid-goal-error-goal condition))))
+  (:equal '("INSTANTIATION_ERROR" "CALL")
+          (handler-case
+              (progn
+                (query-prolog (make-rulebase) '?goal)
+                (error "Expected a PROLOG-INSTANTIATION-ERROR"))
+            (prolog-instantiation-error (condition)
+              (let ((term (prolog-exception-term condition)))
+                (list (symbol-name (second term))
+                      (symbol-name (second (third term))))))))
+  (:equal '(((?goal . true)) t)
+          (multiple-value-list
+           (query-prolog-first
+            (make-rulebase) '?goal :environment '((?goal . true)))))
+  (:equal '(((?goal . true)))
+          (let ((solutions '()))
+            (map-prolog-solutions
+             (lambda (solution) (push solution solutions))
+             (make-rulebase) '?goal :environment '((?goal . true)))
+            (nreverse solutions)))
+  (:equal '(((?goal ready ok)) t)
+          (multiple-value-list
+           (query-prolog-first
+            (make-rulebase :clauses (list (make-clause '(ready ok))))
+            '?goal :environment '((?goal . (ready ok))))))
+  (:equal '(("TYPE_ERROR" "CALLABLE" 42) "CALL" 42)
+          (handler-case
+              (progn
+                (query-prolog
+                 (make-rulebase) '?goal :environment '((?goal . 42)))
+                (error "Expected an INVALID-GOAL-ERROR"))
+            (invalid-goal-error (condition)
+              (let ((term (prolog-exception-term condition)))
+                (list (normalize-error-data (second term))
+                      (symbol-name (second (third term)))
+                      (invalid-goal-error-goal condition))))))
+  (:equal '(p . tail)
+          (handler-case
+              (progn
+                (query-prolog (make-rulebase) '(p . tail))
+                (error "Expected an INVALID-GOAL-ERROR"))
+            (invalid-goal-error (condition)
+              (invalid-goal-error-goal condition))))
+  (:is
+   (let ((goal (list (cl-prolog::%prolog-symbol ":")
+                     'missing-module
+                     (cons 'p 'tail))))
+     (handler-case
+         (progn
+           (query-prolog (make-rulebase) goal)
+           nil)
+       (invalid-goal-error (condition)
+         (equal goal (invalid-goal-error-goal condition))))))
+  (:equal '("INSTANTIATION_ERROR" "CALL")
+          (let ((goal (list (cl-prolog::%prolog-symbol ":")
+                            'missing-module
+                            '?goal)))
+            (handler-case
+                (progn
+                  (query-prolog (make-rulebase) goal)
+                  (error "Expected a PROLOG-INSTANTIATION-ERROR"))
+              (prolog-instantiation-error (condition)
+                (let ((term (prolog-exception-term condition)))
+                  (list (symbol-name (second term))
+                        (symbol-name (second (third term))))))))))
 
 (deftest iso-error-constructors-preserve-formal-data ()
   (dolist (case

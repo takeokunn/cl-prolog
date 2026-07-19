@@ -24,13 +24,23 @@
 
 (defun %proper-list-p (value)
   "True when VALUE is a finite proper list."
-  (loop with seen = (make-hash-table :test #'eq)
-        for tail = value then (cdr tail)
+  (loop with tortoise = value
+        with tail = value
+        with power = 1
+        with span = 0
         do (cond
              ((null tail) (return t))
-             ((atom tail) (return nil))
-             ((gethash tail seen) (return nil))
-             (t (setf (gethash tail seen) t)))))
+             ((atom tail) (return nil)))
+           (when (= span power)
+             (setf tortoise tail
+                   power (if (> power (floor most-positive-fixnum 2))
+                             most-positive-fixnum
+                             (* 2 power))
+                   span 0))
+           (setf tail (cdr tail)
+                 span (1+ span))
+           (when (eq tail tortoise)
+             (return nil))))
 
 (defun %entry-head (clause)
   (clause-head clause))

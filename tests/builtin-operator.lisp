@@ -33,14 +33,39 @@
     (is (not (prolog-succeeds-p
               rulebase '(cl-prolog::current_op 450 cl-prolog::yfx valid-name))))))
 
-(deftest current-op-enumerates-with-cps-backtracking ()
-  (let* ((rulebase (make-rulebase))
-         (expected (length (cl-prolog::%operator-table-current
-                            (cl-prolog::rulebase-operator-table rulebase))))
-         (solutions (query-prolog
-                     rulebase
-                     '(cl-prolog::current_op ?priority ?specifier ?name))))
-    (is-equal expected (length solutions))))
+(progn
+  (deftest current-op-enumerates-with-cps-backtracking ()
+    (let* ((rulebase (make-rulebase))
+           (expected (length (cl-prolog::%operator-table-current
+                              (cl-prolog::rulebase-operator-table rulebase))))
+           (solutions (query-prolog
+                       rulebase
+                       '(cl-prolog::current_op ?priority ?specifier ?name))))
+      (is-equal expected (length solutions))))
+
+  (deftest operator-specifier-lookup-does-not-intern-untrusted-names ()
+    (labels ((keyword-symbol-count ()
+               (let ((count 0)
+                     (package (find-package :keyword)))
+                 (do-symbols (symbol package count)
+                   (when (eq (symbol-package symbol) package)
+                     (incf count))))))
+      (let ((before (keyword-symbol-count))
+            (operation (cl-prolog::%iso-atom "OP")))
+        (loop for name in '("FX" "FY" "XF" "YF" "XFX" "XFY" "YFX")
+              for expected in cl-prolog::+operator-specifiers+
+              do (is (eq expected
+                         (cl-prolog::%operator-specifier
+                          (make-symbol name) nil operation))))
+        (loop for index below 128
+              for name = (format nil
+                                 "CL-PROLOG-INVALID-SPECIFIER-~D" index)
+              do (is (null (find-symbol name :keyword)))
+                 (signals-condition prolog-domain-error
+                   (cl-prolog::%operator-specifier
+                    (make-symbol name) nil operation))
+                 (is (null (find-symbol name :keyword))))
+        (is-equal before (keyword-symbol-count))))))
 
 (deftest-table operator-builtins-report-iso-errors ()
   (:equal 'prolog-instantiation-error

@@ -47,18 +47,29 @@
                                              "Source must be instantiated"))
                (pathname (%io-pathname resolved environment operation))))
            (source-list (value original)
-             (let ((resolved (logic-substitute value environment)))
-               (cond
-                 ((logic-var-p resolved)
-                  (%raise-instantiation-error environment operation
-                                              "Source list must be instantiated"))
-                 ((null resolved) '())
-                 ((consp resolved)
-                  (cons (source-pathname (car resolved))
-                        (source-list (cdr resolved) original)))
-                 (t
-                  (%raise-type-error "LIST" original environment operation
-                                     "Source must be a proper list of atoms"))))))
+             (let ((seen (make-hash-table :test #'eq))
+                   (result '())
+                   (tail value)
+                   (observed 0))
+               (loop
+                 (cond
+                   ((logic-var-p tail)
+                    (%raise-instantiation-error
+                     environment operation "Source list must be instantiated"))
+                   ((null tail)
+                    (return (nreverse result)))
+                   ((consp tail)
+                    (when (gethash tail seen)
+                      (%parser-resource-error
+                       "SOURCE_LIST_CYCLE" 0 1 observed))
+                    (setf (gethash tail seen) t)
+                    (incf observed)
+                    (push (source-pathname (car tail)) result)
+                    (setf tail (cdr tail)))
+                   (t
+                    (%raise-type-error
+                     "LIST" original environment operation
+                     "Source must be a proper list of atoms")))))))
     (let ((value (logic-substitute term environment)))
       (cond
         ((logic-var-p value)
@@ -78,11 +89,11 @@
      (prolog-source-not-found (condition)
        (%raise-existence-error
         "SOURCE_SINK"
-        (%prolog-atom-symbol
-         (namestring (file-error-pathname condition))
-         :preserve-case t)
+        (make-symbol (namestring (file-error-pathname condition)))
         ,environment ,operation
         "Source file does not exist"))
+     (prolog-parser-resource-error (condition)
+       (%raise-parser-resource-error condition ,environment ,operation))
      (prolog-parse-error (condition)
        (%raise-syntax-error condition ,environment ,operation))))
 
@@ -126,10 +137,10 @@
 (defun %operator-specifier-keyword (specifier)
   (unless (symbolp specifier)
     (error "Operator specifier must be an atom, got ~S." specifier))
-  (let ((keyword (intern (symbol-name specifier) '#:keyword)))
-    (unless (%valid-operator-specifier-p keyword)
-      (error "Invalid operator specifier ~S." specifier))
-    keyword))
+  (or (find (symbol-name specifier) +operator-specifiers+
+            :key #'symbol-name
+            :test #'string-equal)
+      (error "Invalid operator specifier ~S." specifier)))
 
 (defun %record-source-operator-effect! (effect)
   (when *current-prolog-source-record*

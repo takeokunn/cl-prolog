@@ -65,25 +65,52 @@
       (is-equal '((parent ?x ?y)) (clause-body rule)))))
 
 (deftest proof-analysis-cache-follows-rulebase-revisions ()
-  (let* ((rulebase (make-family-rulebase))
+  (let* ((depth 2048)
+         (predicates
+           (loop repeat (1+ depth)
+                 collect (gensym "DEPENDENCY-")))
+         (root-predicate (first predicates))
+         (last-predicate (car (last predicates)))
+         (clauses
+           (loop for remaining on predicates
+                 while (rest remaining)
+                 collect
+                 (make-clause
+                  (list (first remaining))
+                  (list (list (second remaining))))))
+         (rulebase (make-rulebase :clauses clauses))
          (session (cl-prolog::%make-rulebase-table-session rulebase))
          (state (cl-prolog::%make-proof-state
-                 rulebase '() nil cl-prolog::+default-prolog-module+ session
+                 rulebase (quote ()) nil
+                 cl-prolog::+default-prolog-module+ session
                  (cl-prolog::%make-cut-tag)))
+         (root-goal (list root-predicate))
+         (last-goal (list last-predicate))
          (first-snapshot (cl-prolog::%proof-module-entries state)))
     (is (eq first-snapshot (cl-prolog::%proof-module-entries state)))
-    (cl-prolog::%left-recursive-p '(ancestor tom ?who) state)
+    (is (not (cl-prolog::%left-recursive-p root-goal state)))
     (let ((analysis-count
             (hash-table-count
              (cl-prolog::%table-session-left-recursion session))))
-      (cl-prolog::%left-recursive-p '(ancestor tom ?who) state)
+      (is (not (cl-prolog::%left-recursive-p last-goal state)))
       (is-equal analysis-count
                 (hash-table-count
                  (cl-prolog::%table-session-left-recursion session))))
-    (rulebase-insert-clause! rulebase (make-clause '(parent eve ada)))
+    (rulebase-insert-clause!
+     rulebase
+     (make-clause last-goal (list root-goal)))
     (let ((next-snapshot (cl-prolog::%proof-module-entries state)))
       (is (not (eq first-snapshot next-snapshot)))
-      (is-equal (1+ (length first-snapshot)) (length next-snapshot)))))
+      (is-equal (1+ (length first-snapshot)) (length next-snapshot)))
+    (is (cl-prolog::%left-recursive-p root-goal state))
+    (let ((analysis-count
+            (hash-table-count
+             (cl-prolog::%table-session-left-recursion session))))
+      (is (cl-prolog::%left-recursive-p last-goal state))
+      (is-equal analysis-count
+                (hash-table-count
+                 (cl-prolog::%table-session-left-recursion session)))
+      (is-equal 2 analysis-count))))
 
 (deftest-table rulebase-default-constructors ()
   (:equal '() (clause-body (make-clause '(lonely))))
