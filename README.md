@@ -15,7 +15,9 @@ The public package is `cl-prolog`.
 ## Quick Start
 
 ```lisp
-(ql:quickload :cl-prolog)
+(require :asdf)
+(asdf:load-asd (truename "cl-prolog.asd")) ; run from the repository root
+(asdf:load-system :cl-prolog)
 
 (in-package #:cl-prolog)
 
@@ -35,24 +37,42 @@ is available at <https://takeokunn.github.io/cl-prolog/>.
 
 ## Install
 
-```lisp
-(ql:quickload :cl-prolog)             ; via Quicklisp
+cl-prolog is not currently distributed by Quicklisp. Clone the repository and
+either load its ASDF definition directly or place the checkout in a directory
+configured in your [ASDF source registry](https://asdf.common-lisp.dev/asdf.html#Configuring-ASDF).
+
+```sh
+git clone https://github.com/takeokunn/cl-prolog.git
+cd cl-prolog
+sbcl --non-interactive \
+  --eval '(require :asdf)' \
+  --eval '(asdf:load-asd (truename "cl-prolog.asd"))' \
+  --eval '(asdf:load-system :cl-prolog)'
 ```
 
 ```sh
-nix run github:takeokunn/cl-prolog    # cl-weave regression suite, Linux-only Nix runner
+nix run github:takeokunn/cl-prolog
 ```
+
+This runs the cl-weave regression suite through the Linux-only Nix runner.
 
 See [Development](docs/src/development.md) for building from a local
 checkout, running the test suite, and previewing the documentation site.
 
 ## Development
 
+The flake currently defines outputs for `x86_64-linux` and `aarch64-linux`
+only. Run these commands on Linux:
+
 ```sh
 nix develop
-nix run .          # cl-weave-backed ASDF regression suite (Linux only)
+nix run .          # cl-weave-backed ASDF regression suite
 nix flake check    # full verification suite
 ```
+
+On Darwin and other platforms, use the local ASDF workflow above. The flake
+does not currently expose development shells, packages, checks, or apps for
+those systems; Linux Nix verification runs in CI.
 
 ## Project Policy
 

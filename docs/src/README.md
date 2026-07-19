@@ -13,7 +13,9 @@ The public package is `cl-prolog`.
 ## Quick start
 
 ```lisp
-(ql:quickload :cl-prolog)
+(require :asdf)
+(asdf:load-asd (truename "cl-prolog.asd")) ; run from the repository root
+(asdf:load-system :cl-prolog)
 
 (in-package #:cl-prolog)
 
@@ -48,10 +50,21 @@ Logic variables are `?`-prefixed symbols.
 
 ## Install
 
+cl-prolog is not currently distributed by Quicklisp. Clone the repository and
+either load its ASDF definition directly or place the checkout in a directory
+configured in your [ASDF source registry](https://asdf.common-lisp.dev/asdf.html#Configuring-ASDF).
+
 ```sh
-nix run github:takeokunn/cl-prolog   # cl-weave regression suite, Linux-only Nix runner
+git clone https://github.com/takeokunn/cl-prolog.git
+cd cl-prolog
+sbcl --non-interactive \
+  --eval '(require :asdf)' \
+  --eval '(asdf:load-asd (truename "cl-prolog.asd"))' \
+  --eval '(asdf:load-system :cl-prolog)'
 ```
 
-```lisp
-(ql:quickload :cl-prolog)            ; via Quicklisp
+To run the cl-weave regression suite through the Linux-only Nix app:
+
+```sh
+nix run github:takeokunn/cl-prolog
 ```

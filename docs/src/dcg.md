@@ -1,16 +1,21 @@
 # DCG
 
 ```lisp
-(def-dcg-rule noun (terminal :noun))
-(def-dcg-rule verb (terminal :verb))
+(defparameter *grammar*
+  (make-rulebase
+   :clauses
+   (list (def-dcg-rule noun (terminal :noun))
+         (def-dcg-rule verb (terminal :verb))
+         (def-dcg-rule sentence
+           (dcg-star noun)
+           (verb)
+           (brace (= 1 1)))))) ; Lisp guard, like (:when ...)
 
-(def-dcg-rule sentence
-  (dcg-star noun)
-  (verb)
-  (brace (= 1 1)))          ; Lisp guard, like (:when ...)
-
-(phrase 'sentence '(:noun :noun :verb))
+(phrase *grammar* 'sentence '(:noun :noun :verb))
 ;; => NIL, T   (remainder, matched-p)
+
+(phrase-all *grammar* 'sentence '(:noun :noun :verb))
+;; => (NIL)
 ```
 
 Combinators: `dcg-alt`, `dcg-opt`, `dcg-star`, `dcg-plus`,
@@ -22,8 +27,10 @@ Combinators: `dcg-alt`, `dcg-opt`, `dcg-star`, `dcg-plus`,
 - `def-dcg-rule` — compile a grammar body into a rule with two stream
   arguments; body elements: `(terminal KIND...)`, `(brace EXPR)`,
   non-terminal calls, and combinator forms
-- `phrase` — `(values remainder matched-p)` for the first parse
-- `phrase-all` — remainders of every parse
+- `phrase` — `(phrase rulebase rule-name input)` returns
+  `(values remainder matched-p)` for the first parse
+- `phrase-all` — `(phrase-all rulebase rule-name input)` returns the
+  remainders of every parse
 - combinators (usable as goals): `dcg-alt`, `dcg-opt`, `dcg-star`,
   `dcg-plus`, `dcg-error-recovery`
 - token matchers: `(dcg-token-match kind input rest)`,

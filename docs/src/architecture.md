@@ -2,91 +2,145 @@
 
 ## Design Direction
 
-`cl-prolog` is a small relational programming library for Common Lisp. The
-codebase optimizes for:
+`cl-prolog` is a relational programming library embedded in Common Lisp. Its
+main design choices are:
 
-- macro-first authoring: macros own syntax, the runtime only sees data
-- CPS proof search: solutions stream through continuations
-- explicit separation between data and logic
-- immutable rulebase construction as the default style
-- a narrow, machine-verified public API with one canonical surface
+- macro-first authoring: macros own syntax and produce runtime data
+- continuation-passing proof search: solutions stream through continuations
+- explicit rulebase and query state rather than a process-global database
+- one ordered clause representation for facts and rules
+- a narrow exported package surface with internal solver machinery
 
-It is not trying to emulate a full ISO Prolog runtime. It is a focused Lisp
-library.
+It implements a focused Prolog runtime rather than attempting to mirror every
+facility of a standalone ISO Prolog system.
 
-## Module Layout
+## ASDF Load Order
 
-Sources live under `src/`, in dependency (and load) order:
+`cl-prolog.asd` is serial. The production system loads these components in
+this exact dependency order:
 
-- `package.lisp` — public package and export boundary
-- `data.lisp` — facts, rules, rulebase structs (data only, no logic)
-- `unification.lisp` — unification, substitution, variable renaming
-- `engine.lisp` — CPS provers, cut, depth bound, and exact-indicator builtin
-  and foreign predicate dispatch
-- `builtin-term.lisp` — ISO-style term inspection and ordering builtins
-- `builtins/` — control, collection, database, arithmetic, and list builtins
-- `dcg-runtime.lisp` — DCG combinator builtins
-- `query.lisp` — public query API over the engine
-- `dsl.lisp` — `prolog`, `def-rule`, and friends; compiles `(:when EXPR)`
-  guards to closures
-- `dcg.lisp` — `def-dcg-rule` expansion, `phrase`
-- `tests/` — split regression suite plus a table-driven expectation DSL
+1. `package.lisp`
+2. `operator-table.lisp`
+3. `module-system.lisp`
+4. `data.lisp`
+5. `unification.lisp`
+6. `parser.lisp`
+7. `term-writer.lisp`
+8. `engine.lisp`
+9. `io-context.lisp`
+10. `prover.lisp`
+11. `builtins/core.lisp`
+12. `builtins/control.lisp`
+13. `builtins/collection.lisp`
+14. `builtins/dynamic.lisp`
+15. `builtins/arithmetic.lisp`
+16. `builtins/list.lisp`
+17. `builtins/atom.lisp`
+18. `builtins/operator.lisp`
+19. `builtins/io.lisp`
+20. `builtins/io-streams.lisp`
+21. `builtins/io-code.lisp`
+22. `fd-store.lisp`
+23. `builtins/fd.lisp`
+24. `builtin-term.lisp`
+25. `dcg-runtime.lisp`
+26. `query.lisp`
+27. `source-loader.lisp`
+28. `dsl-compiler.lisp`
+29. `dsl.lisp`
+30. `dcg.lisp`
 
-## Data Versus Logic
+The important boundaries are:
 
-- data layer: `fact`, `rule`, `rulebase`, constructors, accessors
-- logic layer: unification, CPS proof search, builtin solvers, DSL expansion
+- `data.lisp` owns clauses, the logical-update rulebase, indexes, and mutable
+  registries
+- `engine.lisp` owns conditions plus builtin and foreign-predicate registries
+- `prover.lisp` owns normalization, proof state, dispatch, clause resolution,
+  cut barriers, depth accounting, and tabling
+- `query.lisp` turns the continuation protocol into the public mapping and
+  result APIs
+- `source-loader.lisp`, `dsl*.lisp`, and `dcg*.lisp` are separate front ends
+  that produce or consume the same clause and query representation
 
-A caller can build or transform a rulebase as plain data without depending
-on the query engine, and the engine treats rulebases as read-only input.
+## Unified Clause Store
 
-## The CPS Engine
+Facts and rules use the same `clause` structure. A fact is a clause whose body
+is empty. The rulebase stores clauses in one definition-ordered sequence and a
+predicate index; it does not search a separate fact collection before a rule
+collection.
 
-Every prover receives an `EMIT` continuation and calls it once per solution
-environment:
+Stored entries carry their module, source identity, and born/died revisions.
+A predicate call takes the visible entries for its logical-update snapshot and
+tries them in definition order. Each selected clause is freshened before
+unification, so variables do not leak between uses.
 
-```
-%prove-goal-sequence (goals rb env depth emit)  ; conjunction
-%prove-goal          (goal  rb env depth emit)  ; dispatch
-%prove-with-clauses  (goal  rb env depth emit)  ; facts -> rules
-%prove-with-rule     (goal rule rb env depth emit)
-```
+## Proof-State Prover
 
-Nothing in the engine accumulates result lists — `query-prolog` is a fold
-over `map-prolog-solutions`, which exposes the CPS contract directly.
-Builtins and foreign predicates follow the same contract. `define-builtin`
-and `define-foreign-predicate` register CPS solvers through generic dispatch;
-foreign predicates are keyed by exact name and arity.
+The prover streams solutions in continuation-passing style. Its internal
+`proof-state` carries:
+
+- the explicit rulebase
+- the current persistent binding environment
+- remaining user-rule depth
+- the active module
+- the table session
+- the current cut tag
+
+State transitions construct updated proof states rather than replacing the
+rulebase with hidden global state. Goal dispatch first recognizes registered
+builtin or foreign solvers; otherwise it resolves the goal against the visible
+user clauses. Foreign predicates are keyed by exact name and arity and use the
+same zero-to-many `emit` continuation contract as internal solvers.
+
+`map-prolog-solutions` exposes this streaming model. Convenience query APIs
+fold or stop that stream instead of requiring the prover to accumulate all
+answers.
 
 ### Cut
 
-Cut is implemented with the condition system, the idiomatic Lisp tool for
-dynamically scoped control flow:
+Cut uses dynamically scoped `catch`/`throw` tags:
 
-- `!` emits its solution, then signals the internal `%cut` condition
-- conjunction barriers propagate the signal through earlier choice points
-  in the same invocation
-- each user-defined predicate invocation owns the boundary that consumes the
-  signal, so a rule-body cut prunes remaining clauses without escaping into
-  its caller
-- opaque meta-calls consume their nested cut, while transparent control
-  branches explicitly re-signal it into the containing invocation
+- each user-predicate invocation establishes a fresh cut barrier
+- `!` emits the current state and throws to that invocation's tag
+- the throw abandons remaining alternatives for the invocation
+- opaque meta-calls establish their own barrier
+- transparent control constructs deliberately reuse the caller's barrier
+
+This keeps a rule-body cut local to the predicate invocation while preserving
+the intended transparency of control constructs.
+
+### Depth and tabling
+
+Depth decreases when proof enters a user rule, not for every builtin or
+unification step. `nil` means unbounded search. Declared tabled predicates and
+detected left recursion can use a per-query table session; depth-limited or
+active finite-domain searches bypass that tabling path where required.
 
 ### Guards
 
-`(:when EXPR)` guards are compiled by the DSL macros into
-`(:when FUNCTION ?var...)` goals at macroexpansion time. The engine
-substitutes solved values and funcalls — there is no `eval` anywhere in the
-runtime, so rule data can be treated as inert.
+`(:when expression)` guards are compiled by the DSL macros into
+`(:when function variable...)` goals. At runtime the solver substitutes bound
+values and calls the function. Relational rule data therefore does not require
+runtime `eval`.
 
-### Search order and termination
+## Explicit Dynamic Mutation
 
-- registered builtins and foreign predicates are authoritative; unregistered
-  indicators search facts and then rules
-- facts and rules keep definition order within their group
-- rule and fact variables are freshly renamed per use
-- `:max-depth` decrements only per user-rule resolution; `NIL` is unbounded
-- `dcg-star` refuses zero-progress repetitions, bounding nullable grammars
+There is no process-global rulebase. `prolog` constructs one, `extend-rulebase`
+derives another, and every query receives its rulebase explicitly.
+
+The default authoring style is immutable, but mutation is a supported and
+visible operation:
+
+- `asserta/1`, `assert/1`, and `assertz/1` insert into the supplied rulebase
+- `retract/1`, `retractall/1`, and `abolish/1` retire matching entries
+- `consult-prolog` transactionally replaces the clauses registered for a
+  source after validation
+- `rulebase-insert-clause!` exposes insertion to Lisp callers
+
+Born/died revisions preserve logical-update behavior: a running predicate
+invocation continues over its snapshot even when a dynamic goal changes the
+database. Later invocations observe the newer revision. Callers that require
+isolation can use `copy-rulebase` before mutation.
 
 ## Macro-First Surface
 
@@ -97,21 +151,14 @@ runtime, so rule data can be treated as inert.
   ((rich ?x) (score ?x ?n) (:when (> ?n 10))))
 ```
 
-expands into `make-clause` forms (guards become closures).
-Macros keep relational source compact; runtime code only executes
-normalized data; tests can assert both syntax-level intent and runtime
-behavior.
-
-## Explicit State
-
-There is no process-global rulebase. Build a value with `prolog`, derive a
-new value with `extend-rulebase`, and pass that value to every query. Dynamic
-database predicates mutate only the explicitly supplied rulebase, keeping
-state ownership visible at the call site.
+The DSL expands into clause construction, including precompiled guard
+closures. Parsed Prolog source, Lisp DSL forms, dynamic goals, and DCGs all
+converge on the same runtime terms and rulebase.
 
 ## Verification Layers
 
-1. `nix run .` — cl-weave-backed ASDF regression behavior on Linux
-2. `nix flake check` — packaging and clean-source verification
+1. `nix run .` — run the cl-weave-backed ASDF regression behavior on Linux
+2. `nix flake check` — verify packaging and clean-source behavior
 
-When architecture changes land, update the narrowest affected layer first.
+When architecture changes, update the narrowest affected verification layer
+first.

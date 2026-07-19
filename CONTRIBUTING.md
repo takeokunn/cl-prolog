@@ -11,13 +11,28 @@ User support and triage routing are defined in [`SUPPORT.md`](SUPPORT.md).
 
 ## Development workflow
 
-1. Enter the development environment with `nix develop` when Nix is available.
-2. Run the library test suite before and after changes:
-   `sbcl --non-interactive --eval '(require :asdf)' --load cl-prolog.asd --eval '(asdf:test-system :cl-prolog)'`
-3. Run `nix flake check` for packaging and reproducibility coverage when the
-   change affects distribution, ASDF loading, or documentation examples. This
-   also runs `checks.paredit-lint`, which fails if any tracked `.lisp`/`.asd`
-   file is not a balanced S-expression document.
+1. On Linux, enter the pinned development environment with `nix develop`.
+   The current flake exposes Linux systems only. On Darwin, use a local SBCL
+   and ASDF setup instead; ensure both `cl-prolog` and
+   [`cl-weave`](https://github.com/takeokunn/cl-weave) are discoverable through
+   ASDF before running tests.
+2. Run the cl-weave-backed library test suite before and after changes:
+
+   ```sh
+   sbcl --non-interactive \
+     --eval '(require :asdf)' \
+     --load cl-prolog.asd \
+     --eval '(asdf:test-system :cl-prolog)'
+   ```
+
+   This command requires `cl-weave`; loading `cl-prolog.asd` alone does not
+   provide that dependency. On Linux, `nix run .` supplies the pinned dependency
+   and runs the same ASDF test system.
+3. On Linux, run `nix flake check` for packaging and reproducibility coverage
+   when the change affects distribution, ASDF loading, or documentation
+   examples. This also runs `checks.paredit-lint`, which fails if any tracked
+   `.lisp`/`.asd` file is not a balanced S-expression document. On Darwin, rely
+   on Linux CI for this flake-level gate.
 4. When adding release artifacts exposed from `README.md` or `docs/`,
    ensure the files are tracked in git before relying on `nix flake check`:
    this repository's `cleanSourceWith` flake source omits untracked files,
@@ -51,8 +66,8 @@ re-run with `--write`. See the tool's own docs for the full command surface.
 ## Documentation expectations
 
 - Update `README.md` when user-visible behavior changes.
-- Update `CHANGELOG.md` when a user-visible feature or API change
-  maintenance policy changes.
+- Update `CHANGELOG.md` when a user-visible feature, API, or maintenance policy
+  changes.
 - Update `docs/src/release-checklist.md` when release evidence or ship criteria
   change.
 - Update `SECURITY.md` when the supported-version or reporting policy changes.
