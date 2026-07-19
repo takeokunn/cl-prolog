@@ -52,18 +52,36 @@
 
 (defun %partition-solution-groups (solutions)
   "Partition SOLUTIONS by variant-equivalent keys in standard term order."
-  (let ((groups '()))
-    (dolist (solution solutions
-             (stable-sort groups #'%prolog-term< :key #'car))
-      (let* ((key (%canonicalize-variant (car solution)))
-             (group (find key groups
-                          :key (lambda (candidate)
-                                 (%canonicalize-variant (car candidate)))
-                          :test (lambda (left right)
-                                  (zerop (%compare-terms left right))))))
-        (if group
-            (setf (cdr group) (nconc (cdr group) (list (cdr solution))))
-            (push (list (car solution) (cdr solution)) groups))))))
+  (let ((entries
+          (stable-sort
+           (mapcar (lambda (solution)
+                     (list (%canonicalize-variant (car solution))
+                           (car solution)
+                           (cdr solution)))
+                   solutions)
+           (lambda (left right)
+             (minusp (%compare-terms (first left) (first right)))))))
+    (let ((groups '())
+          (current-key nil)
+          (current-group nil)
+          (have-group nil))
+      (dolist (entry entries)
+        (let ((canonical-key (first entry)))
+          (if (and have-group
+                   (zerop (%compare-terms current-key canonical-key)))
+              (push (third entry) (cdr current-group))
+              (progn
+                (when have-group
+                  (setf (cdr current-group)
+                        (nreverse (cdr current-group)))
+                  (push current-group groups))
+                (setf current-key canonical-key
+                      current-group (list (second entry) (third entry))
+                      have-group t)))))
+      (when have-group
+        (setf (cdr current-group) (nreverse (cdr current-group)))
+        (push current-group groups))
+      (stable-sort groups #'%prolog-term< :key #'car))))
 
 (defun %emit-solution-group (free-variables key values bag environment emit)
   "Unify one grouped KEY and VALUES with the caller and emit on success."

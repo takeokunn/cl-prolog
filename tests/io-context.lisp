@@ -24,6 +24,7 @@
                context (cl-prolog::%prolog-atom-symbol "user_error")
                :output nil "TEST"))))))
 
+(progn
 (deftest io-context-resolves-handle-and-alias ()
   (let* ((context (cl-prolog::make-prolog-io-context))
          (alias (cl-prolog::%prolog-atom-symbol "temporary_output"))
@@ -35,6 +36,32 @@
                    context (cl-prolog::prolog-stream-handle entry)
                    :output nil "TEST")))
     (cl-prolog::%close-all-owned-prolog-streams! context)))
+(deftest io-context-stream-handles-do-not-intern-symbols ()
+  (labels ((owned-symbol-count ()
+             (let ((package (find-package '#:cl-prolog)))
+               (loop for symbol being each symbol of package
+                     count (eq package (symbol-package symbol))))))
+    (let ((alias (cl-prolog::%prolog-atom-symbol "stable_stream_alias")))
+      (let ((before (owned-symbol-count)))
+        (dotimes (index 32)
+          (declare (ignore index))
+          (let* ((context (cl-prolog::make-prolog-io-context))
+                 (entry
+                   (cl-prolog::%register-prolog-stream!
+                    context (make-string-output-stream) :output :alias alias))
+                 (handle (cl-prolog::prolog-stream-handle entry)))
+            (unwind-protect
+                 (progn
+                   (is (null (symbol-package handle)))
+                   (is-equal "$stream_4" (symbol-name handle))
+                   (is (eq entry
+                           (cl-prolog::%resolve-prolog-stream
+                            context handle :output nil "TEST")))
+                   (is (eq entry
+                           (cl-prolog::%resolve-prolog-stream
+                            context alias :output nil "TEST"))))
+              (cl-prolog::%close-all-owned-prolog-streams! context))))
+        (is-equal before (owned-symbol-count)))))))
 
 (deftest io-context-rejects-duplicate-alias ()
   (let* ((context (cl-prolog::make-prolog-io-context))

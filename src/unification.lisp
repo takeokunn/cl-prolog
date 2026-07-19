@@ -42,9 +42,11 @@ sub-query) keep the ordinals of variables created by their caller."
     ordinal))
 
 (defun logic-var-p (term)
-  "Return true when TERM is a logic variable (a non-keyword ?-prefixed symbol)."
+  "Return true when TERM is a logic variable rather than a dedicated Prolog atom."
   (and (symbolp term)
        (not (keywordp term))
+       (not (eq (symbol-package term)
+                (find-package '#:cl-prolog.user-atoms)))
        (plusp (length (symbol-name term)))
        (char= (char (symbol-name term) 0) #\?)))
 
@@ -55,45 +57,95 @@ sub-query) keep the ordinals of variables created by their caller."
         (%register-logic-variable variable)
         variable)))
 
-(defun %walk-term (term env)
-  "Chase TERM through ENV until it is unbound or not a variable."
-  (loop while (logic-var-p term)
-        for binding = (assoc term env :test #'eq)
-        while binding
-        do (setf term (cdr binding))
-        finally (return term)))
+(progn
+  (defun %make-environment-index (environment)
+    "Index ENVIRONMENT by variable identity while preserving first-binding wins."
+    (let ((index (make-hash-table :test #'eq))
+          (rank 0))
+      (dolist (binding environment index)
+        (multiple-value-bind (entry present-p)
+            (gethash (car binding) index)
+          (declare (ignore entry))
+          (unless present-p
+            (setf (gethash (car binding) index)
+                  (cons (cdr binding) rank))))
+        (incf rank))))
 
-(defun %occurs-p (var term env)
-  "Return true when VAR occurs inside TERM under ENV (prevents cyclic terms)."
-  (let ((seen (make-hash-table :test #'eq)))
-    (labels ((occurs-p (node)
-               (let ((resolved (%walk-term node env)))
-                 (cond
-                   ((eq var resolved) t)
-                   ((not (consp resolved)) nil)
-                   ((gethash resolved seen) nil)
-                   (t
-                    (setf (gethash resolved seen) t)
-                    (or (occurs-p (car resolved))
-                        (occurs-p (cdr resolved))))))))
-      (occurs-p term))))
+  (defun %alias-cycle-representative (start index)
+    "Choose the earliest effective binding in the alias cycle containing START."
+    (let* ((entry (gethash start index))
+           (representative start)
+           (best-rank (cdr entry))
+           (term (car entry)))
+      (loop until (eq term start)
+            for term-entry = (gethash term index)
+            when (< (cdr term-entry) best-rank)
+              do (setf representative term
+                       best-rank (cdr term-entry))
+            do (setf term (car term-entry))
+            finally (return representative))))
+
+  (defun %walk-term-indexed (term index)
+    "Chase TERM through INDEX, returning a canonical alias-cycle representative."
+    (let ((seen (make-hash-table :test #'eq)))
+      (loop while (logic-var-p term)
+            do (when (gethash term seen)
+                 (return (%alias-cycle-representative term index)))
+               (setf (gethash term seen) t)
+            do (multiple-value-bind (entry present-p)
+                   (gethash term index)
+                 (unless present-p
+                   (return term))
+                 (setf term (car entry)))
+            finally (return term))))
+
+  (defun %walk-term (term env)
+    "Chase TERM through ENV until it is unbound or not a variable."
+    (%walk-term-indexed term (%make-environment-index env))))
+
+(progn
+  (defun %occurs-p-indexed (var term index)
+    "Return true when VAR occurs inside TERM under INDEX."
+    (let ((seen (make-hash-table :test #'eq)))
+      (labels ((occurs-p (node)
+                 (let ((resolved (%walk-term-indexed node index)))
+                   (cond
+                     ((eq var resolved) t)
+                     ((not (consp resolved)) nil)
+                     ((gethash resolved seen) nil)
+                     (t
+                      (setf (gethash resolved seen) t)
+                      (or (occurs-p (car resolved))
+                          (occurs-p (cdr resolved))))))))
+        (occurs-p term))))
+
+  (defun %occurs-p (var term env)
+    "Return true when VAR occurs inside TERM under ENV (prevents cyclic terms)."
+    (%occurs-p-indexed var term (%make-environment-index env))))
 
 (defun unify (left right &optional (env '()))
   "Unify LEFT and RIGHT against ENV.
 
 Returns (VALUES EXTENDED-ENV T) on success and (VALUES NIL NIL) on failure."
-  (let ((seen-pairs (make-hash-table :test #'eq)))
-    (labels ((seen-pair-p (left right)
+  (let ((index (%make-environment-index env))
+        (next-binding-rank -1)
+        (seen-pairs (make-hash-table :test #'eq)))
+    (labels ((extend-environment (variable term environment)
+               (setf (gethash variable index)
+                     (cons term next-binding-rank))
+               (decf next-binding-rank)
+               (acons variable term environment))
+             (seen-pair-p (left right)
                (member right (gethash left seen-pairs) :test #'eq))
              (unify-terms (left right environment)
-               (setf left (%walk-term left environment)
-                     right (%walk-term right environment))
+               (setf left (%walk-term-indexed left index)
+                     right (%walk-term-indexed right index))
                (cond
                  ((eq left right) (values environment t))
                  ((logic-var-p left)
-                  (if (%occurs-p left right environment)
+                  (if (%occurs-p-indexed left right index)
                       (values nil nil)
-                      (values (acons left right environment) t)))
+                      (values (extend-environment left right environment) t)))
                  ((logic-var-p right)
                   (unify-terms right left environment))
                  ((and (consp left) (consp right))
@@ -115,9 +167,10 @@ Returns (VALUES EXTENDED-ENV T) on success and (VALUES NIL NIL) on failure."
 
 (defun logic-substitute (template env)
   "Recursively apply ENV to TEMPLATE, preserving dotted structure."
-  (let ((copies (make-hash-table :test #'eq)))
+  (let ((index (%make-environment-index env))
+        (copies (make-hash-table :test #'eq)))
     (labels ((substitute-term (term)
-               (let ((resolved (%walk-term term env)))
+               (let ((resolved (%walk-term-indexed term index)))
                  (if (consp resolved)
                      (or (gethash resolved copies)
                          (let ((copy (cons nil nil)))

@@ -13,6 +13,8 @@
                 (%io-parse-term-with-variables input operator-table)
               (setf (prolog-stream-end-of-stream entry) :not)
               (values term variables names singletons t))
+          (prolog-parser-resource-error (condition)
+            (%raise-parser-resource-error condition environment operation))
           (prolog-parse-error (condition)
             (if (%io-option-name-p mode "error")
                 (%raise-syntax-error condition environment operation)

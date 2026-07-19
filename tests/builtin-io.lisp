@@ -62,6 +62,7 @@
     (assert-query rulebase (cl-prolog::get_char ?character)
                   => (((?character . cl-prolog::end_of_file))))))
 
+(progn
 (deftest io-read-term-current-stream-reports-variables ()
   (with-io-rulebase (rulebase input output) "pair(X, X, Y)."
     (assert-query
@@ -73,6 +74,18 @@
           (?variables . (cl-prolog::?x cl-prolog::?y))
           (?names . ((cl-prolog::= cl-prolog::|X| cl-prolog::?x)
                      (cl-prolog::= cl-prolog::|Y| cl-prolog::?y))))))))
+(deftest io-read-term-preserves-quoted-question-atoms ()
+  (with-io-rulebase (rulebase input output) "'?x'."
+    (with-single-query-solution
+        (solution solutions rulebase
+         (list 'cl-prolog::read_term '?term
+               (list (list 'cl-prolog::variables '?variables))))
+      (let ((term (logic-substitute '?term solution))
+            (variables (logic-substitute '?variables solution)))
+        (is (eq (find-package '#:cl-prolog.user-atoms)
+                (symbol-package term)))
+        (is (not (logic-var-p term)))
+        (is (null variables)))))))
 
 (deftest io-read-term-reports-named-singletons-only ()
   (with-io-rulebase (rulebase input output) "tuple(X, Y, X, _, Z)."
@@ -421,6 +434,7 @@
       (is-equal '(cl-prolog::foo (cl-prolog::bar 1 2) cl-prolog::|a b|)
                 (read-prolog-term (concatenate 'string text " ."))))))
 
+(progn
 (deftest io-open-accepts-three-and-four-argument-forms ()
   (let ((path (merge-pathnames (format nil "cl-prolog-open3-~D.txt"
                                        (sb-unix:unix-getpid))
@@ -444,3 +458,36 @@
                                            ?stream (cl-prolog::mode ?mode))
                                  :succeeds)))))))
       (ignore-errors (delete-file path))))
+
+(deftest io-read-resource-errors-remain-catchable-for-all-syntax-policies ()
+  (dolist
+      (query-source
+       (list
+        "catch(read(_), error(resource_error(identifier_length), _), true)."
+        "catch(read_term(_, []), error(resource_error(identifier_length), _), true)."
+        "catch(read_term(_, [syntax_errors(fail)]), error(resource_error(identifier_length), _), true)."
+        "catch(read_term(_, [syntax_errors(quiet)]), error(resource_error(identifier_length), _), true)."))
+    (with-io-rulebase (rulebase input output) "toolong."
+      (let ((query
+              (read-prolog-term
+               query-source
+               (cl-prolog::rulebase-operator-table rulebase))))
+        (let ((*max-prolog-identifier-length* 1))
+          (is (prolog-succeeds-p rulebase query))))))))
+
+(deftest io-open-close-and-current-output-follow-stream-selection ()
+  (let ((path (merge-pathnames (format nil "cl-prolog-current-output-~D.txt"
+                                       (sb-unix:unix-getpid))
+                               #p"/tmp/")))
+    (unwind-protect
+         (with-io-rulebase (rulebase input output) ""
+           (let ((query
+                   (read-prolog-term
+                    (format nil
+                            "open('~A', write, _, [alias(sel)]), ~
+                             set_output(sel), put_char(q), close(sel), ~
+                             current_output(Output), Output == user_output."
+                            (namestring path))
+                    (cl-prolog::rulebase-operator-table rulebase))))
+             (is (prolog-succeeds-p rulebase query))))
+      (ignore-errors (delete-file path)))))

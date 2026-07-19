@@ -28,7 +28,13 @@
 (defstruct (%table-entry (:copier nil)
                          (:constructor %make-table-entry ()))
   "Variant-call answers accumulated during one tabled proof."
-  (answers '() :type list))
+  (answers '() :type list)
+  (answers-tail '() :type list)
+  (answer-count 0 :type (integer 0 *))
+  (answer-index (make-hash-table :test #'equal)
+                :type hash-table :read-only t)
+  (cyclic-answer-index (make-hash-table :test #'equal)
+                       :type hash-table :read-only t))
 
 (defstruct (%table-session
             (:copier nil)
@@ -54,10 +60,13 @@
                        (make-hash-table :test #'equal)))
 
 (defun %canonicalize-variant (term)
-  "Rename TERM's variables by first occurrence, preserving sharing."
+  "Rename TERM's variables by first occurrence, preserving sharing.
+The second value reports whether TERM contains a cons cycle."
   (let ((variables (make-hash-table :test #'eq))
         (copies (make-hash-table :test #'eq))
-        (next-index 0))
+        (active (make-hash-table :test #'eq))
+        (next-index 0)
+        (cyclic-p nil))
     (labels ((canonicalize (node)
                (cond
                  ((logic-var-p node)
@@ -66,30 +75,76 @@
                             (list +variant-variable-marker+
                                   (prog1 next-index (incf next-index))))))
                  ((consp node)
-                  (or (gethash node copies)
-                      (let ((copy (cons nil nil)))
-                        (setf (gethash node copies) copy
-                              (car copy) (canonicalize (car node))
-                              (cdr copy) (canonicalize (cdr node)))
-                        copy)))
+                  (multiple-value-bind (copy present-p)
+                      (gethash node copies)
+                    (if present-p
+                        (progn
+                          (when (gethash node active)
+                            (setf cyclic-p t))
+                          copy)
+                        (let ((copy (cons nil nil)))
+                          (setf (gethash node copies) copy
+                                (gethash node active) t
+                                (car copy) (canonicalize (car node))
+                                (cdr copy) (canonicalize (cdr node)))
+                          (remhash node active)
+                          copy))))
                  (t node))))
-      (canonicalize term))))
+      (values (canonicalize term) cyclic-p))))
+
+(defun %variant-graph-key (term)
+  "Return an EQUAL-safe encoding of TERM's cons graph."
+  (let ((identities (make-hash-table :test #'eq))
+        (next-index 0))
+    (labels ((encode (node)
+               (if (consp node)
+                   (multiple-value-bind (index present-p)
+                       (gethash node identities)
+                     (if present-p
+                         (list :reference index)
+                         (let ((index (prog1 next-index
+                                        (incf next-index))))
+                           (setf (gethash node identities) index)
+                           (list :cons index
+                                 (encode (car node))
+                                 (encode (cdr node))))))
+                   (list :atom node))))
+      (encode term))))
 
 (defun %instantiate-variant (term)
-  "Replace canonical variable markers in TERM with fresh logic variables."
-  (let ((variables (make-hash-table :test #'equal)))
+  "Replace canonical variable markers in TERM with fresh logic variables.
+Ground subtrees are shared because unification never mutates terms."
+  (let ((variables nil)
+        (copies (make-hash-table :test #'eq)))
     (labels ((instantiate (node)
                (cond
                  ((and (consp node)
                        (eq (first node) +variant-variable-marker+)
                        (consp (rest node))
                        (null (cddr node)))
-                  (or (gethash node variables)
-                      (setf (gethash node variables)
-                            (fresh-logic-variable "?TABLE"))))
+                  (let ((table (or variables
+                                   (setf variables
+                                         (make-hash-table :test #'equal)))))
+                    (or (gethash node table)
+                        (setf (gethash node table)
+                              (fresh-logic-variable "?TABLE")))))
                  ((consp node)
-                  (cons (instantiate (car node))
-                        (instantiate (cdr node))))
+                  (multiple-value-bind (copy present-p)
+                      (gethash node copies)
+                    (if present-p
+                        copy
+                        (let ((copy (cons nil nil)))
+                          (setf (gethash node copies) copy)
+                          (let ((new-car (instantiate (car node)))
+                                (new-cdr (instantiate (cdr node))))
+                            (setf (car copy) new-car
+                                  (cdr copy) new-cdr)
+                            (if (and (eq new-car (car node))
+                                     (eq new-cdr (cdr node)))
+                                (progn
+                                  (setf (gethash node copies) node)
+                                  node)
+                                copy))))))
                  (t node))))
       (instantiate term))))
 
@@ -118,12 +173,15 @@
 
 (defstruct (rulebase (:copier nil)
                      (:constructor %make-rulebase
-                         (entries predicate-index revision operator-table
-                          predicate-properties io-context module-registry source-registry
-                          prolog-flag-values char-conversions table-declarations)))
+                         (entries entries-tail predicate-index predicate-tails
+                          revision operator-table predicate-properties io-context
+                          module-registry source-registry prolog-flag-values
+                          char-conversions table-declarations)))
   "An ordered logical-update database of clauses."
   (entries '() :type list)
+  (entries-tail '() :type list)
   (predicate-index (make-hash-table :test #'equal) :type hash-table)
+  (predicate-tails (make-hash-table :test #'equal) :type hash-table)
   (revision 0 :type (integer 0 *))
   (operator-table *standard-operator-table* :type operator-table)
   (predicate-properties (make-hash-table :test #'equal) :type hash-table)
@@ -143,13 +201,19 @@
             (length (rest head))))))
 
 (defun %make-rulebase-predicate-index (entries)
-  "Index ENTRIES by predicate while retaining their resolution order."
-  (let ((index (make-hash-table :test #'equal)))
-    (dolist (entry (reverse entries))
+  "Index ENTRIES by predicate and return its tail metadata as a second value."
+  (let ((index (make-hash-table :test #'equal))
+        (tails (make-hash-table :test #'equal)))
+    (dolist (entry entries)
       (let ((key (%stored-clause-predicate-key entry)))
         (when key
-          (push entry (gethash key index)))))
-    index))
+          (let ((cell (list entry))
+                (tail (gethash key tails)))
+            (if tail
+                (setf (cdr tail) cell)
+                (setf (gethash key index) cell))
+            (setf (gethash key tails) cell)))))
+    (values index tails)))
 
 (defun %rulebase-source-state (rulebase canonical-pathname)
   "Return CANONICAL-PATHNAME's load state and whether it is registered."
@@ -175,18 +239,22 @@
                            (%make-stored-clause
                             clause +default-prolog-module+ 0))
                          clauses)))
-    (%make-rulebase
-     entries
-     (%make-rulebase-predicate-index entries)
-     0
-     *standard-operator-table*
-     (make-hash-table :test #'equal)
-     io-context
-     (make-module-registry)
-     (%make-source-registry)
-     (make-hash-table :test #'equal)
-     (make-hash-table :test #'eql)
-     (make-hash-table :test #'equal))))
+    (multiple-value-bind (predicate-index predicate-tails)
+        (%make-rulebase-predicate-index entries)
+      (%make-rulebase
+       entries
+       (last entries)
+       predicate-index
+       predicate-tails
+       0
+       *standard-operator-table*
+       (make-hash-table :test #'equal)
+       io-context
+       (make-module-registry)
+       (%make-source-registry)
+       (make-hash-table :test #'equal)
+       (make-hash-table :test #'eql)
+       (make-hash-table :test #'equal)))))
 
 (defun %copy-clause (clause)
   "Copy CLAUSE while preserving repeated logic-variable identities."
@@ -210,31 +278,35 @@ terms because transactional updates never mutate them in place."
                             (%stored-clause-died-revision entry))
                       copy))
                   (rulebase-entries rulebase))))
-    (%make-rulebase
-     entries
-     (%make-rulebase-predicate-index entries)
-     (rulebase-revision rulebase)
-     (rulebase-operator-table rulebase)
-     (let ((copy (make-hash-table :test #'equal)))
-       (maphash (lambda (key value) (setf (gethash key copy) value))
-                (rulebase-predicate-properties rulebase))
-       copy)
-     (%copy-prolog-io-context (rulebase-io-context rulebase))
-     (module-registry-copy (rulebase-module-registry rulebase))
-     (%copy-source-registry (rulebase-source-registry rulebase))
-     (let ((copy (make-hash-table :test #'equal)))
-       (maphash (lambda (name value) (setf (gethash name copy) value))
-                (rulebase-prolog-flag-values rulebase))
-       copy)
-     (let ((copy (make-hash-table :test #'eql)))
-       (maphash (lambda (from to) (setf (gethash from copy) to))
-                (rulebase-char-conversions rulebase))
-       copy)
-     (let ((copy (make-hash-table :test #'equal)))
-       (maphash (lambda (key owners)
-                  (setf (gethash key copy) (copy-list owners)))
-                (rulebase-table-declarations rulebase))
-       copy))))
+    (multiple-value-bind (predicate-index predicate-tails)
+        (%make-rulebase-predicate-index entries)
+      (%make-rulebase
+       entries
+       (last entries)
+       predicate-index
+       predicate-tails
+       (rulebase-revision rulebase)
+       (rulebase-operator-table rulebase)
+       (let ((copy (make-hash-table :test #'equal)))
+         (maphash (lambda (key value) (setf (gethash key copy) value))
+                  (rulebase-predicate-properties rulebase))
+         copy)
+       (%copy-prolog-io-context (rulebase-io-context rulebase))
+       (module-registry-copy (rulebase-module-registry rulebase))
+       (%copy-source-registry (rulebase-source-registry rulebase))
+       (let ((copy (make-hash-table :test #'equal)))
+         (maphash (lambda (name value) (setf (gethash name copy) value))
+                  (rulebase-prolog-flag-values rulebase))
+         copy)
+       (let ((copy (make-hash-table :test #'eql)))
+         (maphash (lambda (from to) (setf (gethash from copy) to))
+                  (rulebase-char-conversions rulebase))
+         copy)
+       (let ((copy (make-hash-table :test #'equal)))
+         (maphash (lambda (key owners)
+                    (setf (gethash key copy) (copy-list owners)))
+                  (rulebase-table-declarations rulebase))
+         copy)))))
 
 (defun copy-rulebase (rulebase)
   "Return a detached copy of RULEBASE, including its complete runtime state.
@@ -258,7 +330,9 @@ source registrations, flags, and character conversions are copied as well."
 (defun %replace-rulebase! (target source)
   "Replace TARGET's complete state with SOURCE after a successful transaction."
   (setf (rulebase-entries target) (rulebase-entries source)
+        (rulebase-entries-tail target) (rulebase-entries-tail source)
         (rulebase-predicate-index target) (rulebase-predicate-index source)
+        (rulebase-predicate-tails target) (rulebase-predicate-tails source)
         (rulebase-revision target) (rulebase-revision source)
         (rulebase-operator-table target) (rulebase-operator-table source)
         (rulebase-predicate-properties target)
@@ -393,16 +467,36 @@ source registrations, flags, and character conversions are copied as well."
                                     (%next-rulebase-revision! rulebase)
                                     source)))
     (ecase position
-      (:first (push entry (rulebase-entries rulebase)))
-      (:last (setf (rulebase-entries rulebase)
-                   (append (rulebase-entries rulebase) (list entry)))))
+      (:first
+       (let ((cell (cons entry (rulebase-entries rulebase))))
+         (setf (rulebase-entries rulebase) cell)
+         (when (null (cdr cell))
+           (setf (rulebase-entries-tail rulebase) cell))))
+      (:last
+       (let ((cell (list entry))
+             (tail (rulebase-entries-tail rulebase)))
+         (if tail
+             (setf (cdr tail) cell)
+             (setf (rulebase-entries rulebase) cell))
+         (setf (rulebase-entries-tail rulebase) cell))))
     (let ((key (%stored-clause-predicate-key entry)))
       (when key
-        (ecase position
-          (:first (push entry (gethash key (rulebase-predicate-index rulebase))))
-          (:last (setf (gethash key (rulebase-predicate-index rulebase))
-                       (append (gethash key (rulebase-predicate-index rulebase))
-                               (list entry))))))))
+        (let ((index (rulebase-predicate-index rulebase))
+              (tails (rulebase-predicate-tails rulebase)))
+          (ecase position
+            (:first
+             (let* ((entries (gethash key index))
+                    (cell (cons entry entries)))
+               (setf (gethash key index) cell)
+               (unless entries
+                 (setf (gethash key tails) cell))))
+            (:last
+             (let ((cell (list entry))
+                   (tail (gethash key tails)))
+               (if tail
+                   (setf (cdr tail) cell)
+                   (setf (gethash key index) cell))
+               (setf (gethash key tails) cell))))))))
   rulebase)
 
 (defun %rulebase-retract-entry! (rulebase entry)
