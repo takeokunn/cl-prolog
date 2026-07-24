@@ -89,6 +89,55 @@ optional operator table. `parse-prolog` parses Prolog source into clause data.
 registered. The goal symbols correspond to `consult/1`, `ensure_loaded/1`,
 and `load_files/1` in parsed or Lisp-shaped queries.
 
+## Parser Resource Limits
+
+Every parser entry point — `read-prolog-term`, `read-prolog-clause`,
+`parse-prolog`, and the `consult`/`ensure_loaded`/`load_files` source loaders —
+enforces a set of finite resource bounds so untrusted Prolog text cannot
+exhaust memory or stack. Each bound is a special variable you can rebind; the
+defaults are conservative but generous for ordinary source. Binding a variable
+to `nil` disables that single limit.
+
+- `*max-prolog-source-characters*` — total source characters consumed
+  (default `1048576`)
+- `*max-prolog-delimiter-depth*` — maximum nesting of `(`, `[`, `{`
+  (default `256`)
+- `*max-prolog-parser-depth*` — expression-parser recursion depth
+  (default `256`)
+- `*max-prolog-tokens*` — total tokens produced, excluding EOF
+  (default `65536`)
+- `*max-prolog-identifier-length*` — length of one unquoted name lexeme
+  (default `1024`)
+- `*max-prolog-quoted-lexeme-length*` — content length of one quoted atom or
+  string lexeme (default `65536`)
+- `*max-prolog-numeric-lexeme-length*` — length of one numeric lexeme
+  (default `4096`)
+- `*max-prolog-interned-symbols*` — cumulative count of new symbols the parser
+  may intern (default `65536`)
+
+`*max-prolog-interned-symbols*` differs from the others: it is a cumulative,
+process-wide bound tracked across parse calls rather than a per-parse limit.
+It exists so that a stream of adversarial source cannot permanently intern an
+unbounded number of symbols.
+
+When a bound is exceeded the parser signals `prolog-parser-resource-error`,
+whose readers describe the violation:
+
+- `prolog-parser-resource-error-resource` — which limit was hit (a string such
+  as `"IDENTIFIER_LENGTH"`)
+- `prolog-parser-resource-error-limit` — the configured limit value
+- `prolog-parser-resource-error-observed` — the observed value that exceeded it
+- `prolog-parser-resource-error-position` — the source position at the failure
+
+This condition is a plain Common Lisp `error`, not a `prolog-runtime-error`,
+because it is raised in the lexer beneath the engine's condition hierarchy. The
+direct reader APIs (`read-prolog-term`, `read-prolog-clause`, `parse-prolog`)
+and a direct `consult-prolog` call let it propagate as-is. When the same limit
+is hit *inside* the engine while running a `consult`/`ensure_loaded`/`load_files`
+goal, it is translated into a catchable ISO `resource_error/1` term — for
+example `error(resource_error(identifier_length), _)` — so Prolog-level
+`catch/3` can intercept it.
+
 ## Rule DSL
 
 - `prolog`
@@ -153,6 +202,12 @@ DCG tokens are either a bare token-kind symbol or a `(kind . value)` cons.
 - Process-level halt: `prolog-halt` and reader `prolog-halt-code`
 - Arithmetic diagnostics: `arithmetic-evaluation-error` and readers
   `arithmetic-error-expression`, `arithmetic-error-reason`
+- Parser resource limits: `prolog-parser-resource-error` and readers
+  `prolog-parser-resource-error-resource`,
+  `prolog-parser-resource-error-limit`,
+  `prolog-parser-resource-error-observed`,
+  `prolog-parser-resource-error-position` (see
+  [Parser resource limits](#parser-resource-limits))
 
 `prolog-halt` is not a `prolog-exception`, so `catch/3` does not intercept it.
 The embedding application decides how to translate the condition into process

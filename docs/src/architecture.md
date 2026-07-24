@@ -17,50 +17,90 @@ facility of a standalone ISO Prolog system.
 ## ASDF Load Order
 
 `cl-prolog.asd` is serial. The production system loads these components in
-this exact dependency order:
+this exact dependency order, which groups into layers:
+
+**Foundations** — packages, operator/module/source registries, and the clause
+and tabling data models:
 
 1. `package.lisp`
 2. `operator-table.lisp`
 3. `module-system.lisp`
-4. `data.lisp`
-5. `unification.lisp`
-6. `parser.lisp`
-7. `term-writer.lisp`
-8. `engine.lisp`
-9. `io-context.lisp`
-10. `prover.lisp`
-11. `builtins/core.lisp`
-12. `builtins/control.lisp`
-13. `builtins/collection.lisp`
-14. `builtins/dynamic.lisp`
-15. `builtins/arithmetic.lisp`
-16. `builtins/list.lisp`
-17. `builtins/atom.lisp`
-18. `builtins/operator.lisp`
-19. `builtins/io.lisp`
-20. `builtins/io-streams.lisp`
-21. `builtins/io-code.lisp`
-22. `fd-store.lisp`
-23. `builtins/fd.lisp`
-24. `builtin-term.lisp`
-25. `dcg-runtime.lisp`
-26. `query.lisp`
-27. `source-loader.lisp`
-28. `dsl-compiler.lisp`
-29. `dsl.lisp`
-30. `dcg.lisp`
+4. `source-registry.lisp`
+5. `data.lisp`
+6. `table-variant.lisp`
+7. `unification.lisp`
+
+**Text front end** — the lexer/parser split and the term writer:
+
+8. `lexer.lisp`
+9. `lexer-operator-lexemes.lisp`
+10. `lexer-tokenizer.lisp`
+11. `grammar.lisp`
+12. `term-writer.lisp`
+
+**Search core** — conditions and registries, the I/O context, the CPS prover,
+and the tabling layer:
+
+13. `engine.lisp`
+14. `io-context.lisp`
+15. `prover.lisp`
+16. `tabling.lisp`
+
+**Builtin goal set** — the `define-builtin` machinery and the builtin modules:
+
+17. `builtins/core.lisp`
+18. `builtins/control.lisp`
+19. `builtins/collection.lisp`
+20. `builtins/dynamic.lisp`
+21. `builtins/arithmetic.lisp`
+22. `builtins/list.lisp`
+23. `builtins/text-conversion.lisp`
+24. `builtins/atom-ops.lisp`
+25. `builtins/atom-number-conversion.lisp`
+26. `builtins/operator.lisp`
+27. `builtins/io.lisp`
+28. `builtins/io-streams.lisp`
+29. `builtins/io-code.lisp`
+30. `fd-store.lisp`
+31. `builtins/fd.lisp`
+32. `term-inspect.lisp`
+33. `term-compare.lisp`
+34. `term-construct.lisp`
+
+**Front ends** — DCG runtime, the public query API, the transactional source
+loader, and the authoring macros:
+
+35. `dcg-runtime.lisp`
+36. `query.lisp`
+37. `source-io.lisp`
+38. `source-directives.lisp`
+39. `source-rollback.lisp`
+40. `source-loader.lisp`
+41. `dsl-compiler.lisp`
+42. `dsl.lisp`
+43. `dcg.lisp`
 
 The important boundaries are:
 
-- `data.lisp` owns clauses, the logical-update rulebase, indexes, and mutable
-  registries
-- `engine.lisp` owns conditions plus builtin and foreign-predicate registries
+- `data.lisp` owns clauses, the logical-update rulebase, the predicate index,
+  and mutable registries; `table-variant.lisp` owns the tabling data model
+- `lexer.lisp` tokenizes source text and enforces the parser resource limits,
+  `lexer-operator-lexemes.lisp` holds the standard/symbolic operator lexeme
+  tables the tokenizer matches against, and `lexer-tokenizer.lisp` is the
+  tokenizer itself; `grammar.lisp` runs the precedence-climbing parser on top
+  and exposes the public reader API
+- `engine.lisp` owns conditions plus the builtin and foreign-predicate
+  registries and the CPS `emit` protocol
 - `prover.lisp` owns normalization, proof state, dispatch, clause resolution,
-  cut barriers, depth accounting, and tabling
+  cut barriers, and depth accounting; `tabling.lisp` layers memoized resolution
+  and left-recursion detection on top
 - `query.lisp` turns the continuation protocol into the public mapping and
   result APIs
-- `source-loader.lisp`, `dsl*.lisp`, and `dcg*.lisp` are separate front ends
-  that produce or consume the same clause and query representation
+- the builtin set is split by concern — control, collection, dynamic database,
+  arithmetic, lists, atom/text conversion, operators, stream I/O, finite
+  domains, and term inspection/comparison/construction
+- the `source-*.lisp` files, `dsl*.lisp`, and `dcg*.lisp` are separate front
+  ends that produce or consume the same clause and query representation
 
 ## Unified Clause Store
 
@@ -141,6 +181,35 @@ Born/died revisions preserve logical-update behavior: a running predicate
 invocation continues over its snapshot even when a dynamic goal changes the
 database. Later invocations observe the newer revision. Callers that require
 isolation can use `copy-rulebase` before mutation.
+
+## Transactional Source Loading
+
+Loading Prolog source is all-or-nothing. `consult-prolog` and
+`ensure-prolog-loaded` run inside a loading transaction that copies the live
+rulebase, applies every clause and directive to the detached copy, runs any
+`:- initialization` goals, and only publishes the copy back on success. Any
+parse error, failed directive, or resource-limit violation aborts before the
+live rulebase is touched.
+
+The pipeline is split across five files:
+
+- `source-registry.lisp` records one entry per canonical source pathname,
+  tracking its load state and the effects it applied
+- `source-io.lisp` resolves pathnames and streams and translates parser and
+  I/O failures into ISO source-loading errors (including the catchable
+  `resource_error/1` form of a parser resource-limit breach)
+- `source-directives.lisp` evaluates one directive or clause at a time —
+  `op`, `dynamic`, `table`, `use_module`, `include`, `initialization`,
+  `consult`, and `load_files` — recording each operator, predicate-property,
+  and table declaration for later rollback
+- `source-rollback.lisp` undoes a previously loaded unit on reload: it removes
+  the unit's clauses and replays or restores the operator, predicate-property,
+  and table effects it recorded
+- `source-loader.lisp` orchestrates the transaction and exposes the public
+  `consult`, `load_files`, and `ensure_loaded` surface
+
+Load-state tracking breaks reload cycles and honors the `if-loaded` policy that
+distinguishes `consult` (always reload) from `ensure_loaded` (load once).
 
 ## Macro-First Surface
 
