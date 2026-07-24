@@ -108,17 +108,24 @@
                         domain))
         (values store t))))
 
+(defun %fd-values-supported-by (operator own-domain other-domain own-position)
+  "Return the subset of OWN-DOMAIN whose OWN-POSITION (:LEFT or :RIGHT) role
+in OPERATOR's relation is satisfied by some value in OTHER-DOMAIN."
+  (remove-if-not
+   (lambda (own-value)
+     (some (lambda (other-value)
+             (ecase own-position
+               (:left (%fd-relation-true-p operator own-value other-value))
+               (:right (%fd-relation-true-p operator other-value own-value))))
+           other-domain))
+   own-domain))
+
 (defun %fd-filter-variable-pair (store left right operator)
   (let ((left-domain (%fd-domain-of store left))
         (right-domain (%fd-domain-of store right)))
     (if (and left-domain right-domain)
         (let ((supported-left
-                (remove-if-not
-                 (lambda (left-value)
-                   (some (lambda (right-value)
-                           (%fd-relation-true-p operator left-value right-value))
-                         right-domain))
-                 left-domain)))
+                (%fd-values-supported-by operator left-domain right-domain :left)))
           (multiple-value-bind (left-store left-success-p)
               (%fd-restrict-domain store left supported-left)
             (if (not left-success-p)
@@ -126,12 +133,8 @@
                 (let ((restricted-left (%fd-domain-of left-store left)))
                   (%fd-restrict-domain
                    left-store right
-                   (remove-if-not
-                    (lambda (right-value)
-                      (some (lambda (left-value)
-                              (%fd-relation-true-p operator left-value right-value))
-                            restricted-left))
-                    right-domain))))))
+                   (%fd-values-supported-by
+                    operator right-domain restricted-left :right))))))
         (values store t))))
 
 (defun %fd-propagate-relation (store constraint environment)

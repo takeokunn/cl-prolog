@@ -201,7 +201,10 @@
          "Byte operation requires a binary stream")))
   entry)
 
-(defun %io-character-input (entry environment operation &key peek)
+(defun %io-read-character (entry environment operation &key peek)
+  "Read (or, if PEEK, look ahead at) ENTRY's next character, updating its
+end-of-stream property the way every ISO character/code input predicate
+must. Returns the character, or NIL at end of stream."
   (%io-require-stream-type entry :text environment operation)
   (let ((character (if peek
                        (peek-char nil (prolog-stream-stream entry) nil nil)
@@ -210,7 +213,11 @@
           (cond (character :not)
                 (peek :at)
                 (t :past)))
-    (if character (%io-character-atom character) (%iso-atom "end_of_file"))))
+    character))
+
+(defun %io-character-input (entry environment operation &key peek)
+  (let ((character (%io-read-character entry environment operation :peek peek)))
+    (if character (%character-atom character) (%iso-atom "end_of_file"))))
 
 (%define-io-dual-builtin (get_char (character) (character) "GET_CHAR")
     (rulebase environment depth emit)
@@ -244,10 +251,17 @@
     environment operation :peek t)
    environment emit))
 
-(defun %io-write-character (entry term environment operation)
+(defun %io-write-text-unit (entry term environment operation converter)
+  "Write TERM's single text unit (a character or character-code atom, per
+CONVERTER) to ENTRY, requiring a text stream. Shared by PUT_CHAR
+(CONVERTER = %IO-CHARACTER) and PUT_CODE (CONVERTER = %IO-CODE-CHARACTER,
+src/builtins/io-code.lisp)."
   (%io-require-stream-type entry :text environment operation)
-  (write-char (%io-character term environment operation)
+  (write-char (funcall converter term environment operation)
               (prolog-stream-stream entry)))
+
+(defun %io-write-character (entry term environment operation)
+  (%io-write-text-unit entry term environment operation #'%io-character))
 
 (defun %io-read-byte (entry environment operation &key peek)
   (%io-require-stream-type entry :binary environment operation)

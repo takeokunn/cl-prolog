@@ -3,10 +3,7 @@
 (in-package #:cl-prolog)
 
 (defun %io-read-code (entry environment operation &key peek)
-  (%io-require-stream-type entry :text environment operation)
-  (let ((character (if peek
-                       (peek-char nil (prolog-stream-stream entry) nil nil)
-                       (read-char (prolog-stream-stream entry) nil nil))))
+  (let ((character (%io-read-character entry environment operation :peek peek)))
     (if character (char-code character) -1)))
 
 (defun %io-code-character (term environment operation)
@@ -22,9 +19,7 @@
          "integer does not designate a supported character"))))
 
 (defun %io-write-code (entry term environment operation)
-  (%io-require-stream-type entry :text environment operation)
-  (write-char (%io-code-character term environment operation)
-              (prolog-stream-stream entry)))
+  (%io-write-text-unit entry term environment operation #'%io-code-character))
 
 (%define-io-dual-builtin
     (get_code (code) (code) "GET_CODE")

@@ -38,11 +38,21 @@
 
 (defun %decode-query-options (options)
   "Return query option values as (VALUES MAX-DEPTH ENVIRONMENT PROJECT LIMIT)."
-  (values (%validate-max-depth
-           (%query-option options :max-depth *max-prolog-depth*))
-          (%query-option options :environment nil)
-          (%query-option options :project t)
-          (%query-option options :limit nil)))
+  (unless (evenp (length options))
+    (error 'program-error))
+  (loop for key in options by (function cddr)
+        do (unless (member key (quote (:max-depth :environment :project :limit)))
+             (error 'program-error)))
+  (let ((limit (%query-option options :limit nil)))
+    (unless (typep limit (quote (or null (integer 1 *))))
+      (error 'type-error
+             :datum limit
+             :expected-type (quote (or null (integer 1 *)))))
+    (values (%validate-max-depth
+             (%query-option options :max-depth *max-prolog-depth*))
+            (%query-option options :environment nil)
+            (%query-option options :project t)
+            limit)))
 
 (defmacro %with-query-options ((options max-depth environment project limit) &body body)
   "Bind public query option names decoded from OPTIONS."

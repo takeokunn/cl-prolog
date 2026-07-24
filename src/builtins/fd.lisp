@@ -81,12 +81,17 @@
             (%fd-domain-terms variables environment (%iso-atom "ALL_DIFFERENT"))
             environment emit))
 
+(defparameter +fd-labeling-option-names+ '("FF" "UP" "DOWN")
+  "Valid labeling/2 option atom names: FF selects the most-constrained
+variable first, UP/DOWN fix the domain-enumeration direction.")
+
 (defun %fd-label-options (options environment)
   (let ((resolved (logic-substitute options environment)))
     (unless (and (%proper-list-p resolved)
                  (every (lambda (option)
                           (and (symbolp option)
-                               (member (symbol-name option) '("FF" "UP" "DOWN")
+                               (member (symbol-name option)
+                                       +fd-labeling-option-names+
                                        :test #'string=)))
                         resolved))
       (%raise-domain-error "LABELING_OPTIONS" resolved environment

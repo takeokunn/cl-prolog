@@ -147,9 +147,6 @@
                          "Expected a one-character atom"))
     (char (symbol-name value) 0)))
 
-(defun %io-character-atom (character)
-  (%prolog-atom-symbol (string character) :preserve-case t))
-
 (defun %io-register-open-stream (rulebase source mode options environment operation)
   (let* ((type (%io-option "type" options (%iso-atom "text")))
          (alias (%io-option "alias" options))
@@ -159,9 +156,7 @@
                      (%io-option-name-p type "binary")))
       (%raise-domain-error "STREAM_OPTION" type environment operation
                            "Stream type must be text or binary"))
-    (when (and alias (not (symbolp alias)))
-      (%raise-type-error "ATOM" alias environment operation
-                         "Stream alias must be an atom"))
+    (%check-stream-alias alias environment operation)
     (multiple-value-bind (access-mode direction)
         (%validate-prolog-stream-mode mode environment operation)
       (let ((stream (handler-case
@@ -330,31 +325,38 @@
     (setf (prolog-stream-end-of-stream entry) :not)
     (funcall emit environment)))
 
-(define-builtin (current_input stream) (rulebase environment depth emit)
-  (declare (ignore depth))
-  (%unify-emit stream
-               (%io-public-designator (%io-current-input-entry rulebase))
-               environment emit))
+(defmacro %define-current-stream-builtin (&body definitions)
+  "Each of DEFINITIONS is (NAME ACCESSOR); ACCESSOR retrieves the rulebase's
+current input or output stream entry, which NAME unifies with its public
+designator."
+  `(progn
+     ,@(loop for (name accessor) in definitions
+             collect `(define-builtin (,name stream) (rulebase environment depth emit)
+                        (declare (ignore depth))
+                        (%unify-emit stream
+                                     (%io-public-designator (,accessor rulebase))
+                                     environment emit)))))
 
-(define-builtin (current_output stream) (rulebase environment depth emit)
-  (declare (ignore depth))
-  (%unify-emit stream
-               (%io-public-designator (%io-current-output-entry rulebase))
-               environment emit))
+(%define-current-stream-builtin
+  (current_input %io-current-input-entry)
+  (current_output %io-current-output-entry))
 
-(define-builtin (set_input stream) (rulebase environment depth emit)
-  (declare (ignore depth))
-  (let ((operation (%io-operation "SET_INPUT")))
-    (setf (prolog-io-context-current-input (%io-context rulebase))
-          (%io-stream-entry rulebase stream :input environment operation))
-    (funcall emit environment)))
+(defmacro %define-set-stream-builtin (&body definitions)
+  "Each of DEFINITIONS is (NAME DIRECTION CONTEXT-ACCESSOR OPERATION-NAME);
+NAME resolves STREAM under DIRECTION and installs it as the rulebase's
+current stream for that direction via (SETF CONTEXT-ACCESSOR)."
+  `(progn
+     ,@(loop for (name direction context-accessor operation-name) in definitions
+             collect `(define-builtin (,name stream) (rulebase environment depth emit)
+                        (declare (ignore depth))
+                        (let ((operation (%io-operation ,operation-name)))
+                          (setf (,context-accessor (%io-context rulebase))
+                                (%io-stream-entry rulebase stream ,direction environment operation))
+                          (funcall emit environment))))))
 
-(define-builtin (set_output stream) (rulebase environment depth emit)
-  (declare (ignore depth))
-  (let ((operation (%io-operation "SET_OUTPUT")))
-    (setf (prolog-io-context-current-output (%io-context rulebase))
-          (%io-stream-entry rulebase stream :output environment operation))
-    (funcall emit environment)))
+(%define-set-stream-builtin
+  (set_input :input prolog-io-context-current-input "SET_INPUT")
+  (set_output :output prolog-io-context-current-output "SET_OUTPUT"))
 
 (defun %io-parse-term-with-variables (input operator-table)
   (let* ((parser (%parser (%tokenize-prolog input operator-table) operator-table))
