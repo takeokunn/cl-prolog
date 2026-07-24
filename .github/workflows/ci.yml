@@ -15,8 +15,16 @@ concurrency:
 
 jobs:
   nix:
-    name: nix (x86_64-linux)
-    runs-on: ubuntu-latest
+    name: nix (${{ matrix.system }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - system: x86_64-linux
+            runner: ubuntu-latest
+          - system: aarch64-linux
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 30
     env:
       CACHIX_CACHE: ${{ vars.CACHIX_CACHE }}

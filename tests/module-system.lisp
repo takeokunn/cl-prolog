@@ -32,6 +32,28 @@
               (lambda (module predicate arity)
                 (declare (ignore module predicate arity)) nil))))))
 
+(deftest module-registry-declare-rejects-malformed-declarations ()
+  (let ((registry (cl-prolog::make-module-registry)))
+    (signals-error
+      (cl-prolog::module-registry-declare! registry "not-an-atom" '()))
+    (cl-prolog::module-registry-declare! registry 'once '())
+    (signals-error
+      (cl-prolog::module-registry-declare! registry 'once '()))
+    (signals-error
+      (cl-prolog::module-registry-declare!
+       registry 'duplicated '((/ same 1) (/ same 1))))
+    (signals-error
+      (cl-prolog::module-registry-declare!
+       registry 'malformed '((/ same))))
+    (signals-error
+      (cl-prolog::module-registry-declare!
+       registry 'too-long '((/ same 1 extra))))
+    (signals-error
+      (cl-prolog::module-registry-declare!
+       registry 'wrong-functor '((not-a-slash same 1))))
+    (signals-error
+      (cl-prolog::%find-prolog-module registry "not-an-atom" "test"))))
+
 (deftest module-registry-rejects-invalid-imports ()
   (let ((registry (cl-prolog::make-module-registry)))
     (cl-prolog::module-registry-declare! registry 'left '((/ same 1)))
@@ -74,12 +96,12 @@
     (cl-prolog::module-registry-declare!
      (cl-prolog::rulebase-module-registry rulebase) 'alpha '())
     (assert-query rulebase (cl-prolog::current_module ?module)
-      => (((?module . cl-prolog::user))
+      :ordered (((?module . cl-prolog::user))
           ((?module . alpha))
           ((?module . zeta))))
     (assert-query rulebase (cl-prolog::current_module alpha) :succeeds)
     (assert-query rulebase (cl-prolog::current_module missing) :fails)
-    (assert-query rulebase (cl-prolog::current_module 42) :signals)))
+    (assert-query rulebase (cl-prolog::current_module 42) :signals prolog-type-error)))
 
 (deftest module-consult-isolates-colliding-predicates ()
   (let ((rulebase (make-rulebase)))
@@ -175,6 +197,14 @@
     (signals-error
       (prolog-succeeds-p rulebase
                          (read-prolog-term "value(local).")))))
+
+(deftest module-directive-must-be-the-unique-first-source-term ()
+  (signals-error
+    (consult-prolog "already_seen. :- module(late, []).")))
+
+(deftest module-consult-rejects-an-undefined-export ()
+  (signals-error
+    (consult-prolog ":- module(under_defined, [missing/1]).")))
 
 (deftest dynamic-assertion-rejects-import-redefinition ()
   (let ((rulebase (make-rulebase)))

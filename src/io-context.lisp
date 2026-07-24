@@ -50,15 +50,20 @@
    (format nil "$stream_~D"
            (incf (prolog-io-context-next-handle context)))))
 
+(defun %check-stream-alias (alias environment operation)
+  "Raise a type error unless ALIAS is NIL or a symbol suitable as a stream
+alias."
+  (when (and alias (not (symbolp alias)))
+    (%raise-type-error "ATOM" alias environment operation
+                       "Stream alias must be an atom")))
+
 (defun %register-prolog-stream! (context stream mode
                                  &key alias (owned-p t) source (type :text)
                                    environment (operation "OPEN"))
   (unless (streamp stream)
     (%raise-type-error "STREAM" stream environment operation
                        "Expected a Common Lisp stream"))
-  (when (and alias (not (symbolp alias)))
-    (%raise-type-error "ATOM" alias environment operation
-                       "Stream alias must be an atom"))
+  (%check-stream-alias alias environment operation)
   (when (and alias (gethash alias (prolog-io-context-aliases context)))
     (%raise-permission-error "OPEN" "STREAM" alias environment operation
                              "Stream alias is already in use"))

@@ -1,101 +1,9 @@
-;;;; Transactional Prolog source loading and directive evaluation.
+;;;; Transaction orchestration and the public consult/load_files/
+;;;; ensure_loaded API, built on the stream primitives in source-io.lisp,
+;;;; directive evaluation in source-directives.lisp, and the rollback
+;;;; support in source-rollback.lisp.
 
 (in-package #:cl-prolog)
-
-(defvar *current-prolog-source-directory* nil)
-(defvar *current-prolog-source* nil)
-(defvar *current-prolog-source-record* nil)
-
-(define-condition prolog-source-not-found (file-error) ())
-
-(defun %resolve-prolog-source-pathname (pathname)
-  (merge-pathnames pathname
-                   (or *current-prolog-source-directory*
-                       *default-pathname-defaults*)))
-
-(defun %canonical-prolog-source-pathname (pathname)
-  "Return PATHNAME's canonical existing identity or signal a source error."
-  (let ((resolved (%resolve-prolog-source-pathname pathname)))
-    (handler-case
-        (truename resolved)
-      (file-error ()
-        (error 'prolog-source-not-found :pathname resolved)))))
-
-(defun %call-with-prolog-source-stream (source function)
-  (etypecase source
-    (string
-     (with-input-from-string (stream source)
-       (funcall function stream)))
-    (stream (funcall function source))
-    (pathname
-     (let* ((resolved (%resolve-prolog-source-pathname source))
-            (directory (make-pathname :name nil :type nil :version nil
-                                      :defaults resolved)))
-       (with-open-file (stream resolved :direction :input
-                                       :if-does-not-exist nil)
-         (unless stream
-           (error 'prolog-source-not-found :pathname resolved))
-         (let ((*current-prolog-source-directory* directory))
-           (funcall function stream)))))))
-
-(defun %source-file-pathnames (term environment operation)
-  "Resolve TERM, an atom or proper list of atoms, to source pathnames."
-  (labels ((source-pathname (value)
-             (let ((resolved (logic-substitute value environment)))
-               (when (logic-var-p resolved)
-                 (%raise-instantiation-error environment operation
-                                             "Source must be instantiated"))
-               (pathname (%io-pathname resolved environment operation))))
-           (source-list (value original)
-             (let ((seen (make-hash-table :test #'eq))
-                   (result '())
-                   (tail value)
-                   (observed 0))
-               (loop
-                 (cond
-                   ((logic-var-p tail)
-                    (%raise-instantiation-error
-                     environment operation "Source list must be instantiated"))
-                   ((null tail)
-                    (return (nreverse result)))
-                   ((consp tail)
-                    (when (gethash tail seen)
-                      (%parser-resource-error
-                       "SOURCE_LIST_CYCLE" 0 1 observed))
-                    (setf (gethash tail seen) t)
-                    (incf observed)
-                    (push (source-pathname (car tail)) result)
-                    (setf tail (cdr tail)))
-                   (t
-                    (%raise-type-error
-                     "LIST" original environment operation
-                     "Source must be a proper list of atoms")))))))
-    (let ((value (logic-substitute term environment)))
-      (cond
-        ((logic-var-p value)
-         (%raise-instantiation-error environment operation
-                                     "Source must be instantiated"))
-        ((null value) '())
-        ((symbolp value) (list (source-pathname value)))
-        ((consp value) (source-list value value))
-        (t
-         (%raise-type-error "ATOM" value environment operation
-                            "Source must be an atom or proper list of atoms"))))))
-
-(defmacro with-prolog-source-errors ((environment operation) &body body)
-  "Translate source loading failures into operation-specific ISO errors."
-  `(handler-case
-       (progn ,@body)
-     (prolog-source-not-found (condition)
-       (%raise-existence-error
-        "SOURCE_SINK"
-        (make-symbol (namestring (file-error-pathname condition)))
-        ,environment ,operation
-        "Source file does not exist"))
-     (prolog-parser-resource-error (condition)
-       (%raise-parser-resource-error condition ,environment ,operation))
-     (prolog-parse-error (condition)
-       (%raise-syntax-error condition ,environment ,operation))))
 
 (defmacro with-prolog-loading-transaction ((rulebase transaction initializations)
                                            &body body)
@@ -120,254 +28,6 @@
        (with-source-loading-builtin (environment ,operation emit)
          ,@body))))
 
-(defun %read-source-term (stream operator-table)
-  (let* ((source (%read-prolog-term-source stream))
-         (parser (%parser (%tokenize-prolog source operator-table) operator-table)))
-    (if (eq :eof (%token-kind (%current-token parser)))
-        (values nil nil)
-        (let ((term (%parse-expression parser (make-hash-table :test #'equal) 0)))
-          (%expect-token parser :operator ".")
-          (%expect-token parser :eof)
-          (values term t)))))
-
-(defun %predicate-indicator-values (indicator directive)
-  (let ((key (%predicate-indicator-key indicator directive)))
-    (values (car key) (cdr key))))
-
-(defun %operator-specifier-keyword (specifier)
-  (unless (symbolp specifier)
-    (error "Operator specifier must be an atom, got ~S." specifier))
-  (or (find (symbol-name specifier) +operator-specifiers+
-            :key #'symbol-name
-            :test #'string-equal)
-      (error "Invalid operator specifier ~S." specifier)))
-
-(defun %record-source-operator-effect! (effect)
-  (when *current-prolog-source-record*
-    (push effect (%source-record-operators *current-prolog-source-record*))))
-
-(defun %record-source-predicate-property!
-    (module predicate arity property)
-  (when *current-prolog-source-record*
-    (push (list module predicate arity property)
-          (%source-record-predicate-properties
-           *current-prolog-source-record*))))
-
-(defun %record-source-table-declaration! (module predicate arity owner)
-  (when *current-prolog-source-record*
-    (push (list module predicate arity owner)
-          (%source-record-table-declarations
-           *current-prolog-source-record*))))
-
-(defun %apply-source-directive! (goal rulebase initializations module)
-  (unless (consp goal)
-    (error "Unknown Prolog directive ~S." goal))
-  (case (first goal)
-    (op
-     (unless (= (length goal) 4)
-       (error "OP directive requires priority, specifier, and name."))
-     (destructuring-bind (name priority specifier operator) goal
-       (declare (ignore name))
-       (let* ((keyword (%operator-specifier-keyword specifier))
-              (previous (%operator-table-find
-                         (rulebase-operator-table rulebase) operator keyword)))
-         (%record-source-operator-effect!
-          (list operator keyword
-                (and previous
-                     (operator-definition-priority (first previous)))
-                priority))
-         (setf (rulebase-operator-table rulebase)
-               (%operator-table-define
-                (rulebase-operator-table rulebase)
-                operator priority keyword)))))
-    (dynamic
-     (unless (= (length goal) 2)
-       (error "DYNAMIC directive requires one predicate indicator."))
-     (multiple-value-bind (predicate arity)
-         (%predicate-indicator-values (second goal) 'dynamic)
-       (%set-rulebase-predicate-property! rulebase predicate arity :dynamic module)
-        (%record-source-predicate-property!
-         module predicate arity :dynamic)))
-    (table
-     (unless (= (length goal) 2)
-       (error "TABLE directive requires one predicate indicator."))
-     (multiple-value-bind (predicate arity)
-         (%predicate-indicator-values (second goal) 'table)
-       (let ((owner (or *current-prolog-source* :anonymous-source)))
-         (%add-rulebase-table-declaration!
-          rulebase predicate arity owner module)
-         (%record-source-table-declaration!
-          module predicate arity owner))))
-    (use_module
-     (unless (member (length goal) '(2 3))
-       (error "USE_MODULE directive requires a module and optional imports."))
-     (module-registry-import! (rulebase-module-registry rulebase)
-                              module (second goal) (third goal)))
-    (initialization
-     (unless (= (length goal) 2)
-       (error "INITIALIZATION directive requires one callable goal."))
-     (push (cons module (second goal)) (car initializations)))
-    ((consult ensure_loaded)
-     (unless (= (length goal) 2)
-       (error "~A directive requires one source argument." (first goal)))
-     (%load-prolog-source-into-rulebase
-      (%source-file-pathnames (second goal) nil (first goal))
-      rulebase initializations
-      :if-loaded (if (eq (first goal) 'ensure_loaded) :skip :reload)))
-    (load_files
-     (unless (member (length goal) '(2 3))
-       (error "LOAD_FILES directive requires sources and optional options."))
-     (%load-prolog-source-into-rulebase
-      (%source-file-pathnames (second goal) nil 'load_files)
-      rulebase initializations
-      :if-loaded (if (= (length goal) 2)
-                     :reload
-                     (%load-files-if-loaded-policy (third goal) nil 'load_files))))
-    ((set_prolog_flag char_conversion)
-     (unless (= (length goal) 3)
-       (error "~A directive requires two arguments." (first goal)))
-     (unless (prolog-succeeds-p rulebase goal)
-       (error "Prolog directive failed: ~S." goal)))
-    ((discontiguous multifile)
-     (unless (rest goal)
-       (error "~A directive requires predicate indicators." (first goal)))
-     ;; The engine already resolves clauses independently of their textual
-     ;; grouping and origin, so the declaration only needs validation.
-     (dolist (indicator (rest goal))
-       (%predicate-indicator-values indicator (first goal))))
-    (include
-     (unless (= (length goal) 2)
-       (error "INCLUDE directive requires one source argument."))
-     (dolist (pathname (%source-file-pathnames (second goal) nil 'include))
-       (%call-with-prolog-source-stream
-        (%canonical-prolog-source-pathname pathname)
-        (lambda (stream)
-          (%process-included-source-terms
-           stream rulebase initializations module)))))
-    (otherwise
-     (error "Unknown Prolog directive ~S." goal))))
-
-(defun %process-included-source-terms (stream rulebase initializations module)
-  "Splice STREAM's terms into the including source unit under MODULE."
-  (loop
-    (multiple-value-bind (term present-p)
-        (let ((*active-char-conversions*
-                (%rulebase-active-char-conversions rulebase)))
-          (%read-source-term stream (rulebase-operator-table rulebase)))
-      (unless present-p (return))
-      (cond
-        ((and (consp term) (eq (first term) '?-))
-         (error "Queries are not consultable source forms: ~S." term))
-        ((and (consp term)
-              (eq (first term) (%prolog-symbol ":-"))
-              (= (length term) 2))
-         (let ((directive (second term)))
-           (when (and (consp directive) (eq (first directive) 'module))
-             (error "MODULE directives are not allowed in included files."))
-           (%apply-source-directive! directive rulebase initializations module)))
-        (t
-         (%insert-source-clause! rulebase term module))))))
-
-(defun %source-term-clause (term)
-  (cond
-    ((symbolp term) (make-clause (list term)))
-    ((and (consp term) (eq (first term) '-->) (= (length term) 3))
-     (%expand-prolog-dcg-clause (second term) (third term)))
-    ((and (consp term)
-          (eq (first term) (%prolog-symbol ":-"))
-          (= (length term) 3))
-     (let ((head (second term)))
-       (unless (or (symbolp head) (consp head))
-         (error "Invalid Prolog clause head ~S." head))
-       (make-clause (if (symbolp head) (list head) head)
-                    (%body-goals (third term)))))
-    ((consp term) (make-clause term))
-    (t (error "Invalid consultable Prolog term ~S." term))))
-
-(defun %insert-source-clause! (rulebase term module)
-  (let ((clause (%source-term-clause term)))
-    (multiple-value-bind (predicate arity)
-        (values (first (clause-head clause)) (length (rest (clause-head clause))))
-      (module-registry-ensure-definition-allowed
-       (rulebase-module-registry rulebase) module predicate arity)
-      (unless (%rulebase-predicate-property rulebase predicate arity module)
-        (%set-rulebase-predicate-property! rulebase predicate arity :static module)
-        (%record-source-predicate-property!
-         module predicate arity :static)))
-    (rulebase-insert-clause! rulebase clause :module module
-                             :source *current-prolog-source*)))
-
-(defun %remove-source-clauses! (rulebase canonical)
-  (multiple-value-bind (revision entries) (%rulebase-snapshot rulebase)
-    (declare (ignore revision))
-    (%rulebase-retract-entries!
-     rulebase
-     (remove canonical entries :test-not #'equal
-                               :key #'%stored-clause-source))))
-
-(defun %remove-source-operators! (rulebase record)
-  ;; Effects are pushed during loading, so replaying them restores prior layers.
-  (dolist (effect (%source-record-operators record))
-    (destructuring-bind (name specifier previous-priority source-priority) effect
-      (let ((current (%operator-table-find
-                      (rulebase-operator-table rulebase) name specifier)))
-        (when (if (zerop source-priority)
-                  (null current)
-                  (and current
-                       (= source-priority
-                          (operator-definition-priority (first current)))))
-          (setf (rulebase-operator-table rulebase)
-                (%operator-table-define
-                 (rulebase-operator-table rulebase) name
-                 (or previous-priority 0) specifier)))))))
-
-(defun %source-operator-overrides (rulebase record)
-  "Return runtime definitions currently shadowing RECORD's latest effects."
-  (let ((seen '())
-        (overrides '()))
-    (dolist (effect (%source-record-operators record) overrides)
-      (destructuring-bind (name specifier previous-priority source-priority) effect
-        (declare (ignore previous-priority))
-        (let ((key (list name specifier)))
-          (unless (member key seen :test #'equal)
-            (push key seen)
-            (let ((current (%operator-table-find
-                            (rulebase-operator-table rulebase) name specifier)))
-              (when (and current
-                         (/= source-priority
-                             (operator-definition-priority (first current))))
-                (push (first current) overrides)))))))))
-
-(defun %restore-operator-overrides! (rulebase overrides)
-  (dolist (definition overrides)
-    (setf (rulebase-operator-table rulebase)
-          (%operator-table-define
-           (rulebase-operator-table rulebase)
-           (operator-definition-name definition)
-           (operator-definition-priority definition)
-           (operator-definition-specifier definition)))))
-
-(defun %remove-source-predicate-properties! (rulebase record)
-  (dolist (effect (%source-record-predicate-properties record))
-    (destructuring-bind (module predicate arity property) effect
-      (when (eq property
-                (%rulebase-predicate-property
-                 rulebase predicate arity module))
-        (%remove-rulebase-predicate-property!
-         rulebase predicate arity module)))))
-
-(defun %remove-source-table-declarations! (rulebase record)
-  (dolist (effect (%source-record-table-declarations record))
-    (destructuring-bind (module predicate arity owner) effect
-      (%remove-rulebase-table-declaration!
-       rulebase predicate arity owner module))))
-
-(defun %remove-source-artifacts! (rulebase canonical record)
-  (%remove-source-clauses! rulebase canonical)
-  (%remove-source-operators! rulebase record)
-  (%remove-source-predicate-properties! rulebase record)
-  (%remove-source-table-declarations! rulebase record))
-
 (defun %load-prolog-source-transaction (stream rulebase initializations)
   (let ((module +default-prolog-module+)
         (module-declared-p nil)
@@ -379,11 +39,9 @@
             (%read-source-term stream (rulebase-operator-table rulebase)))
         (unless present-p (return))
         (cond
-          ((and (consp term) (eq (first term) '?-))
+          ((%prolog-query-term-p term)
            (error "Queries are not consultable source forms: ~S." term))
-          ((and (consp term)
-                (eq (first term) (%prolog-symbol ":-"))
-                (= (length term) 2))
+          ((%prolog-directive-term-p term)
            (let ((directive (second term)))
              (if (and (consp directive) (eq (first directive) 'module))
                  (progn
@@ -447,8 +105,7 @@
   rulebase)
 
 (defun %load-prolog-pathnames-into-rulebase
-    (pathnames rulebase &optional (initializations (list '()))
-                          &key (if-loaded :reload))
+    (pathnames rulebase initializations &key (if-loaded :reload))
   (dolist (pathname pathnames rulebase)
     (%load-prolog-pathname-into-rulebase
      pathname rulebase initializations if-loaded)))
@@ -461,6 +118,8 @@
      (%load-prolog-pathnames-into-rulebase
       (list source) rulebase initializations :if-loaded if-loaded))
     ((and (listp source) (not (stringp source)))
+     ;; Exercised by every load_files/1 call (%source-file-pathnames always
+     ;; returns a list); sb-cover under-reports this tail call as partial.
      (%load-prolog-pathnames-into-rulebase
       source rulebase initializations :if-loaded if-loaded))
     (t

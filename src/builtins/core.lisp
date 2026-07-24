@@ -22,6 +22,42 @@
           (funcall *constraint-post-unify-hook* extended emit)
           (funcall emit extended)))))
 
+(defun %term-unify-sequence (pairs environment emit)
+  "EMIT the extension of ENVIRONMENT that unifies every (LEFT . RIGHT) pair
+in PAIRS, in order, or nothing if any pair fails to unify."
+  (labels ((unify-next (remaining current)
+             (if (endp remaining)
+                 (funcall emit current)
+                 (multiple-value-bind (extended ok)
+                     (unify (caar remaining) (cdar remaining) current)
+                   (when ok
+                     (unify-next (cdr remaining) extended))))))
+    (unify-next pairs environment)))
+
+(defmacro define-iso-builtin ((name &rest arguments) operation-name &body body)
+  "Define a builtin whose body starts by resolving its arguments against
+ENVIRONMENT under an ISO OPERATION-NAME context.  Each of ARGUMENTS is
+either a symbol -- a define-builtin parameter that also gets a
+RESOLVED-<ARGUMENT> binding via %TERM-RESOLVE -- or (SYMBOL :raw), a
+pure-output parameter left unresolved.  Binds OPERATION to the ISO atom
+for OPERATION-NAME, then splices in BODY."
+  (let* ((parameter-names (mapcar (lambda (argument)
+                                    (if (consp argument) (first argument) argument))
+                                  arguments))
+         (resolved-bindings
+           (loop for argument in arguments
+                 unless (and (consp argument) (eq (second argument) :raw))
+                   collect (let ((parameter (if (consp argument)
+                                                (first argument)
+                                                argument)))
+                             `(,(intern (format nil "RESOLVED-~A" parameter))
+                               (%term-resolve ,parameter environment))))))
+    `(define-builtin (,name ,@parameter-names) (rulebase environment depth emit)
+       (declare (cl:ignore rulebase depth))
+       (let* ((operation (%iso-atom ,operation-name))
+              ,@resolved-bindings)
+         ,@body))))
+
 (defun %proper-list-p (value)
   "True when VALUE is a finite proper list."
   (loop with tortoise = value
@@ -46,13 +82,11 @@
   (clause-head clause))
 
 (defun %entry-body-term (clause)
-  (if (null (clause-body clause))
-      'true
-      (let ((body (clause-body clause)))
-        (cond
-          ((null body) 'true)
-          ((null (rest body)) (first body))
-          (t (cons 'and body))))))
+  (let ((body (clause-body clause)))
+    (cond
+      ((null body) 'true)
+      ((null (rest body)) (first body))
+      (t (cons 'and body)))))
 
 (defun %freshen-dynamic-clause (clause)
   (%freshen-clause clause))
@@ -60,11 +94,20 @@
 (defun %builtin-predicate-p (predicate arity)
   (and (symbolp predicate) (%goal-solver predicate arity)))
 
+(defun %stored-clause-matches-predicate-p (stored predicate arity)
+  (multiple-value-bind (entry-predicate entry-arity)
+      (%entry-predicate-arity (%stored-clause-clause stored))
+    (and (eq predicate entry-predicate) (= arity entry-arity))))
+
+(defun %predicate-clause-matcher (predicate arity)
+  "Return a predicate matching a stored clause against PREDICATE/ARITY,
+shared by callers that check existence (SOME) or count matches (COUNT-IF)
+over one module's stored clauses."
+  (lambda (stored)
+    (%stored-clause-matches-predicate-p stored predicate arity)))
+
 (defun %rulebase-defines-predicate-p (rulebase predicate arity module)
-  (some (lambda (stored)
-          (multiple-value-bind (entry-predicate entry-arity)
-              (%entry-predicate-arity (%stored-clause-clause stored))
-            (and (eq predicate entry-predicate) (= arity entry-arity))))
+  (some (%predicate-clause-matcher predicate arity)
         (%rulebase-module-entries rulebase module)))
 
 (defun %ensure-dynamic-predicate (rulebase predicate arity goal environment
@@ -92,6 +135,24 @@
     (%raise-type-error "CALLABLE" term environment operation
                        "expected a callable term"))
   (%ensure-goal-form term))
+
+(defun %require-non-negative-integer (value environment operation predicate-indicator field-name)
+  "Validate that VALUE is a non-negative integer for PREDICATE-INDICATOR's
+FIELD-NAME argument, raising the matching ISO error; returns VALUE when valid."
+  (cond
+    ((logic-var-p value)
+     (%raise-instantiation-error
+      environment operation
+      (format nil "~A requires an instantiated ~A" predicate-indicator field-name)))
+    ((not (integerp value))
+     (%raise-type-error
+      "INTEGER" value environment operation
+      (format nil "~A ~A must be an integer" predicate-indicator field-name)))
+    ((minusp value)
+     (%raise-domain-error
+      "NOT_LESS_THAN_ZERO" value environment operation
+      (format nil "~A ~A must not be negative" predicate-indicator field-name)))
+    (t value)))
 
 (defun %dynamic-clause-head (term environment operation)
   "Validate TERM as a fact or rule and return its callable head."

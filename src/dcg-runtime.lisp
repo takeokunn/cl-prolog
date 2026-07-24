@@ -18,8 +18,7 @@
   (when (consp token) (cdr token)))
 
 (defun %dcg-sync-token-p (token)
-  (and (consp token)
-       (member (car token) *dcg-sync-tokens* :test #'eq)))
+  (member (%dcg-token-kind token) *dcg-sync-tokens* :test #'eq))
 
 (defun %skip-to-sync-token (tokens)
   "Drop TOKENS until one is a synchronization token."
@@ -49,16 +48,11 @@
                            (%solve-dcg-star rule midpoint stream-out
                                             rulebase extended depth emit))))))
 
-(define-builtin (dcg-token-match expected input rest) (rulebase environment depth emit)
-  (let ((tokens (logic-substitute input environment)))
-    (when (consp tokens)
-      (multiple-value-bind (extended ok)
-          (unify expected (%dcg-token-kind (first tokens)) environment)
-        (when ok
-          (%unify-emit rest (rest tokens) extended emit))))))
-
-(define-builtin (dcg-token-match-value expected-kind expected-value input rest)
-                (rulebase environment depth emit)
+(defun %dcg-match-token (expected-kind expected-value input rest environment emit)
+  "Match INPUT's first token against EXPECTED-KIND and EXPECTED-VALUE,
+unifying REST with the remaining tokens on success. A fresh, unbound
+EXPECTED-VALUE unifies with any token value, so this also implements a
+kind-only match."
   (let ((tokens (logic-substitute input environment)))
     (when (consp tokens)
       (multiple-value-bind (kind-env kind-ok)
@@ -69,10 +63,42 @@
             (when value-ok
               (%unify-emit rest (rest tokens) value-env emit))))))))
 
+(define-builtin (dcg-token-match expected input rest) (rulebase environment depth emit)
+  (declare (cl:ignore rulebase depth))
+  (%dcg-match-token expected (fresh-logic-variable) input rest environment emit))
+
+(define-builtin (dcg-token-match-value expected-kind expected-value input rest)
+                (rulebase environment depth emit)
+  (declare (cl:ignore rulebase depth))
+  (%dcg-match-token expected-kind expected-value input rest environment emit))
+
 (define-builtin (dcg-error-recovery input rest) (rulebase environment depth emit)
-  (%unify-emit rest
-               (%skip-to-sync-token (logic-substitute input environment))
-               environment emit))
+  (let ((tokens (logic-substitute input environment))
+        (operation (%iso-atom "DCG_ERROR_RECOVERY")))
+    (cond
+      ((logic-var-p tokens)
+       (%raise-instantiation-error
+        environment operation "The input token list must be instantiated"))
+      ((not (%proper-list-p tokens))
+       (loop with visited = (make-hash-table :test (function eq))
+             for tail = tokens then (cdr tail)
+             do (cond
+                  ((logic-var-p tail)
+                   (%raise-instantiation-error
+                    environment operation
+                    "The input token list must be fully instantiated"))
+                  ((not (consp tail))
+                   (%raise-type-error
+                    "LIST" tokens environment operation
+                    "The input must be a proper token list"))
+                  ((gethash tail visited)
+                   (%raise-type-error
+                    "LIST" tokens environment operation
+                    "The input must be a finite proper token list"))
+                  (t
+                   (setf (gethash tail visited) t)))))
+      (t
+       (%unify-emit rest (%skip-to-sync-token tokens) environment emit)))))
 
 (define-builtin (dcg-opt rule stream-in stream-out) (rulebase environment depth emit)
   (%prove-bindings/k (list rule stream-in stream-out)

@@ -90,6 +90,16 @@
                  (funcall emit extended)
                  (return-from requested-proof nil)))))))))
 
+(defmacro %with-restored-call-depth-limit
+    ((outer-token outer-remaining outer-used outer-depth-limited-p) &body body)
+  "Run BODY with the four call-depth-limit dynamic variables restored to
+the caller's OUTER-* values, undoing CALL_WITH_DEPTH_LIMIT's own binding."
+  `(let ((*call-depth-limit-token* ,outer-token)
+         (*call-depth-limit-remaining* ,outer-remaining)
+         (*call-depth-limit-used* ,outer-used)
+         (*depth-limited-search-p* ,outer-depth-limited-p))
+     ,@body))
+
 (define-builtin (call_with_depth_limit goal limit result)
     (rulebase environment depth emit)
   (let* ((operation (%iso-atom "CALL_WITH_DEPTH_LIMIT"))
@@ -112,32 +122,29 @@
         (%unify-emit result (%iso-atom "DEPTH_LIMIT_EXCEEDED")
                      environment emit)
         (let ((token (list '%call-depth-limit))
-          (outer-token *call-depth-limit-token*)
-          (outer-remaining *call-depth-limit-remaining*)
-          (outer-used *call-depth-limit-used*)
-          (outer-depth-limited-p *depth-limited-search-p*))
-      (let ((*call-depth-limit-token* token)
-            (*call-depth-limit-remaining* resolved-limit)
-            (*call-depth-limit-used* 0)
-            (*depth-limited-search-p* t))
-        (when (eq token
-                  (cl:catch token
-                    (%prove-bindings/k
-                     resolved-goal rulebase environment depth
-                     (lambda (extended)
-                       (let ((used *call-depth-limit-used*)
-                             (*call-depth-limit-token* outer-token)
-                             (*call-depth-limit-remaining* outer-remaining)
-                             (*call-depth-limit-used* outer-used)
-                             (*depth-limited-search-p* outer-depth-limited-p))
-                         (%unify-emit result used extended emit))))
-                    nil))
-          (let ((*call-depth-limit-token* outer-token)
-                (*call-depth-limit-remaining* outer-remaining)
-                (*call-depth-limit-used* outer-used)
-                (*depth-limited-search-p* outer-depth-limited-p))
-            (%unify-emit result (%iso-atom "DEPTH_LIMIT_EXCEEDED")
-                         environment emit))))))))
+              (outer-token *call-depth-limit-token*)
+              (outer-remaining *call-depth-limit-remaining*)
+              (outer-used *call-depth-limit-used*)
+              (outer-depth-limited-p *depth-limited-search-p*))
+          (let ((*call-depth-limit-token* token)
+                (*call-depth-limit-remaining* resolved-limit)
+                (*call-depth-limit-used* 0)
+                (*depth-limited-search-p* t))
+            (when (eq token
+                      (cl:catch token
+                        (%prove-bindings/k
+                         resolved-goal rulebase environment depth
+                         (lambda (extended)
+                           (let ((used *call-depth-limit-used*))
+                             (%with-restored-call-depth-limit
+                                 (outer-token outer-remaining outer-used
+                                  outer-depth-limited-p)
+                               (%unify-emit result used extended emit)))))
+                        nil))
+              (%with-restored-call-depth-limit
+                  (outer-token outer-remaining outer-used outer-depth-limited-p)
+                (%unify-emit result (%iso-atom "DEPTH_LIMIT_EXCEEDED")
+                             environment emit))))))))
 
 (defun %first-proof-environment (goal rulebase environment depth)
   "Return the first proof environment for GOAL and whether one exists."
@@ -153,6 +160,11 @@
          (return-from first-proof))))
     (values result matched-p)))
 
+(defparameter +cleanup-deterministic-builtin-names+
+  '("TRUE" "=" "UNIFY_WITH_OCCURS_CHECK" "==" "\\==")
+  "Builtin functor names known to yield at most one proof, so
+SETUP_CALL_CLEANUP's cleanup goal can skip its choice-point bookkeeping.")
+
 (defun %cleanup-goal-deterministic-p (goal)
   "Return true when GOAL is a builtin that cannot yield multiple proofs."
   (let ((name (and (consp goal)
@@ -160,8 +172,7 @@
                    (symbol-name (first goal)))))
     (or (and (symbolp goal)
              (string= (symbol-name goal) "TRUE"))
-        (member name '("TRUE" "=" "UNIFY_WITH_OCCURS_CHECK" "==" "\\==")
-                :test #'string=))))
+        (member name +cleanup-deterministic-builtin-names+ :test #'string=))))
 
 (defun %call-cleanup/k (setup goal cleanup rulebase environment depth emit
                         operation)

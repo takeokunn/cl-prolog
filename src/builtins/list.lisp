@@ -9,43 +9,48 @@
         (when ok
           (%unify-sequence (cdr pairs) extended continuation)))))
 
+(defmacro %unless-cyclic-list-cell ((resolved tail environment seen) &body body)
+  "Resolve TAIL through ENVIRONMENT into RESOLVED and run BODY, unless
+RESOLVED is a cons cell already seen in SEEN (an EQ hash-table) -- the
+shared cycle-safety guard opening every cyclic-list-tolerant list
+builtin's per-cell walk. Marks a fresh cons RESOLVED seen before running
+BODY."
+  `(let ((,resolved (%walk-term ,tail ,environment)))
+     (unless (and (consp ,resolved) (gethash ,resolved ,seen))
+       (when (consp ,resolved) (setf (gethash ,resolved ,seen) t))
+       ,@body)))
+
 (define-builtin (member item list-term) (rulebase environment depth emit)
   (declare (cl:ignore rulebase depth))
   (let ((seen (make-hash-table :test #'eq)))
     (labels ((visit (tail current-environment)
-               (let ((resolved (%walk-term tail current-environment)))
-                 (unless (and (consp resolved) (gethash resolved seen))
-                   (when (consp resolved)
-                     (setf (gethash resolved seen) t))
-                   (let ((head (fresh-logic-variable "?MEMBER-HEAD"))
-                         (rest (fresh-logic-variable "?MEMBER-TAIL")))
-                     (%unify-sequence
-                      (list (cons tail (cons head rest)))
-                      current-environment
-                      (lambda (extended)
-                        (%unify-emit item head extended emit)
-                        (visit rest extended))))))))
+               (%unless-cyclic-list-cell (resolved tail current-environment seen)
+                 (let ((head (fresh-logic-variable "?MEMBER-HEAD"))
+                       (rest (fresh-logic-variable "?MEMBER-TAIL")))
+                   (%unify-sequence
+                    (list (cons tail (cons head rest)))
+                    current-environment
+                    (lambda (extended)
+                      (%unify-emit item head extended emit)
+                      (visit rest extended)))))))
       (visit list-term environment))))
 
 (define-builtin (memberchk item list-term) (rulebase environment depth emit)
   (declare (cl:ignore rulebase depth))
   (let ((seen (make-hash-table :test #'eq)))
     (labels ((visit (tail current-environment)
-               (let ((resolved (%walk-term tail current-environment)))
-                 (unless (and (consp resolved) (gethash resolved seen))
-                   (when (consp resolved)
-                     (setf (gethash resolved seen) t))
-                   (let ((head (fresh-logic-variable "?MEMBERCHK-HEAD"))
-                         (rest (fresh-logic-variable "?MEMBERCHK-TAIL")))
-                     (%unify-sequence
-                      (list (cons tail (cons head rest)))
-                      current-environment
-                      (lambda (extended)
-                        (multiple-value-bind (matched ok)
-                            (unify item head extended)
-                          (if ok
-                              (funcall emit matched)
-                              (visit rest extended))))))))))
+               (%unless-cyclic-list-cell (resolved tail current-environment seen)
+                 (let ((head (fresh-logic-variable "?MEMBERCHK-HEAD"))
+                       (rest (fresh-logic-variable "?MEMBERCHK-TAIL")))
+                   (%unify-sequence
+                    (list (cons tail (cons head rest)))
+                    current-environment
+                    (lambda (extended)
+                      (multiple-value-bind (matched ok)
+                          (unify item head extended)
+                        (if ok
+                            (funcall emit matched)
+                            (visit rest extended)))))))))
       (visit list-term environment))))
 
 (define-builtin (select item list-term rest-term)
@@ -86,24 +91,21 @@
                              environment operation
                              "The list index is below the valid range")))
     (labels ((visit (tail position current-environment)
-               (let ((resolved (%walk-term tail current-environment)))
-                 (unless (and (consp resolved) (gethash resolved seen))
-                   (when (consp resolved)
-                     (setf (gethash resolved seen) t))
-                   (let ((head (fresh-logic-variable "?NTH-HEAD"))
-                         (rest (fresh-logic-variable "?NTH-TAIL")))
-                     (%unify-sequence
-                      (list (cons tail (cons head rest)))
-                      current-environment
-                      (lambda (extended)
-                        (when (or (logic-var-p resolved-index)
-                                  (= resolved-index position))
-                          (%unify-sequence
-                           (list (cons index position) (cons item head))
-                           extended emit))
-                        (when (or (logic-var-p resolved-index)
-                                  (> resolved-index position))
-                          (visit rest (1+ position) extended)))))))))
+               (%unless-cyclic-list-cell (resolved tail current-environment seen)
+                 (let ((head (fresh-logic-variable "?NTH-HEAD"))
+                       (rest (fresh-logic-variable "?NTH-TAIL")))
+                   (%unify-sequence
+                    (list (cons tail (cons head rest)))
+                    current-environment
+                    (lambda (extended)
+                      (when (or (logic-var-p resolved-index)
+                                (= resolved-index position))
+                        (%unify-sequence
+                         (list (cons index position) (cons item head))
+                         extended emit))
+                      (when (or (logic-var-p resolved-index)
+                                (> resolved-index position))
+                        (visit rest (1+ position) extended))))))))
       (visit list-term offset environment))))
 
 (define-builtin (nth0 index list-term item) (rulebase environment depth emit)
@@ -118,21 +120,18 @@
   (declare (cl:ignore rulebase depth))
   (let ((seen (make-hash-table :test #'eq)))
     (labels ((visit (tail current-environment)
-               (let ((resolved (%walk-term tail current-environment)))
-                 (unless (and (consp resolved) (gethash resolved seen))
-                   (when (consp resolved)
-                     (setf (gethash resolved seen) t))
-                   (let ((head (fresh-logic-variable "?LAST-HEAD"))
-                         (rest (fresh-logic-variable "?LAST-TAIL")))
-                     (%unify-sequence
-                      (list (cons tail (cons head rest)) (cons rest nil)
-                            (cons item head))
-                      current-environment emit)
-                     (%unify-sequence
-                      (list (cons tail (cons head rest)))
-                      current-environment
-                      (lambda (extended)
-                        (visit rest extended))))))))
+               (%unless-cyclic-list-cell (resolved tail current-environment seen)
+                 (let ((head (fresh-logic-variable "?LAST-HEAD"))
+                       (rest (fresh-logic-variable "?LAST-TAIL")))
+                   (%unify-sequence
+                    (list (cons tail (cons head rest)) (cons rest nil)
+                          (cons item head))
+                    current-environment emit)
+                   (%unify-sequence
+                    (list (cons tail (cons head rest)))
+                    current-environment
+                    (lambda (extended)
+                      (visit rest extended)))))))
       (visit list-term environment))))
 
 (define-builtin (is_list list-term) (rulebase environment depth emit)
@@ -149,24 +148,22 @@
   (declare (cl:ignore rulebase depth))
   (let ((seen (make-hash-table :test #'eq)))
     (labels ((join (left-tail result-tail current-environment)
-               (let ((resolved (%walk-term left-tail current-environment)))
-                 (unless (and (consp resolved) (gethash resolved seen))
-                   (when (consp resolved)
-                     (setf (gethash resolved seen) t))
-                   ;; append([], Ys, Ys).
+               (%unless-cyclic-list-cell
+                   (resolved left-tail current-environment seen)
+                 ;; append([], Ys, Ys).
+                 (%unify-sequence
+                  (list (cons left-tail nil) (cons right result-tail))
+                  current-environment emit)
+                 ;; append([X|Xs], Ys, [X|Zs]) :- append(Xs, Ys, Zs).
+                 (let ((head (fresh-logic-variable "?APPEND-HEAD"))
+                       (left-rest (fresh-logic-variable "?APPEND-LEFT"))
+                       (result-rest (fresh-logic-variable "?APPEND-RESULT")))
                    (%unify-sequence
-                    (list (cons left-tail nil) (cons right result-tail))
-                    current-environment emit)
-                   ;; append([X|Xs], Ys, [X|Zs]) :- append(Xs, Ys, Zs).
-                   (let ((head (fresh-logic-variable "?APPEND-HEAD"))
-                         (left-rest (fresh-logic-variable "?APPEND-LEFT"))
-                         (result-rest (fresh-logic-variable "?APPEND-RESULT")))
-                     (%unify-sequence
-                      (list (cons left-tail (cons head left-rest))
-                            (cons result-tail (cons head result-rest)))
-                      current-environment
-                      (lambda (extended)
-                        (join left-rest result-rest extended))))))))
+                    (list (cons left-tail (cons head left-rest))
+                          (cons result-tail (cons head result-rest)))
+                    current-environment
+                    (lambda (extended)
+                      (join left-rest result-rest extended)))))))
       (join left result environment))))
 
 (define-builtin (reverse forward backward) (rulebase environment depth emit)

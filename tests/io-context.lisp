@@ -37,42 +37,35 @@
                    :output nil "TEST")))
     (cl-prolog::%close-all-owned-prolog-streams! context)))
 (deftest io-context-stream-handles-do-not-intern-symbols ()
-  (labels ((owned-symbol-count ()
-             (let ((package (find-package '#:cl-prolog)))
-               (loop for symbol being each symbol of package
-                     count (eq package (symbol-package symbol))))))
-    (let ((alias (cl-prolog::%prolog-atom-symbol "stable_stream_alias")))
-      (let ((before (owned-symbol-count)))
-        (dotimes (index 32)
-          (declare (ignore index))
-          (let* ((context (cl-prolog::make-prolog-io-context))
-                 (entry
-                   (cl-prolog::%register-prolog-stream!
-                    context (make-string-output-stream) :output :alias alias))
-                 (handle (cl-prolog::prolog-stream-handle entry)))
-            (unwind-protect
-                 (progn
-                   (is (null (symbol-package handle)))
-                   (is-equal "$stream_4" (symbol-name handle))
-                   (is (eq entry
-                           (cl-prolog::%resolve-prolog-stream
-                            context handle :output nil "TEST")))
-                   (is (eq entry
-                           (cl-prolog::%resolve-prolog-stream
-                            context alias :output nil "TEST"))))
-              (cl-prolog::%close-all-owned-prolog-streams! context))))
-        (is-equal before (owned-symbol-count)))))))
+  (let ((alias (cl-prolog::%prolog-atom-symbol "stable_stream_alias")))
+    (let ((before (package-owned-symbol-count '#:cl-prolog)))
+      (dotimes (index 32)
+        (declare (ignorable index))
+        (let* ((context (cl-prolog::make-prolog-io-context))
+               (entry
+                 (cl-prolog::%register-prolog-stream!
+                  context (make-string-output-stream) :output :alias alias))
+               (handle (cl-prolog::prolog-stream-handle entry)))
+          (with-closed-io-context (context)
+            (is (null (symbol-package handle)))
+            (is-equal "$stream_4" (symbol-name handle))
+            (is (eq entry
+                    (cl-prolog::%resolve-prolog-stream
+                     context handle :output nil "TEST")))
+            (is (eq entry
+                    (cl-prolog::%resolve-prolog-stream
+                     context alias :output nil "TEST"))))))
+      (is-equal before (package-owned-symbol-count '#:cl-prolog))))))
 
 (deftest io-context-rejects-duplicate-alias ()
   (let* ((context (cl-prolog::make-prolog-io-context))
          (alias (cl-prolog::%prolog-atom-symbol "duplicate_output")))
     (cl-prolog::%register-prolog-stream!
      context (make-string-output-stream) :output :alias alias)
-    (unwind-protect
-         (signals-condition cl-prolog::prolog-permission-error
-           (cl-prolog::%register-prolog-stream!
-            context (make-string-output-stream) :output :alias alias))
-      (cl-prolog::%close-all-owned-prolog-streams! context))))
+    (with-closed-io-context (context)
+      (signals-condition cl-prolog::prolog-permission-error
+        (cl-prolog::%register-prolog-stream!
+         context (make-string-output-stream) :output :alias alias)))))
 
 (deftest io-context-rejects-unknown-stream ()
   (let ((context (cl-prolog::make-prolog-io-context)))
@@ -85,12 +78,30 @@
   (let* ((context (cl-prolog::make-prolog-io-context))
          (entry (cl-prolog::%register-prolog-stream!
                  context (make-string-input-stream "") :input)))
-    (unwind-protect
-         (signals-condition cl-prolog::prolog-permission-error
-           (cl-prolog::%resolve-prolog-stream
-            context (cl-prolog::prolog-stream-handle entry)
-            :output nil "TEST"))
-      (cl-prolog::%close-all-owned-prolog-streams! context))))
+    (with-closed-io-context (context)
+      (signals-condition cl-prolog::prolog-permission-error
+        (cl-prolog::%resolve-prolog-stream
+         context (cl-prolog::prolog-stream-handle entry)
+         :output nil "TEST"))))
+  (let* ((context (cl-prolog::make-prolog-io-context))
+         (entry (cl-prolog::%register-prolog-stream!
+                 context (make-string-output-stream) :output)))
+    (with-closed-io-context (context)
+      (signals-condition cl-prolog::prolog-permission-error
+        (cl-prolog::%resolve-prolog-stream
+         context (cl-prolog::prolog-stream-handle entry)
+         :input nil "TEST")))))
+
+(deftest io-context-rejects-malformed-registration-arguments ()
+  (let ((context (cl-prolog::make-prolog-io-context)))
+    (signals-condition cl-prolog::prolog-type-error
+      (cl-prolog::%register-prolog-stream! context 'cl-prolog::not-a-stream :output))
+    (signals-condition cl-prolog::prolog-type-error
+      (cl-prolog::%register-prolog-stream!
+       context (make-string-output-stream) :output :alias 123))
+    (signals-condition cl-prolog::prolog-domain-error
+      (cl-prolog::%register-prolog-stream!
+       context (make-string-output-stream) :output :type :bogus))))
 
 (deftest io-context-closes-only-owned-streams ()
   (let* ((standard-output (make-string-output-stream))
@@ -130,14 +141,12 @@
          (stream (make-string-output-stream))
          (entry (cl-prolog::%register-prolog-stream!
                  first-context stream :append)))
-    (unwind-protect
-         (progn
-           (is-equal :append (cl-prolog::prolog-stream-mode entry))
-           (signals-condition cl-prolog::prolog-existence-error
-             (cl-prolog::%resolve-prolog-stream
-              second-context entry :output nil "TEST"))
-           (close stream)
-           (signals-condition cl-prolog::prolog-existence-error
-             (cl-prolog::%resolve-prolog-stream
-              first-context entry :output nil "TEST")))
-      (cl-prolog::%close-all-owned-prolog-streams! first-context))))
+    (with-closed-io-context (first-context)
+      (is-equal :append (cl-prolog::prolog-stream-mode entry))
+      (signals-condition cl-prolog::prolog-existence-error
+        (cl-prolog::%resolve-prolog-stream
+         second-context entry :output nil "TEST"))
+      (close stream)
+      (signals-condition cl-prolog::prolog-existence-error
+        (cl-prolog::%resolve-prolog-stream
+         first-context entry :output nil "TEST")))))

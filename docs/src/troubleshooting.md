@@ -65,6 +65,25 @@ This has two meanings depending on the grammar:
 
 Use `phrase-all` when you need to inspect every successful remainder stream.
 
+## Parsing signalled `prolog-parser-resource-error`
+
+The source exceeded one of the parser resource limits (source length, nesting
+depth, token count, a lexeme size, or the interned-symbol count). Read
+`prolog-parser-resource-error-resource` to see which limit, and `-limit`,
+`-observed`, and `-position` for the details.
+
+- for legitimately large trusted input, rebind the relevant special (for
+  example `*max-prolog-source-characters*`) higher, or to `nil` to disable that
+  one limit
+- inside a running `consult`/`load_files` goal the same breach surfaces as a
+  catchable ISO `resource_error/1` term rather than this condition
+- `*max-prolog-interned-symbols*` is cumulative across parse calls in the
+  process; if a long-lived process trips it, rebind it or reset the parser's
+  symbol table
+
+See [API reference](api-reference.md#parser-resource-limits) for every special
+and its default.
+
 ## Nix checks fail only in a clean source tree
 
 Check whether the file is tracked in git. The release checks intentionally

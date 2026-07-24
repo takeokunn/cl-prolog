@@ -27,14 +27,18 @@
 (define-condition prolog-runtime-error (prolog-exception) ()
   (:documentation "Base condition for engine-generated ISO Prolog errors."))
 
-(define-condition prolog-instantiation-error (prolog-runtime-error) ())
-(define-condition prolog-type-error (prolog-runtime-error) ())
-(define-condition prolog-domain-error (prolog-runtime-error) ())
-(define-condition prolog-permission-error (prolog-runtime-error) ())
-(define-condition prolog-existence-error (prolog-runtime-error) ())
-(define-condition prolog-evaluation-error (prolog-runtime-error) ())
-(define-condition prolog-resource-error (prolog-runtime-error) ())
-(define-condition prolog-syntax-error (prolog-runtime-error) ())
+(defmacro define-prolog-runtime-error-conditions (&rest names)
+  "Define each of NAMES as an empty PROLOG-RUNTIME-ERROR subtype, one per
+ISO error category (instantiation, type, domain, permission, existence,
+evaluation, resource, syntax)."
+  `(progn
+     ,@(mapcar (lambda (name) `(define-condition ,name (prolog-runtime-error) ()))
+               names)))
+
+(define-prolog-runtime-error-conditions
+  prolog-instantiation-error prolog-type-error prolog-domain-error
+  prolog-permission-error prolog-existence-error prolog-evaluation-error
+  prolog-resource-error prolog-syntax-error)
 
 (define-condition invalid-max-depth-error (error)
   ((value :initarg :value :reader invalid-max-depth-error-value))
@@ -65,14 +69,11 @@ Deliberately not a PROLOG-EXCEPTION: catch/3 must not intercept it."))
     (error 'invalid-max-depth-error :value value))
   value)
 
-(define-condition invalid-goal-error (prolog-type-error)
-  ((goal :initarg :goal :reader invalid-goal-error-goal)
-   (reason :initarg :reason :reader invalid-goal-error-reason))
-  (:report (lambda (condition stream)
-             (format stream "Invalid Prolog goal ~S: ~A."
-                     (invalid-goal-error-goal condition)
-                     (invalid-goal-error-reason condition))))
-  (:documentation "Signalled when a goal is structurally unusable."))
+(define-contextual-error-condition invalid-goal-error (prolog-type-error)
+  (goal invalid-goal-error-goal)
+  (reason invalid-goal-error-reason)
+  "Invalid Prolog goal ~S: ~A."
+  "Signalled when a goal is structurally unusable.")
 
 (declaim (ftype function %iso-atom %iso-term %iso-error-term))
 
@@ -167,11 +168,9 @@ Deliberately not a PROLOG-EXCEPTION: catch/3 must not intercept it."))
      environment operation description)))
 
 (defun %raise-prolog-exception (term environment)
-  "Raise TERM together with the binding environment active at THROW/1."
-  (if (logic-var-p term)
-      (%raise-instantiation-error environment (%iso-atom "THROW")
-                                  "throw/1 requires an instantiated term")
-      (error 'prolog-exception :term term :environment environment)))
+  "Raise TERM together with the binding environment active at THROW/1.
+Callers must have already rejected an unbound TERM."
+  (error 'prolog-exception :term term :environment environment))
 
 ;;; Builtin goal dispatch
 
@@ -231,23 +230,48 @@ variadic builtins dispatch only at or above their required arity.
 BODY must call EMIT with one extended environment per solution."
   (multiple-value-bind (minimum maximum)
       (%argument-list-arity argument-list)
-    (let ((goal (gensym "GOAL"))
-          (names (if (listp name) name (list name))))
+    (let* ((goal (gensym "GOAL"))
+           (names (if (listp name) name (list name)))
+           (context-variables (list rulebase environment depth emit))
+           (sanitized-body
+             (loop for form in body
+                   append
+                   (if (and (consp form) (eq (first form) (quote declare)))
+                       (let ((specifiers
+                               (loop for specifier in (rest form)
+                                     for declaration = (and (consp specifier)
+                                                            (first specifier))
+                                     for variables = (if (member declaration
+                                                                   (quote (ignore ignorable)))
+                                                         (remove-if
+                                                          (lambda (variable)
+                                                            (and (member variable context-variables)
+     (not (member variable argument-list))))
+                                                          (rest specifier))
+                                                         (rest specifier))
+                                     when (or (not (member declaration
+                                                           (quote (ignore ignorable))))
+                                              variables)
+                                       collect (cons declaration variables))))
+                         (if specifiers
+                             (list (cons (quote declare) specifiers))
+                             nil))
+                       (list form)))))
       `(progn
          ,@(mapcar
             (lambda (builtin-name)
               `(eval-when (:load-toplevel :execute)
                  (%register-builtin-solver!
-                  ',builtin-name ,minimum ,maximum
+                  (quote ,builtin-name) ,minimum ,maximum
                   (lambda (,goal ,rulebase ,environment ,depth ,emit)
                     (declare (ignorable ,rulebase ,environment ,depth ,emit))
                     ;; Dispatch guarantees the arity matches: fixed builtins
                     ;; are keyed by their exact indicator, variadic ones only
                     ;; receive goals at or above their required arity.
                     (destructuring-bind ,argument-list (rest ,goal)
-                      ,@body)))))
+                      ,@sanitized-body)))))
             names)
-         ',(first names)))))
+         (quote ,(first names))))))
 
 ;;; Foreign predicate dispatch
 

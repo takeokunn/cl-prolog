@@ -11,7 +11,9 @@ nix develop        # sbcl, cl-weave, paredit-cli, nixpkgs-fmt, mdbook
 
 On Darwin and other platforms, the flake does not expose a development shell,
 package, check, or app. Load the local checkout with ASDF instead and use CI as
-the authoritative Linux Nix verification path.
+the authoritative Linux Nix verification path. Do not treat a successful
+`nix flake check` on Darwin as verification: Nix may omit every Linux-only
+check and still exit successfully.
 
 ## Examples
 
@@ -30,7 +32,7 @@ not load the `cl-prolog` package.
 ## Testing
 
 The `cl-prolog/tests` ASDF system depends on
-[cl-weave](https://github.com/takeokunn/cl-weave) and runs the complete
+[cl-weave](https://github.com/nerima-lisp/cl-weave) and runs the complete
 regression suite, including isolated table cases, per-query cases, fixtures,
 and generated relational properties. Nix provides the self-contained runner:
 
@@ -39,8 +41,17 @@ nix run .
 ```
 
 All flake outputs, including the packaged Nix app and checks, are supported on
-Linux only. On Darwin, use the ASDF workflow for library development and rely
-on CI for the Linux `nix flake check` verification path.
+Linux only. On Darwin, ensure `cl-weave` is discoverable through ASDF and run:
+
+```sh
+sbcl --non-interactive \
+  --eval '(require :asdf)' \
+  --load cl-prolog.asd \
+  --eval '(asdf:test-system :cl-prolog)'
+```
+
+Then rely on CI for the Linux `nix flake check` verification path. A local
+Darwin invocation may report success after omitting all supported systems.
 
 Pass any cl-weave CLI options after `--`; for example, to produce a JSON
 result:
@@ -56,8 +67,9 @@ nix flake check
 ```
 
 This also runs `checks.paredit-lint`, a structural parse gate over every
-tracked `.lisp`/`.asd` file, and `checks.documentation`, which builds the
-mdBook site and fails if it does not produce a valid `index.html`.
+tracked `.lisp`/`.asd` file; `checks.examples`, which loads every shipped
+example through ASDF; and `checks.documentation`, which builds the mdBook site
+and fails if it does not produce a valid `index.html`.
 
 ### Query test helpers
 

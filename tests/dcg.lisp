@@ -52,21 +52,48 @@
               (query-prolog rulebase '(epsilon-run (:noun) ?rest)))))
 
 (deftest-queries dcg-token-builtins ((make-rulebase))
-  ((dcg-token-match :noun (:noun :verb) ?rest)  => (((?rest . (:verb)))))
-  ((dcg-token-match :noun ((:noun . cat) :verb) ?rest) => (((?rest . (:verb)))))
+  ((dcg-token-match :noun (:noun :verb) ?rest)  :ordered (((?rest . (:verb)))))
+  ((dcg-token-match :noun ((:noun . cat) :verb) ?rest) :ordered (((?rest . (:verb)))))
   ((dcg-token-match :noun (:verb) ?rest)        :fails)
   ((dcg-token-match :noun () ?rest)             :fails)
-  ((dcg-token-match ?kind (:noun) ?rest)        => (((?kind . :noun) (?rest))))
-  ((dcg-token-match-value :name "alice" ((:name . "alice")) ?rest) => (((?rest))))
+  ((dcg-token-match ?kind (:noun) ?rest)        :ordered (((?kind . :noun) (?rest))))
+  ((dcg-token-match-value :name "alice" ((:name . "alice")) ?rest) :ordered (((?rest))))
   ((dcg-token-match-value :name "bob" ((:name . "alice")) ?rest)   :fails)
   ((dcg-token-match-value :age 30 (:age) ?rest) :fails)
   ((dcg-token-match-value :name ?v () ?rest)    :fails))
 
-(deftest-queries dcg-error-recovery ((make-rulebase))
-  ((dcg-error-recovery (:noise (:t-rparen . ")") :tail) ?rest)
-   => (((?rest . ((:t-rparen . ")") :tail)))))
-  ((dcg-error-recovery (:noise :more-noise) ?rest) => (((?rest))))
-  ((dcg-error-recovery () ?rest)                   => (((?rest)))))
+(deftest dcg-error-recovery ()
+  (let ((rulebase (make-rulebase)))
+    (assert-query rulebase
+                  (dcg-error-recovery (:noise (:t-rparen . ")") :tail) ?rest)
+                  :ordered (((?rest . ((:t-rparen . ")") :tail)))))
+    (assert-query rulebase
+                  (dcg-error-recovery (:noise :t-rparen :tail) ?rest)
+                  :ordered (((?rest . (:t-rparen :tail)))))
+    (assert-query rulebase
+                  (dcg-error-recovery (:noise :t-semi :tail) ?rest)
+                  :ordered (((?rest . (:t-semi :tail)))))
+    (assert-query rulebase
+                  (dcg-error-recovery (:noise :t-eof :tail) ?rest)
+                  :ordered (((?rest . (:t-eof :tail)))))
+    (assert-query rulebase
+                  (dcg-error-recovery (:noise :more-noise) ?rest)
+                  :ordered (((?rest))))
+    (assert-query rulebase (dcg-error-recovery () ?rest) :ordered (((?rest))))
+    (dolist (goal (quote ((dcg-error-recovery ?input ?rest)
+                         (dcg-error-recovery (:noise . ?tail) ?rest)
+                         (dcg-error-recovery (:t-rparen . ?tail) ?rest))))
+      (signals-condition prolog-instantiation-error
+        (query-prolog rulebase goal)))
+    (dolist (goal (quote ((dcg-error-recovery atom ?rest)
+                         (dcg-error-recovery (:noise . tail) ?rest))))
+      (signals-condition prolog-type-error
+        (query-prolog rulebase goal)))
+    (let ((cyclic (list :noise :t-rparen)))
+      (setf (cddr cyclic) cyclic)
+      (signals-condition prolog-type-error
+        (query-prolog rulebase
+                      (list (quote dcg-error-recovery) cyclic (quote ?rest)))))))
 
 (deftest dcg-brace-guards ()
   (let ((rulebase
@@ -117,3 +144,15 @@
     (is (prolog-succeeds-p rulebase '(phrase p (c))))
     (is (not (prolog-succeeds-p rulebase '(phrase p (a c)))))
     (is (not (prolog-succeeds-p rulebase '(phrase p (b)))))))
+
+(deftest prolog-dcg-goal-handles-empty-and-flat-conjunction-bodies ()
+  (let* ((empty-clause (cl-prolog::%expand-prolog-dcg-clause 'empty-rule nil))
+         (flat-clause
+           (cl-prolog::%expand-prolog-dcg-clause
+            'flat-rule
+            '(and (dcg-terminals (a)) (dcg-terminals (b)) (dcg-terminals (c)))))
+         (rulebase (make-rulebase :clauses (list empty-clause flat-clause))))
+    (is (prolog-succeeds-p rulebase '(phrase empty-rule ())))
+    (is (not (prolog-succeeds-p rulebase '(phrase empty-rule (a)))))
+    (is (prolog-succeeds-p rulebase '(phrase flat-rule (a b c))))
+    (is (not (prolog-succeeds-p rulebase '(phrase flat-rule (a b)))))))

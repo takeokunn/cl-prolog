@@ -33,4 +33,8 @@ dispatches like `cond` over queries.
 - `:max-depth` optionally bounds user-rule resolution (the default is `NIL`,
   meaning unbounded); exhaustion signals `prolog-depth-limit-exceeded`;
   `0` disables rule expansion entirely, facts still match
-- `:limit` must be `nil` or a positive integer
+- `:limit` must be `nil` or a positive integer; any other value signals a
+  `type-error`
+- the option list is validated: an odd-length list or an unrecognized keyword
+  signals a `program-error`, so a mistyped option fails loudly instead of being
+  silently ignored

@@ -23,9 +23,19 @@ Lisp package symbols.
 - **Arithmetic:** `(is ?x expr)`, `(=:= a b)`, `(=\= a b)`, `(< a b)`,
   `(=< a b)`, `(> a b)`, and `(>= a b)` evaluate arithmetic expressions and
   compare their numeric values.
-- **Lists:** `(member ?x list)`, `(append ?a ?b ?c)`, `(reverse ?a ?b)`, and
-  `(length ?l ?n)` define relations over proper and partially instantiated
-  lists.
+- **Lists:** `(member ?x list)`, `(memberchk ?x list)`, `(append ?a ?b ?c)`,
+  `(reverse ?a ?b)`, `(length ?l ?n)`, `(select ?x ?list ?rest)`,
+  `(nth0 ?i ?list ?x)`, `(nth1 ?i ?list ?x)`, `(last ?list ?x)`, and
+  `(is_list ?l)` define relations over proper and partially instantiated
+  lists. `memberchk/2` commits to the first match.
+- **Atoms and text:** `(atom_length ?atom ?len)`,
+  `(atom_concat ?a ?b ?whole)`, `(sub_atom ?atom ?b ?l ?a ?sub)`,
+  `(atom_chars ?atom ?chars)`, `(atom_codes ?atom ?codes)`,
+  `(char_code ?char ?code)`, `(number_chars ?n ?chars)`,
+  `(number_codes ?n ?codes)`, and `(atom_number ?atom ?n)` inspect and convert
+  atoms, character lists, code lists, and numbers. These are ISO string
+  predicates; they raise the corresponding instantiation or type error when
+  under-instantiated or given the wrong term kind.
 - **Finite domains:** `(#= a b)`, `(#\= a b)`, `(#< a b)`, `(#=< a b)`,
   `(#> a b)`, `(#>= a b)`, `(in x range)`, and `(indomain x)` constrain
   integers and enumerate finite-domain solutions.

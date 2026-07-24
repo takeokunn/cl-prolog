@@ -89,6 +89,24 @@
     (cons (mapcar #'normalize-error-data term))
     (t term)))
 
+(defun %read-prolog-query (rulebase format-control &rest format-arguments)
+  "Format FORMAT-CONTROL with FORMAT-ARGUMENTS (if any) and read the result
+as a Prolog query term using RULEBASE's operator table."
+  (read-prolog-term (apply #'format nil format-control format-arguments)
+                     (cl-prolog::rulebase-operator-table rulebase)))
+
+(defun query-error-summary (rulebase goal &key with-data)
+  "Run GOAL against RULEBASE, returning NIL on success or the signalled
+condition's type on a Prolog runtime error.  WITH-DATA also returns the
+condition's normalized ISO error-term payload as a second list element."
+  (handler-case
+      (progn (query-prolog rulebase goal) nil)
+    (prolog-runtime-error (condition)
+      (if with-data
+          (list (type-of condition)
+                (normalize-error-data (second (prolog-exception-term condition))))
+          (type-of condition)))))
+
 (defun %symbol-export-assertion (name package-name exported-p)
   "Compile a package export assertion for NAME in PACKAGE-NAME."
   (let ((message (if exported-p
@@ -105,6 +123,20 @@
 (defmacro signals-error (form &optional message)
   (declare (ignore message))
   `(cl-weave:expect (lambda () ,form) :to-throw))
+
+(defmacro with-closed-io-context ((context) &body body)
+  "Run BODY, then close every stream CONTEXT owns, even if BODY errors."
+  `(unwind-protect (progn ,@body)
+     (cl-prolog::%close-all-owned-prolog-streams! ,context)))
+
+(defun package-owned-symbol-count (package-designator)
+  "Return the number of symbols PACKAGE-DESIGNATOR's package owns (interns
+directly, excluding symbols merely inherited via :USE) -- the before/after
+invariant interning-avoidance security tests check around a rejected or
+speculative identifier, to assert it was never interned as a side effect."
+  (let ((package (find-package package-designator)))
+    (loop for symbol being each symbol of package
+          count (eq package (symbol-package symbol)))))
 
 (defun %table-spec-assertion (spec)
   "Compile one table SPEC into an assertion form."
