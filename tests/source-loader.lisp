@@ -1,4 +1,7 @@
-;;;; Standalone Prolog source loading contract.
+;;;; Source-loading fixtures, input media, and directive/rollback atomicity
+;;;; tests.  consult/load_files/ensure_loaded semantics live in
+;;;; source-loader-transactions.lisp; interning/resource-error safety in
+;;;; source-loader-limits.lisp.
 
 (in-package #:cl-prolog.tests)
 
@@ -8,6 +11,11 @@
                   :type "pl")
    (truename ".")))
 
+(defun rewrite-prolog-file! (pathname text)
+  "Overwrite PATHNAME's contents with TEXT, superseding any existing file."
+  (with-open-file (output pathname :direction :output :if-exists :supersede)
+    (write-string text output)))
+
 (defun %call-with-temporary-prolog-files (sources function)
   (let ((pathnames (loop repeat (length sources)
                          collect (%temporary-prolog-pathname))))
@@ -15,10 +23,7 @@
          (progn
            (loop for pathname in pathnames
                  for source in sources
-                 do (with-open-file (output pathname
-                                            :direction :output
-                                            :if-exists :supersede)
-                      (write-string source output)))
+                 do (rewrite-prolog-file! pathname source))
            (funcall function pathnames))
       (dolist (pathname pathnames)
         (when (probe-file pathname)
@@ -70,9 +75,7 @@
      (consult-prolog input rulebase))))
 
 (defun %source-query-succeeds-p (rulebase source)
-  (prolog-succeeds-p
-   rulebase
-   (read-prolog-term source (cl-prolog::rulebase-operator-table rulebase))))
+  (prolog-succeeds-p rulebase (%read-prolog-query rulebase source)))
 
 (defun %source-list-query-succeeds-p (rulebase sources query-format)
   "Check that QUERY-FORMAT succeeds when SOURCES are rendered as a Prolog list."
@@ -167,6 +170,24 @@
      rulebase
      "phrase(token(rejected), [rejected])")))
 
+(deftest source-loader-expands-dcg-rules-with-empty-and-cut-bodies ()
+  (let ((rulebase
+          (consult-prolog
+           (format nil
+                   "epsilon_rule --> [].~%~
+                    triple --> [a], [b], [c].~%~
+                    cut_rule --> [a], !, [b].~%~
+                    cut_rule --> [a], [x]."))))
+    (%source-queries-succeed-p
+     rulebase
+     "phrase(epsilon_rule, [])"
+     "phrase(triple, [a, b, c])"
+     "phrase(cut_rule, [a, b])")
+    (%source-queries-fail-p
+     rulebase
+     "phrase(epsilon_rule, [x])"
+     "phrase(cut_rule, [a, x])")))
+
 (deftest-table source-loader-rejects-non-consult-forms ()
   (:signals (consult-prolog "?- true.")
             "Queries are not consultable source forms")
@@ -174,6 +195,112 @@
             "Unknown directives must not be ignored")
   (:signals (consult-prolog ":- op(1300, xfx, invalid).")
             "Invalid directives fail during validation"))
+
+;; %apply-source-directive! validates each directive's shape before acting on
+;; it; these cases hand-build malformed directive terms directly (bypassing
+;; the parser) to exercise every arity/shape guard.
+(deftest-table source-directive-validates-arity-and-shape ()
+  (:signals (cl-prolog::%apply-source-directive!
+             'cl-prolog::not-a-list-goal (make-rulebase) (list '()) 'cl-prolog::user)
+            "a non-cons goal must be rejected")
+  (:signals (cl-prolog::%apply-source-directive!
+             '(cl-prolog::op 500 cl-prolog::yfx) (make-rulebase) (list '())
+             'cl-prolog::user)
+            "op directive must supply priority, specifier, and name")
+  (:signals (cl-prolog::%apply-source-directive!
+             '(cl-prolog::op 500 42 cl-prolog::the_operator) (make-rulebase)
+             (list '()) 'cl-prolog::user)
+            "op specifier must be an atom, not a number")
+  (:signals (cl-prolog::%apply-source-directive!
+             '(cl-prolog::dynamic cl-prolog::a/1 cl-prolog::b/1) (make-rulebase)
+             (list '()) 'cl-prolog::user)
+            "dynamic directive must supply exactly one predicate indicator")
+  (:signals (cl-prolog::%apply-source-directive!
+             '(cl-prolog::table cl-prolog::a/1 cl-prolog::b/1) (make-rulebase)
+             (list '()) 'cl-prolog::user)
+            "table directive must supply exactly one predicate indicator")
+  (:signals (cl-prolog::%apply-source-directive!
+             '(cl-prolog::use_module cl-prolog::a cl-prolog::b cl-prolog::c
+               cl-prolog::d)
+             (make-rulebase) (list '()) 'cl-prolog::user)
+            "use_module directive must supply 1-2 trailing arguments")
+  (:signals (cl-prolog::%apply-source-directive!
+             '(cl-prolog::initialization cl-prolog::goal cl-prolog::extra)
+             (make-rulebase) (list '()) 'cl-prolog::user)
+            "initialization directive must supply exactly one goal")
+  (:signals (cl-prolog::%apply-source-directive!
+             '(cl-prolog::consult cl-prolog::a cl-prolog::b) (make-rulebase)
+             (list '()) 'cl-prolog::user)
+            "consult directive must supply exactly one source")
+  (:signals (cl-prolog::%apply-source-directive!
+             '(cl-prolog::ensure_loaded cl-prolog::a cl-prolog::b) (make-rulebase)
+             (list '()) 'cl-prolog::user)
+            "ensure_loaded directive must supply exactly one source")
+  (:signals (cl-prolog::%apply-source-directive!
+             '(cl-prolog::load_files cl-prolog::a cl-prolog::b cl-prolog::c
+               cl-prolog::d)
+             (make-rulebase) (list '()) 'cl-prolog::user)
+            "load_files directive must supply sources and at most one options argument")
+  (:signals (cl-prolog::%apply-source-directive!
+             '(cl-prolog::set_prolog_flag cl-prolog::flag) (make-rulebase)
+             (list '()) 'cl-prolog::user)
+            "set_prolog_flag directive must supply exactly two arguments")
+  (:signals (cl-prolog::%apply-source-directive!
+             '(cl-prolog::char_conversion cl-prolog::x) (make-rulebase)
+             (list '()) 'cl-prolog::user)
+            "char_conversion directive must supply exactly two arguments")
+  (:signals (cl-prolog::%apply-source-directive!
+             '(cl-prolog::discontiguous) (make-rulebase) (list '())
+             'cl-prolog::user)
+            "discontiguous directive must supply at least one predicate indicator")
+  (:signals (cl-prolog::%apply-source-directive!
+             '(cl-prolog::multifile) (make-rulebase) (list '()) 'cl-prolog::user)
+            "multifile directive must supply at least one predicate indicator")
+  (:signals (cl-prolog::%apply-source-directive!
+             '(cl-prolog::include cl-prolog::a cl-prolog::b) (make-rulebase)
+             (list '()) 'cl-prolog::user)
+            "include directive must supply exactly one source")
+  (:signals (cl-prolog::%apply-source-directive!
+             '(cl-prolog::totally-unrecognized-directive) (make-rulebase)
+             (list '()) 'cl-prolog::user)
+            "unrecognized directive functors must be rejected"))
+
+;; %source-term-clause rejects terms that cannot name a clause: a bare
+;; non-callable atom-value, or a rule whose head is neither an atom nor a
+;; compound term.  Both terms are hand-built to bypass the parser.
+(deftest-table source-term-clause-rejects-non-clause-terms ()
+  (:signals (cl-prolog::%source-term-clause 42)
+            "a bare number is not a consultable clause")
+  (:signals (cl-prolog::%source-term-clause
+             (list (cl-prolog::%prolog-symbol ":-") 42 'cl-prolog::body))
+            "a rule head must be an atom or compound term"))
+
+(deftest source-loader-load-files-directive-honors-if-not-loaded-option ()
+  (with-temporary-prolog-files
+      ((loaded "load_files_directive_clause.")
+       (entry ""))
+    (rewrite-prolog-file!
+     entry (format nil ":- load_files(~A, [if(not_loaded)])."
+                   (%prolog-path-list (list loaded))))
+    (let ((rulebase (consult-prolog entry)))
+      (is (%source-query-succeeds-p rulebase "load_files_directive_clause")))))
+
+(deftest source-loader-include-splices-atom-facts ()
+  (with-temporary-prolog-files
+      ((included "included_atom_fact.")
+       (entry ""))
+    (rewrite-prolog-file!
+     entry (format nil ":- include(~A)." (%prolog-path-atom included)))
+    (let ((rulebase (consult-prolog entry)))
+      (is (%source-query-succeeds-p rulebase "included_atom_fact")))))
+
+(deftest source-loader-include-rejects-atom-directives ()
+  (with-temporary-prolog-files
+      ((included ":- bare_atom_directive.")
+       (entry ""))
+    (rewrite-prolog-file!
+     entry (format nil ":- include(~A)." (%prolog-path-atom included)))
+    (signals-error (consult-prolog entry))))
 
 (deftest source-loader-validation-is-atomic ()
   (dolist (source '("kept. ?- kept."
@@ -219,19 +346,17 @@
                    :error-output (make-string-output-stream)))
          (alias (cl-prolog::%prolog-atom-symbol "transient_output"))
          (rulebase (make-rulebase :io-context context)))
-    (unwind-protect
-         (progn
-           (cl-prolog::%register-prolog-stream!
-            context transient-output :output :alias alias)
-           (signals-error
-            (consult-prolog
-             ":- initialization((set_output(transient_output), fail))."
-             rulebase))
-           (is (eq original-output
-                   (cl-prolog::prolog-stream-stream
-                    (cl-prolog::prolog-io-context-current-output
-                     (cl-prolog::rulebase-io-context rulebase))))))
-      (cl-prolog::%close-all-owned-prolog-streams! context))))
+    (with-closed-io-context (context)
+      (cl-prolog::%register-prolog-stream!
+       context transient-output :output :alias alias)
+      (signals-error
+       (consult-prolog
+        ":- initialization((set_output(transient_output), fail))."
+        rulebase))
+      (is (eq original-output
+              (cl-prolog::prolog-stream-stream
+               (cl-prolog::prolog-io-context-current-output
+                (cl-prolog::rulebase-io-context rulebase))))))))
 
 (deftest source-loader-rolls-back-operator-and-predicate-properties ()
   (let ((rulebase (make-rulebase)))
@@ -248,422 +373,3 @@
     (is (null (cl-prolog::%rulebase-predicate-property
                rulebase 'cl-prolog::transient 1)))))
 
-(deftest consult-publishes-clauses-before-the-next-conjunct ()
-  (with-temporary-prolog-files
-      ((source "consulted(immediately)."))
-    (let ((rulebase (make-rulebase)))
-      (is (%source-query-succeeds-p
-           rulebase
-           (format nil "consult(~A), consulted(immediately)"
-                   (%prolog-path-atom source)))))))
-
-(deftest consult-loads-a-source-list-in-order ()
-  (with-temporary-prolog-files
-      ((declaration ":- op(500, xfx, precedes).")
-       (usage "ordered(first precedes second)."))
-    (let ((rulebase (make-rulebase)))
-      (is (%source-list-query-succeeds-p
-           rulebase
-           (list declaration usage)
-           "consult(~A), ordered(precedes(first, second))")))))
-
-(deftest load-files-loads-each-source-in-its-list ()
-  (with-temporary-prolog-files
-      ((first "loaded_from(first).")
-       (second "loaded_from(second)."))
-    (let ((rulebase (make-rulebase)))
-      (is (%source-list-query-succeeds-p
-           rulebase
-           (list first second)
-           "load_files(~A), loaded_from(first), loaded_from(second)")))))
-
-(deftest load-files-rolls-back-the-whole-list-on-late-failure ()
-  (with-temporary-prolog-files
-      ((valid "transient_clause.")
-       (invalid ":- unsupported_directive(value)."))
-    (let ((rulebase (consult-prolog "preserved_clause.")))
-      (signals-error
-       (query-prolog
-        rulebase
-        (read-prolog-term
-         (format nil "load_files(~A)"
-                 (%prolog-path-list (list valid invalid))))))
-      (is (%source-query-succeeds-p rulebase "preserved_clause"))
-      (is (%source-query-succeeds-p
-           rulebase
-           "catch((transient_clause, fail), error(existence_error(procedure, _), _), true)")))))
-
-(deftest load-files-defers-initialization-until-every-source-is-valid ()
-  (with-temporary-prolog-files
-      ((initializing ":- initialization(write(should_not_run)).")
-       (invalid ":- unsupported_directive(value)."))
-    (let* ((output (make-string-output-stream))
-           (context (cl-prolog::make-prolog-io-context :output output))
-           (rulebase (make-rulebase :io-context context)))
-      (signals-error (consult-prolog (list initializing invalid) rulebase))
-      (is-equal "" (get-output-stream-string output)))))
-
-(deftest source-loader-resolves-nested-directives-relative-to-their-source ()
-  (let* ((base (%temporary-prolog-pathname))
-         (directory (make-pathname :directory
-                                   (append (pathname-directory base)
-                                           (list (pathname-name base)))
-                                   :name nil :type nil :defaults base))
-         (entry (merge-pathnames "entry.pl" directory))
-         (nested-directory (merge-pathnames "nested/" directory))
-         (consulted (merge-pathnames "consulted.pl" nested-directory))
-         (loaded (merge-pathnames "loaded.pl" nested-directory)))
-    (unwind-protect
-         (progn
-           (ensure-directories-exist consulted)
-           (with-open-file (output consulted :direction :output
-                                              :if-exists :supersede)
-             (write-string "nested_consulted." output))
-           (with-open-file (output loaded :direction :output
-                                           :if-exists :supersede)
-             (write-string "nested_loaded." output))
-           (with-open-file (output entry :direction :output
-                                          :if-exists :supersede)
-             (write-string
-              ":- consult('nested/consulted.pl'). :- load_files(['nested/loaded.pl'])."
-              output))
-           (let ((rulebase (consult-prolog entry)))
-             (is (%source-query-succeeds-p rulebase "nested_consulted"))
-             (is (%source-query-succeeds-p rulebase "nested_loaded"))))
-      (uiop:delete-directory-tree directory :validate t :if-does-not-exist :ignore))))
-
-(deftest ensure-loaded-is-idempotent-across-pathname-spellings ()
-  (with-temporary-prolog-files
-      ((source "loaded_once."))
-    (let* ((rulebase (make-rulebase))
-           (relative (enough-namestring source (truename "."))))
-      (ensure-prolog-loaded source rulebase)
-      (ensure-prolog-loaded (pathname relative) rulebase)
-      (is-equal 1
-                (count 'cl-prolog::loaded_once
-                       (rulebase-visible-clauses rulebase)
-                       :key (lambda (clause) (first (clause-head clause))))))))
-
-(deftest consult-replaces-artifacts-owned-by-the-same-source ()
-  (with-temporary-prolog-files
-      ((source ":- op(500, xfx, source_operator). old_clause."))
-    (let ((rulebase (consult-prolog source)))
-      (with-open-file (output source :direction :output :if-exists :supersede)
-        (write-string "new_clause." output))
-      (consult-prolog source rulebase)
-      (is (not (%source-predicate-defined-p rulebase 'cl-prolog::old_clause)))
-      (is (%source-query-succeeds-p rulebase "new_clause"))
-      (is (null (cl-prolog::%operator-table-find
-                 (cl-prolog::rulebase-operator-table rulebase)
-                 'cl-prolog::source_operator))))))
-
-(deftest consult-reload-preserves-runtime-clauses-and-operator-overrides ()
-  (with-temporary-prolog-files
-      ((source ":- op(500, xfx, layered_operator). source_clause."))
-    (let ((rulebase (consult-prolog source)))
-      (is (%source-query-succeeds-p rulebase "assertz(runtime_clause)"))
-      (is (%source-query-succeeds-p
-           rulebase "op(600, xfx, 'LAYERED_OPERATOR')"))
-      (with-open-file (output source :direction :output :if-exists :supersede)
-        (write-string "replacement_clause." output))
-      (consult-prolog source rulebase)
-      (is (%source-query-succeeds-p rulebase "runtime_clause"))
-      (is-equal 600
-                (cl-prolog::operator-definition-priority
-                 (first (cl-prolog::%operator-table-find
-                         (cl-prolog::rulebase-operator-table rulebase)
-                         'cl-prolog::layered_operator :xfx)))))))
-
-(deftest consult-reload-failure-restores-owned-artifacts ()
-  (with-temporary-prolog-files
-      ((source ":- op(500, xfx, rollback_operator). preserved_source_clause."))
-    (let ((rulebase (consult-prolog source)))
-      (with-open-file (output source :direction :output :if-exists :supersede)
-        (write-string "transient_source_clause. ?- invalid." output))
-      (signals-error (consult-prolog source rulebase))
-      (is (%source-query-succeeds-p rulebase "preserved_source_clause"))
-      (is (cl-prolog::%operator-table-find
-           (cl-prolog::rulebase-operator-table rulebase)
-           'cl-prolog::rollback_operator :xfx)))))
-
-(deftest canonical-source-identity-collapses-symbolic-links ()
-  (with-temporary-prolog-files ((source "linked_clause."))
-    (let ((link (%temporary-prolog-pathname)))
-      (unwind-protect
-           (progn
-             (uiop:run-program (list "ln" "-s" (namestring source)
-                                     (namestring link)))
-             (let ((rulebase (ensure-prolog-loaded source)))
-               (ensure-prolog-loaded link rulebase)
-               (is-equal 1
-                         (hash-table-count
-                          (cl-prolog::rulebase-source-registry rulebase)))
-               (is-equal 1 (length (rulebase-visible-clauses rulebase)))))
-        (when (probe-file link) (delete-file link))))))
-
-(deftest ensure-loaded-breaks-circular-source-directives ()
-  (with-temporary-prolog-files
-      ((first "first_loaded. :- ensure_loaded('__SECOND__').")
-       (second "second_loaded. :- ensure_loaded('__FIRST__')."))
-    (with-open-file (output first :direction :output :if-exists :supersede)
-      (format output "first_loaded. :- ensure_loaded(~A)."
-              (%prolog-path-atom second)))
-    (with-open-file (output second :direction :output :if-exists :supersede)
-      (format output "second_loaded. :- ensure_loaded(~A)."
-              (%prolog-path-atom first)))
-    (let ((rulebase (ensure-prolog-loaded first)))
-      (%source-queries-succeed-p
-       rulebase
-       "first_loaded"
-       "second_loaded")
-      (is-equal 2 (hash-table-count
-                   (cl-prolog::rulebase-source-registry rulebase))))))
-
-(deftest load-files-if-not-loaded-is-idempotent-and-atomic ()
-  (with-temporary-prolog-files
-      ((first "first_once.")
-       (second "second_once."))
-    (let ((rulebase (make-rulebase)))
-      (dotimes (_ 2)
-        (is (%source-list-query-succeeds-p
-             rulebase
-             (list first second)
-             "load_files(~A, [if(not_loaded)])")))
-      (is-equal 2 (length (rulebase-visible-clauses rulebase))))))
-
-(deftest load-files-if-not-loaded-rolls-back-source-registry ()
-  (with-temporary-prolog-files
-      ((valid "must_rollback.")
-       (invalid ":- unsupported_directive(value)."))
-    (let* ((rulebase (make-rulebase))
-           (query (format nil "load_files(~A, [if(not_loaded)])"
-                          (%prolog-path-list (list valid invalid)))))
-      (signals-error (%source-query-succeeds-p rulebase query))
-      (is (null (rulebase-visible-clauses rulebase)))
-      (is-equal 0
-                (hash-table-count
-                 (cl-prolog::rulebase-source-registry rulebase))))))
-
-(deftest-table load-files-options-are-strict ()
-  (:is (%source-query-succeeds-p
-        (make-rulebase)
-        "catch(load_files([], Options), error(instantiation_error, _), true)"))
-  (:is (%source-query-succeeds-p
-        (make-rulebase)
-        "catch(load_files([], [if(Mode)]), error(instantiation_error, _), true)"))
-  (:is (%source-query-succeeds-p
-        (make-rulebase)
-        "catch(load_files([], [if(not_loaded) | tail]), error(type_error(list, _), _), true)"))
-  (:is (%source-query-succeeds-p
-        (make-rulebase)
-        "catch(load_files([], [unknown]), error(domain_error(load_option, unknown), _), true)"))
-  (:is (%source-query-succeeds-p
-        (make-rulebase)
-        "catch(load_files([], [if(not_loaded), if(not_loaded)]), error(domain_error(load_option, _), _), true)")))
-
-(defmacro deftest-source-loading-error (name &body query-form)
-  `(deftest ,name ()
-     (let ((rulebase (make-rulebase))
-           (missing (%temporary-prolog-pathname)))
-       (is (%source-query-succeeds-p rulebase (progn ,@query-form))))))
-
-(deftest-source-loading-error source-loading-instantiation-error
-  "catch(consult(Source), error(instantiation_error, _), true)")
-
-(deftest-source-loading-error source-loading-scalar-type-error
-  "catch(consult(42), error(type_error(atom, 42), _), true)")
-
-(deftest-source-loading-error source-loading-improper-list-type-error
-  (format nil
-          "catch(load_files([~A | tail]), ~
-           error(type_error(list, [~A | tail]), _), true)"
-          (%prolog-path-atom missing)
-          (%prolog-path-atom missing)))
-
-(deftest-source-loading-error source-loading-partial-list-instantiation-error
-  (format nil
-          "catch(load_files([~A | Tail]), error(instantiation_error, _), true)"
-          (%prolog-path-atom missing)))
-
-(deftest-source-loading-error source-loading-variable-list-item-instantiation-error
-  "catch(load_files([Source]), error(instantiation_error, _), true)")
-
-(deftest-source-loading-error source-loading-missing-source-error
-  (format nil
-          "catch(consult(~A), ~
-           error(existence_error(source_sink, ~A), _), true)"
-          (%prolog-path-atom missing)
-          (%prolog-path-atom missing)))
-
-(deftest source-loader-supports-iso-declaration-directives ()
-  (let ((rulebase
-          (consult-prolog
-           (format nil
-                   ":- discontiguous(scattered/1).~%~
-                    scattered(one).~%~
-                    other(fact).~%~
-                    scattered(two).~%~
-                    :- multifile(shared/0).~%~
-                    :- set_prolog_flag(double_quotes, codes)."))))
-    (%source-queries-succeed-p
-     rulebase
-     "scattered(one)"
-     "scattered(two)")
-    (is (%source-query-succeeds-p rulebase
-                                  "current_prolog_flag(double_quotes, codes)")))
-  (signals-error (consult-prolog ":- discontiguous.")))
-
-(deftest source-loader-supports-table-directives-without-changing-update-property ()
-  (let ((rulebase
-          (consult-prolog
-           ":- table(reachable/1). :- dynamic(reachable/1). reachable(origin).")))
-    (is (cl-prolog::%rulebase-tabled-p
-         rulebase 'cl-prolog::reachable 1))
-    (is (eq :dynamic
-            (cl-prolog::%rulebase-predicate-property
-             rulebase 'cl-prolog::reachable 1)))
-    (is (%source-query-succeeds-p rulebase "reachable(origin)")))
-  (signals-error (consult-prolog ":- table(reachable).")))
-
-(deftest source-loader-table-declarations-are-source-owned ()
-  (with-temporary-prolog-files
-      ((first ":- table(shared_table/1). shared_table(first).")
-       (second ":- table(shared_table/1). shared_table(second)."))
-    (let ((rulebase (consult-prolog (list first second))))
-      (is (cl-prolog::%rulebase-tabled-p
-           rulebase 'cl-prolog::shared_table 1))
-      (with-open-file (output first :direction :output :if-exists :supersede)
-        (write-string "replacement(first)." output))
-      (consult-prolog first rulebase)
-      (is (cl-prolog::%rulebase-tabled-p
-           rulebase 'cl-prolog::shared_table 1))
-      (with-open-file (output second :direction :output :if-exists :supersede)
-        (write-string "replacement(second)." output))
-      (consult-prolog second rulebase)
-      (is (not (cl-prolog::%rulebase-tabled-p
-                rulebase 'cl-prolog::shared_table 1))))))
-
-(deftest source-loader-rolls-back-table-declarations ()
-  (let ((rulebase (make-rulebase)))
-    (signals-error
-     (consult-prolog
-      ":- table(transient_table/1). :- initialization(fail)."
-      rulebase))
-    (is (not (cl-prolog::%rulebase-tabled-p
-              rulebase 'cl-prolog::transient_table 1)))))
-
-(deftest source-loader-char-conversion-directive-affects-later-terms ()
-  (let ((rulebase
-          (consult-prolog
-           (format nil
-                   ":- char_conversion('k', 'f').~%~
-                    :- set_prolog_flag(char_conversion, on).~%~
-                    kact(one).~%~
-                    'kwoted'(two)."))))
-    ;; kact reads as fact under the conversion; quoted atoms are exempt.
-    (%source-queries-succeed-p
-     rulebase
-     "fact(one)"
-     "'kwoted'(two)")))
-
-(progn
-(progn
-(deftest source-loader-include-splices-terms-into-the-including-unit ()
-  (with-temporary-prolog-files ((included "included(fact)."))
-      (let ((rulebase
-              (consult-prolog
-               (format nil ":- include(~A).~%outer(fact)."
-                       (%prolog-path-atom included)))))
-      (%source-queries-succeed-p
-       rulebase
-       "included(fact)"
-       "outer(fact)"))))
-(deftest source-loader-operator-specifiers-do-not-intern-keywords ()
-  (dolist (entry '(("FX" :fx) ("FY" :fy) ("XF" :xf) ("YF" :yf)
-                   ("XFX" :xfx) ("XFY" :xfy) ("YFX" :yfx)))
-    (is (eq (second entry)
-            (cl-prolog::%operator-specifier-keyword
-             (make-symbol (first entry))))))
-  (labels ((owned-symbol-count ()
-             (let ((package (find-package '#:keyword)))
-               (loop for symbol being each symbol of package
-                     count (eq package (symbol-package symbol))))))
-    (let ((before (owned-symbol-count)))
-      (dotimes (index 128)
-        (let* ((name (format nil "INVALID-OPERATOR-~D" index))
-               (specifier (make-symbol name)))
-          (is (null (nth-value 1 (find-symbol name '#:keyword))))
-          (signals-error
-           (cl-prolog::%operator-specifier-keyword specifier))
-          (is (null (nth-value 1 (find-symbol name '#:keyword))))))
-      (is-equal before (owned-symbol-count)))))
-
-(deftest source-loader-missing-pathnames-do-not-intern-culprits ()
-  (let* ((pathname (%temporary-prolog-pathname))
-         (resolved (cl-prolog::%resolve-prolog-source-pathname pathname))
-         (name (namestring resolved)))
-    (is (null (nth-value 1 (find-symbol name '#:cl-prolog))))
-    (handler-case
-        (progn
-          (cl-prolog::with-prolog-source-errors (nil (cl-prolog::%iso-atom "CONSULT")) (consult-prolog pathname))
-          (error "Expected a missing source error."))
-      (prolog-existence-error (condition)
-        (let ((culprit
-                (third (second (prolog-exception-term condition)))))
-          (is (null (symbol-package culprit)))
-          (is-equal name (symbol-name culprit))
-          (is-equal (%prolog-path-atom resolved)
-                    (prolog-term-string culprit)))))
-    (is (null (nth-value 1 (find-symbol name '#:cl-prolog))))))
-
-(deftest source-loader-syntax-descriptions-do-not-intern-culprits ()
-  (labels ((owned-symbol-count ()
-             (let ((package (find-package '#:cl-prolog)))
-               (loop for symbol being each symbol of package
-                     count (eq package (symbol-package symbol))))))
-    (let ((before (owned-symbol-count)))
-      (dotimes (index 32)
-        (let ((description
-                (format nil "Unexpected generated token ~D." index)))
-          (handler-case
-              (cl-prolog::%raise-syntax-error
-               (make-condition 'cl-prolog::prolog-parse-error
-                               :description description)
-               nil 'cl-prolog::consult)
-            (cl-prolog::prolog-syntax-error (condition)
-              (let ((culprit
-                      (second (second
-                               (prolog-exception-term condition)))))
-                (is (null (symbol-package culprit)))
-                (is-equal description (symbol-name culprit)))))))
-      (is-equal before (owned-symbol-count))))))
-
-(deftest source-loader-preserves-parser-resource-errors-for-direct-api ()
-  (with-temporary-prolog-files ((source "toolong."))
-    (let ((*max-prolog-identifier-length* 1))
-      (handler-case
-          (progn
-            (consult-prolog source)
-            (error "Expected a parser resource error."))
-        (prolog-parser-resource-error (condition)
-          (is-equal "IDENTIFIER_LENGTH"
-                    (prolog-parser-resource-error-resource condition)))))))
-
-(deftest source-loader-translates-parser-resource-errors-for-consult ()
-  (with-temporary-prolog-files ((source "toolong."))
-    (let* ((rulebase (make-rulebase))
-           (query
-             (read-prolog-term
-              (format nil
-                      "catch(consult(~A), error(resource_error(identifier_length), _), true)."
-                      (%prolog-path-atom source))
-              (cl-prolog::rulebase-operator-table rulebase))))
-      (let ((*max-prolog-identifier-length* 1))
-        (is (prolog-succeeds-p rulebase query)))))))
-
-(deftest source-loader-rejects-cyclic-source-lists ()
-  (let ((sources (list (cl-prolog::%prolog-atom-symbol "cycle.pl"
-                                                       :preserve-case t))))
-    (setf (cdr sources) sources)
-    (signals-error
-     (cl-prolog::%source-file-pathnames sources nil 'cl-prolog::consult))))
