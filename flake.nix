@@ -5,22 +5,22 @@
 
   # cl-weave is the testing library used by the cl-prolog/tests ASDF system.
   # suite.  It follows this flake's nixpkgs so both share a single SBCL.
-  inputs.cl-weave.url = "github:takeokunn/cl-weave/v0.4.0";
+  inputs.cl-weave.url = "github:nerima-lisp/cl-weave/v0.4.0";
   inputs.cl-weave.inputs.nixpkgs.follows = "nixpkgs";
   inputs.cl-weave.inputs.paredit-cli.follows = "paredit-cli";
 
   # paredit-cli provides structural S-expression tooling for this repo's
   # Lisp sources: a dev-shell binary for agent-driven refactors and a
   # structural-parse lint gate reused in `checks`.
-  inputs.paredit-cli.url = "github:takeokunn/paredit-cli";
+  inputs.paredit-cli.url = "github:nerima-lisp/paredit-cli";
   inputs.paredit-cli.inputs.nixpkgs.follows = "nixpkgs";
 
   outputs =
-    {
-      self,
-      nixpkgs,
-      cl-weave,
-      paredit-cli,
+    { self
+    , nixpkgs
+    , cl-weave
+    , paredit-cli
+    ,
     }:
     let
       systems = [
@@ -30,10 +30,12 @@
       forAllSystems =
         f:
         builtins.listToAttrs (
-          map (system: {
-            name = system;
-            value = f system;
-          }) systems
+          map
+            (system: {
+              name = system;
+              value = f system;
+            })
+            systems
         );
       sourceFor =
         pkgs:
@@ -43,7 +45,8 @@
             path: type:
             (
               (pkgs.lib.cleanSourceFilter path type)
-              # Keep test sources available to Nix checks before they are staged.
+              # Retain test sources present in the Git-backed flake input.
+              # This filter cannot reintroduce files excluded as untracked.
               || (
                 let
                   tests-directory = "${toString ./.}/tests";
@@ -56,21 +59,21 @@
               let
                 name = builtins.baseNameOf path;
               in
-              !(
-                pkgs.lib.hasSuffix ".fasl" name
-                || pkgs.lib.hasSuffix ".cfasl" name
-                || pkgs.lib.hasSuffix ".dfsl" name
-                || pkgs.lib.hasSuffix ".ufasl" name
-                || pkgs.lib.hasSuffix ".core" name
-                || pkgs.lib.hasSuffix ".o" name
-              )
+                !(
+                  pkgs.lib.hasSuffix ".fasl" name
+                  || pkgs.lib.hasSuffix ".cfasl" name
+                  || pkgs.lib.hasSuffix ".dfsl" name
+                  || pkgs.lib.hasSuffix ".ufasl" name
+                  || pkgs.lib.hasSuffix ".core" name
+                  || pkgs.lib.hasSuffix ".o" name
+                )
             );
         };
       mkDocs =
         pkgs:
         pkgs.stdenvNoCC.mkDerivation {
           pname = "cl-prolog-docs";
-          version = "0.5.0";
+          version = "0.6.0";
           src = pkgs.lib.fileset.toSource {
             root = ./docs;
             fileset = pkgs.lib.fileset.unions [
@@ -107,7 +110,7 @@
           src = sourceFor pkgs;
           cl-prolog = pkgs.sbcl.buildASDFSystem {
             pname = "cl-prolog";
-            version = "0.5.0";
+            version = "0.6.0";
             src = src;
             systems = [ "cl-prolog" ];
           };
@@ -143,7 +146,7 @@
                 export CL_SOURCE_REGISTRY="${
                   cl-weave.packages.${system}.default
                 }/share/common-lisp/source//:$PWD//:"
-                sbcl --non-interactive \
+                timeout 600 sbcl --non-interactive \
                   --eval '(require :asdf)' \
                   --eval '(asdf:load-asd (truename "cl-prolog.asd"))' \
                   --eval '(asdf:test-system :cl-prolog/tests)'
@@ -157,11 +160,43 @@
             name = "cl-prolog-paredit-lint";
           };
 
+          # Ensure every shipped example loads from the same clean source used
+          # by the package and CI checks.
+          examples =
+            pkgs.runCommand "cl-prolog-examples"
+              {
+                nativeBuildInputs = [ pkgs.sbcl ];
+              }
+              ''
+                cp -R ${src} source
+                chmod -R u+w source
+                cd source
+                export HOME="$TMPDIR/home"
+                export XDG_CACHE_HOME="$TMPDIR/cache"
+                mkdir -p "$HOME" "$XDG_CACHE_HOME"
+                timeout 600 sbcl --non-interactive \
+                  --eval '(require :asdf)' \
+                  --eval '(asdf:load-asd (truename "cl-prolog.asd"))' \
+                  --eval '(asdf:load-system :cl-prolog/examples)'
+                touch $out
+              '';
+
           # Fails if the mdBook site does not build to a valid index.html.
           documentation =
             pkgs.runCommand "cl-prolog-documentation" { docs = self.packages.${system}.docs; }
               ''
                 test -f "$docs/index.html"
+                touch $out
+              '';
+
+          # Keep the flake aligned with the formatter exposed by this flake.
+          formatting =
+            pkgs.runCommand "cl-prolog-nix-formatting"
+              {
+                nativeBuildInputs = [ pkgs.nixpkgs-fmt ];
+              }
+              ''
+                nixpkgs-fmt --check ${./flake.nix}
                 touch $out
               '';
         }

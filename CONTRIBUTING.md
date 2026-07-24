@@ -14,7 +14,7 @@ User support and triage routing are defined in [`SUPPORT.md`](SUPPORT.md).
 1. On Linux, enter the pinned development environment with `nix develop`.
    The current flake exposes Linux systems only. On Darwin, use a local SBCL
    and ASDF setup instead; ensure both `cl-prolog` and
-   [`cl-weave`](https://github.com/takeokunn/cl-weave) are discoverable through
+   [`cl-weave`](https://github.com/nerima-lisp/cl-weave) are discoverable through
    ASDF before running tests.
 2. Run the cl-weave-backed library test suite before and after changes:
 
@@ -31,17 +31,21 @@ User support and triage routing are defined in [`SUPPORT.md`](SUPPORT.md).
 3. On Linux, run `nix flake check` for packaging and reproducibility coverage
    when the change affects distribution, ASDF loading, or documentation
    examples. This also runs `checks.paredit-lint`, which fails if any tracked
-   `.lisp`/`.asd` file is not a balanced S-expression document. On Darwin, rely
-   on Linux CI for this flake-level gate.
+   `.lisp`/`.asd` file is not a balanced S-expression document and loads the
+   shipped examples through `checks.examples`. On Darwin, `nix flake check`
+   may exit successfully after omitting all Linux-only checks; that result is
+   not verification. Run the ASDF test command above and rely on Linux CI for
+   the flake-level gate.
 4. When adding release artifacts exposed from `README.md` or `docs/`,
    ensure the files are tracked in git before relying on `nix flake check`:
-   this repository's `cleanSourceWith` flake source omits untracked files,
-   so docs, examples, and alias `.asd` files can
-   disappear from Nix builds even when they exist in a dirty worktree.
+   Git-backed flake input selection excludes untracked files before this
+   repository's `cleanSourceWith` filter runs, so docs, examples, and alias
+   `.asd` files can disappear from Nix builds even when they exist in a dirty
+   worktree.
 
 ## Structural refactors
 
-`nix develop` puts [`paredit`](https://github.com/takeokunn/paredit-cli) on
+`nix develop` puts [`paredit`](https://github.com/nerima-lisp/paredit-cli) on
 `PATH`. Prefer it over hand-editing parentheses for renames, moves, and other
 structural changes to Lisp sources:
 
