@@ -27,11 +27,6 @@
   (let ((name (symbol-name variable)))
     (write-string (if (> (length name) 1) (subseq name 1) "_") stream)))
 
-(defun %plain-prolog-atom-name-p (name)
-  (and (plusp (length name))
-       (lower-case-p (char name 0))
-       (every #'%identifier-character-p name)))
-
 (defun %write-quoted-prolog-atom (name stream)
   (write-char #\' stream)
   (loop for character across name
@@ -122,13 +117,22 @@
 
 (defun %write-prolog-conditional
     (term stream context-priority softp quotedp numbervarsp ignore-opsp)
-  (let ((parenthesize (> 1100 context-priority)))
+  "Render (SOFT-)IF-THEN-ELSE at the ISO priorities of the -> / *-> / ; xfy
+operators it stands for: `;' at 1100, `->'/`*->' at 1050, and the condition
+argument one below that so a bare `->'/`*->' on the left needs no parens."
+  (let* ((semicolon-priority 1100)
+         (arrow-priority 1050)
+         (condition-priority (1- arrow-priority))
+         (parenthesize (> semicolon-priority context-priority)))
     (when parenthesize (write-char #\( stream))
-    (%write-prolog-term (second term) stream 1049 quotedp numbervarsp ignore-opsp)
+    (%write-prolog-term (second term) stream condition-priority
+                        quotedp numbervarsp ignore-opsp)
     (write-string (if softp " *-> " " -> ") stream)
-    (%write-prolog-term (third term) stream 1050 quotedp numbervarsp ignore-opsp)
+    (%write-prolog-term (third term) stream arrow-priority
+                        quotedp numbervarsp ignore-opsp)
     (write-string " ; " stream)
-    (%write-prolog-term (fourth term) stream 1100 quotedp numbervarsp ignore-opsp)
+    (%write-prolog-term (fourth term) stream semicolon-priority
+                        quotedp numbervarsp ignore-opsp)
     (when parenthesize (write-char #\) stream))))
 
 (defun %write-prolog-compound (term stream quotedp numbervarsp ignore-opsp)

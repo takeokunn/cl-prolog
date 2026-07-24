@@ -15,27 +15,52 @@ The macro expands each case into two DEFTEST-QUERIES specs."
                                           reverse-output reverse-expected)
                         case
                       `(((,predicate ,forward-input ,forward-output)
-                         => ,forward-expected)
+                         :ordered ,forward-expected)
                         ((,predicate ,reverse-input ,reverse-output)
-                         => ,reverse-expected))))))
+                         :ordered ,reverse-expected))))))
 
 (deftest-queries atom-builtins ((make-rulebase))
-  ((cl-prolog::atom_length cl-prolog::hello ?length) => (((?length . 5))))
+  ((cl-prolog::atom_length cl-prolog::hello ?length) :ordered (((?length . 5))))
   ((cl-prolog::atom_length cl-prolog::hello 5) :succeeds)
   ((cl-prolog::atom_length cl-prolog::hello 4) :fails)
   ((cl-prolog::atom_concat cl-prolog::hello cl-prolog::world ?whole)
-   => (((?whole . cl-prolog::helloworld))))
+   :ordered (((?whole . cl-prolog::helloworld))))
   ((cl-prolog::atom_concat ?left ?right cl-prolog::abc)
-   => (((?left . cl-prolog::||) (?right . cl-prolog::abc))
+   :ordered (((?left . cl-prolog::||) (?right . cl-prolog::abc))
        ((?left . cl-prolog::a) (?right . cl-prolog::bc))
        ((?left . cl-prolog::ab) (?right . cl-prolog::c))
        ((?left . cl-prolog::abc) (?right . cl-prolog::||))))
   ((cl-prolog::atom_concat cl-prolog::a ?right cl-prolog::abc)
-   => (((?right . cl-prolog::bc))))
+   :ordered (((?right . cl-prolog::bc))))
+  ((cl-prolog::atom_concat ?left cl-prolog::bc cl-prolog::abc)
+   :ordered (((?left . cl-prolog::a))))
+  ((cl-prolog::atom_concat ?left cl-prolog::bcdef cl-prolog::abc)
+   :fails)
+  ((cl-prolog::atom_concat cl-prolog::left ?right ?whole)
+   :signals)
   ((cl-prolog::sub_atom cl-prolog::abc ?before ?length ?after ?sub)
-   :succeeds :limit 10)
+   :succeeds)
   ((cl-prolog::sub_atom cl-prolog::abc 1 1 ?after ?sub)
-   => (((?after . 1) (?sub . cl-prolog::b)))))
+   :ordered (((?after . 1) (?sub . cl-prolog::b))))
+  ((cl-prolog::sub_atom cl-prolog::abc ?before 2 ?after ?sub)
+   :ordered (((?before . 0) (?after . 1) (?sub . cl-prolog::ab))
+       ((?before . 1) (?after . 0) (?sub . cl-prolog::bc))))
+  ((cl-prolog::sub_atom cl-prolog::abc ?before ?length 1 ?sub)
+   :ordered (((?before . 0) (?length . 2) (?sub . cl-prolog::ab))
+       ((?before . 1) (?length . 1) (?sub . cl-prolog::b))
+       ((?before . 2) (?length . 0) (?sub . cl-prolog::||))))
+  ((cl-prolog::sub_atom cl-prolog::abc ?before 3 0 ?sub)
+   :ordered (((?before . 0) (?sub . cl-prolog::abc))))
+  ((cl-prolog::sub_atom cl-prolog::abc 1 ?length ?after ?sub)
+   :ordered (((?length . 0) (?after . 2) (?sub . cl-prolog::||))
+       ((?length . 1) (?after . 1) (?sub . cl-prolog::b))
+       ((?length . 2) (?after . 0) (?sub . cl-prolog::bc))))
+  ((cl-prolog::sub_atom cl-prolog::abc 2 ?length 2 ?sub)
+   :fails)
+  ((cl-prolog::sub_atom cl-prolog::abc ?before 5 0 ?sub)
+   :fails)
+  ((cl-prolog::sub_atom cl-prolog::abc 3 3 ?after ?sub)
+   :fails))
 
 (deftest-bidirectional-queries atom-builtins-text ((make-rulebase))
   (cl-prolog::atom_chars cl-prolog::abc ?chars
@@ -65,7 +90,7 @@ The macro expands each case into two DEFTEST-QUERIES specs."
 
 (deftest-queries atom-number-builtins ((make-rulebase))
   ((cl-prolog::atom_number cl-prolog::|-0.125| ?number)
-   => (((?number . -0.125d0))))
+   :ordered (((?number . -0.125d0))))
   ((cl-prolog::atom_number cl-prolog::|42| 42) :succeeds)
   ((cl-prolog::atom_number cl-prolog::|42| 43) :fails)
   ((cl-prolog::atom_number cl-prolog::bad ?number) :fails))
@@ -77,10 +102,8 @@ The macro expands each case into two DEFTEST-QUERIES specs."
     (cdr (assoc '?number (first solutions)))))
 
 (defun number-codes-error-type (codes)
-  (handler-case
-      (progn (parse-number-codes codes) nil)
-    (prolog-runtime-error (condition)
-      (type-of condition))))
+  (query-error-summary
+   (make-rulebase) `(cl-prolog::number_codes ?number ,codes)))
 
 (defun round-trip-number-codes (number)
   (let* ((encoded (query-prolog
@@ -90,13 +113,8 @@ The macro expands each case into two DEFTEST-QUERIES specs."
     (parse-number-codes codes)))
 
 (defun number-output-error-type (number)
-  (handler-case
-      (progn
-        (query-prolog (make-rulebase)
-                      `(cl-prolog::number_codes ,number ?codes))
-        nil)
-    (prolog-runtime-error (condition)
-      (type-of condition))))
+  (query-error-summary
+   (make-rulebase) `(cl-prolog::number_codes ,number ?codes)))
 
 (deftest-table atom-number-text-grammar ()
   (:equal 0 (parse-number-codes '(48)))
@@ -109,7 +127,14 @@ The macro expands each case into two DEFTEST-QUERIES specs."
   (:equal 'prolog-domain-error (number-codes-error-type '(49 46)))
   (:equal 'prolog-domain-error (number-codes-error-type '(46 53)))
   (:equal 'prolog-domain-error (number-codes-error-type '(49 101)))
-  (:equal 'prolog-domain-error (number-codes-error-type '(49 50 120))))
+  (:equal 'prolog-domain-error (number-codes-error-type '(49 50 120)))
+  (:equal 'prolog-resource-error
+          (number-codes-error-type
+           (map 'list #'char-code
+                (format nil "1e~A" (make-string 40 :initial-element #\9)))))
+  (:equal 'prolog-resource-error
+          (number-codes-error-type
+           (map 'list #'char-code "1.0e4095"))))
 
 (deftest-table atom-number-text-round-trips ()
   (:equal 42 (round-trip-number-codes 42))
@@ -132,13 +157,51 @@ The macro expands each case into two DEFTEST-QUERIES specs."
         (declare (ignore condition))
         (is t "Cyclic lists must raise a Prolog type error")))))
 
-(defun atom-builtin-error-summary (goal)
+(deftest atom-list-conversion-rejects-a-variable-tail ()
   (handler-case
-      (progn (query-prolog (make-rulebase) goal) nil)
-    (prolog-runtime-error (condition)
-      (list (type-of condition)
-            (normalize-error-data
-             (second (prolog-exception-term condition)))))))
+      (progn
+        (cl-prolog::%character-list-text
+         (cons (cl-prolog::%text-atom "a") '?tail)
+         nil (cl-prolog::%iso-atom "ATOM_CHARS"))
+        (error "Expected a variable tail to be rejected"))
+    (prolog-instantiation-error (condition)
+      (declare (ignore condition))
+      (is t "A variable list tail must raise an instantiation error"))))
+
+(deftest atom-list-conversion-rejects-an-improper-tail ()
+  (handler-case
+      (progn
+        (cl-prolog::%character-list-text
+         (cons (cl-prolog::%text-atom "a") (cl-prolog::%text-atom "b"))
+         nil (cl-prolog::%iso-atom "ATOM_CHARS"))
+        (error "Expected an improper tail to be rejected"))
+    (prolog-type-error (condition)
+      (declare (ignore condition))
+      (is t "A non-cons, non-nil tail must raise a type error"))))
+
+(deftest atom-list-conversion-rejects-a-variable-element ()
+  (handler-case
+      (progn
+        (cl-prolog::%character-list-text
+         (list (cl-prolog::%text-atom "a") '?element)
+         nil (cl-prolog::%iso-atom "ATOM_CHARS"))
+        (error "Expected a variable element to be rejected"))
+    (prolog-instantiation-error (condition)
+      (declare (ignore condition))
+      (is t "An unbound list element must raise an instantiation error"))))
+
+(deftest resource-limit-check-rejects-values-past-the-configured-limit ()
+  (handler-case
+      (progn
+        (cl-prolog::%check-resource-limit
+         5 3 "TEST_RESOURCE" nil (cl-prolog::%iso-atom "TEST") "over limit")
+        (error "Expected the over-limit value to be rejected"))
+    (prolog-resource-error (condition)
+      (declare (ignore condition))
+      (is t "A value past the configured limit must raise a resource error"))))
+
+(defun atom-builtin-error-summary (goal)
+  (query-error-summary (make-rulebase) goal :with-data t))
 
 (deftest-table atom-builtins-report-iso-errors ()
   (:equal '(prolog-instantiation-error "INSTANTIATION_ERROR")
@@ -155,6 +218,8 @@ The macro expands each case into two DEFTEST-QUERIES specs."
           (atom-builtin-error-summary '(cl-prolog::sub_atom ?atom 0 1 ?after ?sub)))
   (:equal '(prolog-type-error ("TYPE_ERROR" "INTEGER" 1.5))
           (atom-builtin-error-summary '(cl-prolog::sub_atom abc 1.5 1 ?after ?sub)))
+  (:equal '(prolog-type-error ("TYPE_ERROR" "ATOM" 42))
+          (atom-builtin-error-summary '(cl-prolog::sub_atom abc 0 1 ?after 42)))
   (:equal '(prolog-instantiation-error "INSTANTIATION_ERROR")
           (atom-builtin-error-summary '(cl-prolog::atom_chars ?atom ?chars)))
   (:equal '(prolog-type-error ("TYPE_ERROR" "CHARACTER" "AB"))
