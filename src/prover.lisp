@@ -45,33 +45,29 @@ caller's clause alternatives, as ISO requires.")
                    :type (or null (integer 0 *))
                    :read-only t))
 
-(defun %state-with-bindings (state bindings)
-  "Return STATE advanced with BINDINGS while preserving its search budget."
-  (%make-proof-state (proof-state-rulebase state)
-                     bindings
-                     (proof-state-remaining-depth state)
-                     (proof-state-module state)
-                     (proof-state-table-session state)
-                     (proof-state-cut-tag state)))
-
-(defun %state-in-module (state module)
-  (%make-proof-state (proof-state-rulebase state)
-                     (proof-state-bindings state)
-                     (proof-state-remaining-depth state)
-                     module
-                     (proof-state-table-session state)
-                     (proof-state-cut-tag state)))
-
-(defun %state-with-cut-tag (state cut-tag)
-  "Return STATE rebased onto the cut barrier CUT-TAG."
-  (if (eq (proof-state-cut-tag state) cut-tag)
+(defun %state-with (state &key (bindings nil bindings-p)
+                                (module nil module-p)
+                                (table-session nil table-session-p)
+                                (cut-tag nil cut-tag-p)
+                                (remaining-depth nil remaining-depth-p))
+  "Return STATE with any supplied slot replaced; slots not supplied are
+preserved from STATE.  Supplying only CUT-TAG, when it already matches
+STATE's current cut tag, returns STATE unchanged, avoiding allocation
+churn on the conjunction traversal's common no-op case."
+  (if (and cut-tag-p (eq (proof-state-cut-tag state) cut-tag)
+           (not bindings-p) (not module-p) (not table-session-p)
+           (not remaining-depth-p))
       state
       (%make-proof-state (proof-state-rulebase state)
-                         (proof-state-bindings state)
-                         (proof-state-remaining-depth state)
-                         (proof-state-module state)
-                         (proof-state-table-session state)
-                         cut-tag)))
+                         (if bindings-p bindings (proof-state-bindings state))
+                         (if remaining-depth-p
+                             remaining-depth
+                             (proof-state-remaining-depth state))
+                         (if module-p module (proof-state-module state))
+                         (if table-session-p
+                             table-session
+                             (proof-state-table-session state))
+                         (if cut-tag-p cut-tag (proof-state-cut-tag state)))))
 
 (defun %state-descending-into-rule (state bindings goal)
   "Return the state for proving a matched rule body."
@@ -83,12 +79,9 @@ caller's clause alternatives, as ISO requires.")
                              "explicit rule-resolution depth limit exceeded"
                              :condition-type 'prolog-depth-limit-exceeded
                              :goal goal))
-    (%make-proof-state (proof-state-rulebase state)
-                       bindings
-                       (and remaining (1- remaining))
-                       (proof-state-module state)
-                       (proof-state-table-session state)
-                       (proof-state-cut-tag state))))
+    (%state-with state
+                :bindings bindings
+                :remaining-depth (and remaining (1- remaining)))))
 
 (defun %conjunction-p (query)
   "True when QUERY is already a list of goals rather than a single goal."
@@ -204,7 +197,7 @@ caller's clause alternatives, as ISO requires.")
                (proof-state-bindings state))
       (when ok
         (flet ((continue-with-propagated-bindings (propagated)
-                 (funcall succeed (%state-with-bindings state propagated))))
+                 (funcall succeed (%state-with state :bindings propagated))))
           (if *constraint-post-unify-hook*
               (funcall *constraint-post-unify-hook*
                        extended
@@ -228,15 +221,13 @@ into the caller's remaining goals."
         (%prove-goal/k (first goals) state
                        (lambda (next-state)
                          (%prove-goals/k (rest goals)
-                                         (%state-with-cut-tag next-state cut-tag)
+                                         (%state-with next-state :cut-tag cut-tag)
                                          succeed))))))
 
-(defun %prove-goal-dispatch/k (goal state succeed)
-  "Prove GOAL from STATE after any active depth-limit accounting."
-  (let* ((*current-table-session* (proof-state-table-session state))
-         (environment (proof-state-bindings state))
-         (context (%iso-atom "CALL"))
-         (resolved-goal (logic-substitute goal environment)))
+(defun %resolve-dispatched-goal (goal state environment context)
+  "Validate GOAL is callable (after substitution and any module
+qualification) and return (VALUES NORMALIZED-GOAL EXPLICIT-MODULE)."
+  (let ((resolved-goal (logic-substitute goal environment)))
     (when (logic-var-p resolved-goal)
       (%raise-instantiation-error environment context
                                   "callable term must be instantiated"))
@@ -254,50 +245,57 @@ into the caller's remaining goals."
                   (%goal-form-p callable-goal))
         (%invalid-goal resolved-goal
                        "a goal must be a symbol or a proper list headed by a symbol"))
-      (let* ((explicit-module
-               (and qualified-p
-                    (%resolve-qualified-module (second resolved-goal) state)))
-             (normalized-goal (%ensure-goal-form callable-goal)))
-        (when (and (eq (first normalized-goal) (quote !))
-                   (null (rest normalized-goal)))
-          (funcall succeed state)
-          (cl:throw (proof-state-cut-tag state) t))
-        (let* ((predicate (first normalized-goal))
-               (arity (length (rest normalized-goal)))
-               (builtin-solver (%goal-solver predicate arity))
-               (foreign-solver (%foreign-goal-solver predicate arity))
-               (solver (or builtin-solver foreign-solver)))
-          (cond
-            (solver
-              (when explicit-module
-                (%find-prolog-module
-                 (rulebase-module-registry (proof-state-rulebase state))
-                 explicit-module "invoke qualified goal"))
-              (let* ((solver-state
-                       (if explicit-module
-                           (%state-in-module state explicit-module)
-                           state))
-                     (*current-prolog-module* (proof-state-module solver-state))
-                     (*caller-cut-tag* (proof-state-cut-tag solver-state)))
-                (funcall solver
-                         normalized-goal
-                         (proof-state-rulebase solver-state)
-                         (proof-state-bindings solver-state)
-                         (proof-state-remaining-depth solver-state)
-                         (lambda (bindings)
-                           (funcall succeed
-                                    (%state-with-bindings solver-state bindings))))))
-            (t
-             (multiple-value-bind (resolved-user-goal defining-module)
-                 (%resolve-user-goal normalized-goal state explicit-module)
-               (if defining-module
-                   (%prove-clauses/k resolved-user-goal
-                                     (%state-in-module state defining-module)
-                                     succeed)
-                   (%raise-existence-error
-                    "PROCEDURE" (%goal-predicate-indicator normalized-goal)
-                    environment context
-                    "the invoked predicate is not defined"))))))))))
+      (values (%ensure-goal-form callable-goal)
+              (and qualified-p
+                   (%resolve-qualified-module (second resolved-goal) state))))))
+
+(defun %prove-goal-dispatch/k (goal state succeed)
+  "Prove GOAL from STATE after any active depth-limit accounting."
+  (let* ((*current-table-session* (proof-state-table-session state))
+         (environment (proof-state-bindings state))
+         (context (%iso-atom "CALL")))
+    (multiple-value-bind (normalized-goal explicit-module)
+        (%resolve-dispatched-goal goal state environment context)
+      (when (and (eq (first normalized-goal) (quote !))
+                 (null (rest normalized-goal)))
+        (funcall succeed state)
+        (cl:throw (proof-state-cut-tag state) t))
+      (let* ((predicate (first normalized-goal))
+             (arity (length (rest normalized-goal)))
+             (builtin-solver (%goal-solver predicate arity))
+             (foreign-solver (%foreign-goal-solver predicate arity))
+             (solver (or builtin-solver foreign-solver)))
+        (cond
+          (solver
+            (when explicit-module
+              (%find-prolog-module
+               (rulebase-module-registry (proof-state-rulebase state))
+               explicit-module "invoke qualified goal"))
+            (let* ((solver-state
+                     (if explicit-module
+                         (%state-with state :module explicit-module)
+                         state))
+                   (*current-prolog-module* (proof-state-module solver-state))
+                   (*caller-cut-tag* (proof-state-cut-tag solver-state)))
+              (funcall solver
+                       normalized-goal
+                       (proof-state-rulebase solver-state)
+                       (proof-state-bindings solver-state)
+                       (proof-state-remaining-depth solver-state)
+                       (lambda (bindings)
+                         (funcall succeed
+                                  (%state-with solver-state :bindings bindings))))))
+          (t
+           (multiple-value-bind (resolved-user-goal defining-module)
+               (%resolve-user-goal normalized-goal state explicit-module)
+             (if defining-module
+                 (%prove-clauses/k resolved-user-goal
+                                   (%state-with state :module defining-module)
+                                   succeed)
+                 (%raise-existence-error
+                  "PROCEDURE" (%goal-predicate-indicator normalized-goal)
+                  environment context
+                  "the invoked predicate is not defined")))))))))
 
 (defun %prove-goal/k (goal state succeed)
   "Prove GOAL, counting every dispatched call for local depth limits."
@@ -342,23 +340,13 @@ any nested proof rebinds *CALLER-CUT-TAG*."
   (%prove-with-cut-tag/k query rulebase bindings remaining-depth
                          *caller-cut-tag* succeed))
 
-(defun %replay-table-answers/k (goal state entry succeed)
-  "Unify each stored answer for ENTRY with GOAL and invoke SUCCEED."
-  (loop repeat (%table-entry-answer-count entry)
-        for answer in (%table-entry-answers entry)
-        do (multiple-value-bind (extended ok)
-               (unify goal (%instantiate-variant answer)
-                      (proof-state-bindings state))
-             (when ok
-               (funcall succeed (%state-with-bindings state extended))))))
-
 (defun %prove-raw-clauses/k (goal state succeed)
   "Prove GOAL within one predicate invocation and consume its cut.
 
 The fresh CATCH tag is this invocation's cut barrier: a cut in any clause
 body throws here, abandoning the remaining clause alternatives."
   (let* ((cut-tag (%make-cut-tag))
-         (state (%state-with-cut-tag state cut-tag)))
+         (state (%state-with state :cut-tag cut-tag)))
     (cl:catch cut-tag
       (dolist (entry (%proof-predicate-entries goal state))
         (let ((clause (%stored-clause-clause entry)))
@@ -366,255 +354,6 @@ body throws here, abandoning the remaining clause alternatives."
               (%continue-matching-fact goal clause state succeed)
               (when (%matching-rule-p goal clause)
                 (%prove-rule/k goal clause state succeed))))))))
-
-(defun %predicate-key (goal)
-  (when (%goal-form-p goal)
-    (cons (first goal) (length (rest goal)))))
-
-(defun %first-user-predicate-keys (clause)
-  "Return possible first user-predicate indicators reached by CLAUSE."
-  (labels ((static-call-goal (closure arguments)
-             (cond
-               ((and (symbolp closure)
-      (not (logic-var-p closure)))
- (cons closure arguments))
-               ((and (consp closure) (%goal-form-p closure))
-                (append closure arguments))))
-           (analyze-alternatives (goals)
-             (let ((keys '())
-                   (transparent-p nil))
-               (dolist (goal goals)
-                 (multiple-value-bind (goal-keys goal-transparent-p)
-                     (analyze-goal goal)
-                   (setf keys (nconc keys goal-keys)
-                         transparent-p
-                         (or transparent-p goal-transparent-p))))
-               (values (remove-duplicates keys :test #'equal)
-                       transparent-p)))
-           (analyze-sequence (goals)
-             (if (null goals)
-                 (values nil t)
-                 (multiple-value-bind (keys transparent-p)
-                     (analyze-goal (first goals))
-                   (if transparent-p
-                       (multiple-value-bind (later-keys later-transparent-p)
-                           (analyze-sequence (rest goals))
-                         (values (remove-duplicates
-                                  (nconc keys later-keys) :test #'equal)
-                                 later-transparent-p))
-                       (values keys nil)))))
-           (analyze-conditional (condition branches)
-             (multiple-value-bind (keys transparent-p)
-                 (analyze-goal condition)
-               (if transparent-p
-                   (multiple-value-bind (branch-keys branch-transparent-p)
-                       (analyze-alternatives branches)
-                     (values (remove-duplicates
-                              (nconc keys branch-keys) :test #'equal)
-                             branch-transparent-p))
-                   (values keys nil))))
-           (analyze-goal (raw-goal)
-             (let* ((goal (%ensure-goal-form raw-goal))
-                    (key (%predicate-key goal)))
-               (cond
-                 ((null key) (values nil t))
-                 ((and (not (%goal-solver (car key) (cdr key)))
-                       (not (%foreign-goal-solver (car key) (cdr key))))
-                  (values (list key) nil))
-                 ((%foreign-goal-solver (car key) (cdr key))
-                  (values nil t))
-                 (t
-                  (let ((name (string-upcase (symbol-name (first goal)))))
-                    (cond
-                      ((string= name "CALL")
-                       (let ((called (static-call-goal (second goal)
-                                                       (cddr goal))))
-                         (if called
-                             (analyze-goal called)
-                             (values nil t))))
-                      ((member name '("NOT" "\\+" "ONCE" "IGNORE")
-                               :test #'string=)
-                       (analyze-goal (second goal)))
-                      ((member name '("CALL_NTH" "CALL_WITH_DEPTH_LIMIT")
-                               :test #'string=)
-                       (analyze-goal (second goal)))
-                      ((string= name "AND")
-                       (analyze-sequence (rest goal)))
-                      ((string= name "OR")
-                       (analyze-alternatives (rest goal)))
-                      ((member name '("IF-THEN-ELSE" "SOFT-IF-THEN-ELSE")
-                               :test #'string=)
-                       (analyze-conditional (second goal) (cddr goal)))
-                      ((string= name "CATCH")
-                       (analyze-conditional (second goal)
-                                            (list (fourth goal))))
-                      ((member name '("SETUP_CALL_CLEANUP" "CALL_CLEANUP"
-                                      "FORALL")
-                               :test #'string=)
-                       (analyze-sequence (rest goal)))
-                      (t (values nil t)))))))))
-    (nth-value 0 (analyze-sequence (clause-body clause)))))
-
-(defun %left-recursive-p (goal state)
-  "Return true when GOAL belongs to a first-user-goal call cycle."
-  (let* ((target (%predicate-key goal))
-         (rulebase (proof-state-rulebase state))
-         (module (proof-state-module state))
-         (cache (%table-session-left-recursion
-                 (proof-state-table-session state)))
-         (cache-key (list (rulebase-revision rulebase) module)))
-    (when target
-      (multiple-value-bind (index present-p) (gethash cache-key cache)
-        (unless present-p
-          (let ((adjacency (make-hash-table :test #'equal))
-                (reverse-adjacency (make-hash-table :test #'equal))
-                (nodes '()))
-            (labels ((ensure-node (key)
-                       (multiple-value-bind (neighbors node-present-p)
-                           (gethash key adjacency)
-                         (declare (ignore neighbors))
-                         (unless node-present-p
-                           (setf (gethash key adjacency) '()
-                                 (gethash key reverse-adjacency) '())
-                           (push key nodes)))))
-              (dolist (entry (%proof-module-entries state))
-  (let* ((clause (%stored-clause-clause entry))
-         (head-key (%predicate-key (clause-head clause)))
-         (successors (%first-user-predicate-keys clause)))
-    (when head-key
-      (ensure-node head-key)
-      (dolist (successor successors)
-        (ensure-node successor)
-        (push successor (gethash head-key adjacency))
-        (push head-key
-              (gethash successor reverse-adjacency))))))
-              (let ((visited (make-hash-table :test #'equal))
-                    (finish-order '()))
-                (dolist (node nodes)
-                  (unless (gethash node visited)
-                    (let ((stack (list (cons node nil))))
-                      (loop while stack
-                            for frame = (pop stack)
-                            for current = (car frame)
-                            for expanded-p = (cdr frame)
-                            do (if expanded-p
-                                   (push current finish-order)
-                                   (unless (gethash current visited)
-                                     (setf (gethash current visited) t)
-                                     (push (cons current t) stack)
-                                     (dolist (next
-                                              (gethash current adjacency))
-                                       (unless (gethash next visited)
-                                         (push (cons next nil) stack)))))))))
-                (let ((assigned (make-hash-table :test #'equal))
-                      (recursive (make-hash-table :test #'equal)))
-                  (dolist (node finish-order)
-                    (unless (gethash node assigned)
-                      (let ((component '())
-                            (stack (list node)))
-                        (loop while stack
-                              for current = (pop stack)
-                              do (unless (gethash current assigned)
-                                   (setf (gethash current assigned) t)
-                                   (push current component)
-                                   (dolist (previous
-                                            (gethash current
-                                                     reverse-adjacency))
-                                     (unless (gethash previous assigned)
-                                       (push previous stack)))))
-                        (when (or (rest component)
-                                  (member (first component)
-                                          (gethash (first component)
-                                                   adjacency)
-                                          :test #'equal))
-                          (dolist (member component)
-                            (setf (gethash member recursive) t))))))
-                  (setf index recursive
-                        (gethash cache-key cache) recursive))))))
-        (not (null (gethash target index)))))))
-
-(defun %prove-clauses/k (goal state succeed)
-  "Prove GOAL, tabling declared predicates and detected left recursion."
-  (if (or *depth-limited-search-p*
-          (and *constraints-active-p-hook*
-               (funcall *constraints-active-p-hook*))
-          (not (or (%rulebase-tabled-p
-                    (proof-state-rulebase state) (first goal)
-                    (length (rest goal)) (proof-state-module state))
-                   (%left-recursive-p goal state))))
-      (%prove-raw-clauses/k goal state succeed)
-      (let* ((session (proof-state-table-session state))
-             (resolved-goal
-               (logic-substitute goal (proof-state-bindings state))))
-        (multiple-value-bind (canonical-goal cyclic-goal-p)
-            (%canonicalize-variant resolved-goal)
-          (let* ((key
-                   (if cyclic-goal-p
-                       (list (rulebase-revision
-                              (proof-state-rulebase state))
-                             (proof-state-module state)
-                             :cyclic
-                             (%variant-graph-key canonical-goal))
-                       (list (rulebase-revision
-                              (proof-state-rulebase state))
-                             (proof-state-module state)
-                             canonical-goal)))
-                 (entries (%table-session-entries session))
-                 (entry (gethash key entries)))
-            (if entry
-                (%replay-table-answers/k goal state entry succeed)
-                (let ((entry (%make-table-entry))
-                      (completed-p nil))
-                  (labels ((record-answer-p (answer cyclic-p)
-                             (let* ((index
-                                      (if cyclic-p
-                                          (%table-entry-cyclic-answer-index
-                                           entry)
-                                          (%table-entry-answer-index entry)))
-                                    (answer-key
-                                      (if cyclic-p
-                                          (%variant-graph-key answer)
-                                          answer)))
-                               (multiple-value-bind (stored present-p)
-                                   (gethash answer-key index)
-                                 (declare (ignore stored))
-                                 (unless present-p
-                                   (let ((cell (list answer))
-                                         (tail
-                                           (%table-entry-answers-tail entry)))
-                                     (if tail
-                                         (setf (cdr tail) cell)
-                                         (setf (%table-entry-answers entry)
-                                               cell))
-                                     (setf (%table-entry-answers-tail entry)
-                                           cell
-                                           (gethash answer-key index) t)
-                                     (incf (%table-entry-answer-count entry))
-                                     t))))))
-                    (setf (gethash key entries) entry)
-                    (unwind-protect
-                         (progn
-                           (loop
-                             with changed-p
-                             do (setf changed-p nil)
-                                (%prove-raw-clauses/k
-                                 goal state
-                                 (lambda (answer-state)
-                                   (multiple-value-bind
-                                         (answer cyclic-answer-p)
-                                       (%canonicalize-variant
-                                        (logic-substitute
-                                         goal
-                                         (proof-state-bindings
-                                          answer-state)))
-                                     (when (record-answer-p
-                                            answer cyclic-answer-p)
-                                       (setf changed-p t)
-                                       (funcall succeed answer-state)))))
-                             while changed-p)
-                           (setf completed-p t))
-                      (unless completed-p
-                        (remhash key entries)))))))))))
 
 (defun %prove-rule/k (goal clause state succeed)
   "Resolve GOAL against one CLAUSE; a cut in the body prunes the clause list."
