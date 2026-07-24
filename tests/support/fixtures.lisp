@@ -5,17 +5,14 @@
 (defvar *recorded-colors* '())
 
 (define-foreign-predicate (record-color color) (rulebase environment depth emit)
-  (declare (cl:ignore rulebase depth))
   (push (logic-substitute color environment) *recorded-colors*)
   (funcall emit environment))
 
 (define-foreign-predicate (accept-ok value) (rulebase environment depth emit)
-  (declare (cl:ignore rulebase depth))
   (when (eql (logic-substitute value environment) :ok)
     (funcall emit environment)))
 
 (define-foreign-predicate (foreign-choice value) (rulebase environment depth emit)
-  (declare (cl:ignore rulebase depth))
   (dolist (choice '(left right))
     (multiple-value-bind (extended matched)
         (unify value choice environment)

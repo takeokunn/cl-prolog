@@ -1,7 +1,7 @@
 ;;;; Test package for the ASDF-loaded cl-weave suite.
 
 (defpackage #:cl-prolog.tests
-  (:use #:cl #:cl-prolog)
+  (:use #:cl #:cl-prolog #:cl-prolog/weave)
   (:shadowing-import-from #:cl-prolog #:assert #:catch #:throw)
   (:export #:deftest
            #:deftest-table

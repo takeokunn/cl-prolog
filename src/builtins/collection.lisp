@@ -169,17 +169,18 @@
                        "KEYSORT/2 expects Key-Value pairs"))
   (second pair))
 
-(define-builtin (sort input sorted) (rulebase environment depth emit)
-  (declare (cl:ignore rulebase depth))
-  (let* ((values (%resolved-collection-list input environment (%iso-atom "SORT")))
-         (ordered (%standard-term-sort-unique values)))
-    (%unify-emit sorted ordered environment emit)))
+(defmacro define-standard-order-sort-builtin (name operation-name sort-fn)
+  "Define NAME as a builtin resolving INPUT to a proper list and unifying
+SORTED with (SORT-FN list), reporting ISO errors under OPERATION-NAME."
+  `(define-builtin (,name input sorted) (rulebase environment depth emit)
+     (declare (cl:ignore rulebase depth))
+     (let* ((values (%resolved-collection-list
+                     input environment (%iso-atom ,operation-name)))
+            (ordered (,sort-fn values)))
+       (%unify-emit sorted ordered environment emit))))
 
-(define-builtin (msort input sorted) (rulebase environment depth emit)
-  (declare (cl:ignore rulebase depth))
-  (let* ((values (%resolved-collection-list input environment (%iso-atom "MSORT")))
-         (ordered (%standard-term-sort values)))
-    (%unify-emit sorted ordered environment emit)))
+(define-standard-order-sort-builtin sort "SORT" %standard-term-sort-unique)
+(define-standard-order-sort-builtin msort "MSORT" %standard-term-sort)
 
 (define-builtin (keysort input sorted) (rulebase environment depth emit)
   (declare (cl:ignore rulebase depth))

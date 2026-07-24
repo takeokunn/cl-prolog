@@ -15,13 +15,30 @@
   "Mutable namespace registry owned by one rulebase."
   (modules (%make-equal-hash-table) :type hash-table :read-only t))
 
-(define-condition prolog-module-error (error)
-  ((operation :initarg :operation :reader prolog-module-error-operation)
-   (detail :initarg :detail :reader prolog-module-error-detail))
-  (:report (lambda (condition stream)
-             (format stream "Cannot ~A: ~A."
-                     (prolog-module-error-operation condition)
-                     (prolog-module-error-detail condition)))))
+(defmacro define-contextual-error-condition
+    (name (parent) (context-slot context-reader) (reason-slot reason-reader)
+     report-format &optional documentation)
+  "Define NAME as a PARENT condition carrying two initargs -- CONTEXT-SLOT
+(read via CONTEXT-READER) and REASON-SLOT (read via REASON-READER) -- and
+reported by formatting REPORT-FORMAT with the context value then the
+reason value.  Shared shape for this codebase's \"something went wrong
+doing X: reason\" conditions (prolog-module-error, and later
+arithmetic-evaluation-error, invalid-goal-error)."
+  `(define-condition ,name (,parent)
+     ((,context-slot :initarg ,(intern (symbol-name context-slot) :keyword)
+                     :reader ,context-reader)
+      (,reason-slot :initarg ,(intern (symbol-name reason-slot) :keyword)
+                    :reader ,reason-reader))
+     (:report (lambda (condition stream)
+                (format stream ,report-format
+                        (,context-reader condition)
+                        (,reason-reader condition))))
+     ,@(when documentation `((:documentation ,documentation)))))
+
+(define-contextual-error-condition prolog-module-error (error)
+  (operation prolog-module-error-operation)
+  (detail prolog-module-error-detail)
+  "Cannot ~A: ~A.")
 
 (defun %module-error (operation control &rest arguments)
   (error 'prolog-module-error
@@ -154,15 +171,17 @@ imports; otherwise the unique import origin is returned."
   (let ((copy (%make-module-registry (%make-equal-hash-table))))
     (maphash
      (lambda (name module)
-       (let ((exports (%make-equal-hash-table))
-             (imports (%make-equal-hash-table)))
-         (maphash (lambda (key value) (setf (gethash key exports) value))
-                  (prolog-module-exports module))
-         (maphash (lambda (key value) (setf (gethash key imports) value))
-                  (prolog-module-imports module))
-         (setf (gethash name (module-registry-modules copy))
-               (%make-prolog-module name exports imports))))
+       (setf (gethash name (module-registry-modules copy))
+             (%make-prolog-module name
+                                   (%copy-hash-table (prolog-module-exports module))
+                                   (%copy-hash-table (prolog-module-imports module)))))
      (module-registry-modules registry))
     copy))
 
 (defun %make-equal-hash-table () (make-hash-table :test #'equal))
+
+(defun %copy-hash-table (source)
+  "Return a new hash table with SOURCE's test and every key/value pair shallow-copied."
+  (let ((copy (make-hash-table :test (hash-table-test source))))
+    (maphash (lambda (key value) (setf (gethash key copy) value)) source)
+    copy))

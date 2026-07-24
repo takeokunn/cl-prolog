@@ -1,13 +1,10 @@
 (in-package #:cl-prolog)
 
-(define-condition arithmetic-evaluation-error (prolog-evaluation-error)
-  ((expression :initarg :expression :reader arithmetic-error-expression)
-   (reason :initarg :reason :reader arithmetic-error-reason))
-  (:report (lambda (condition stream)
-             (format stream "Cannot evaluate Prolog arithmetic expression ~S: ~A."
-                     (arithmetic-error-expression condition)
-                     (arithmetic-error-reason condition))))
-  (:documentation "Signalled when a Prolog arithmetic expression cannot be evaluated."))
+(define-contextual-error-condition arithmetic-evaluation-error (prolog-evaluation-error)
+  (expression arithmetic-error-expression)
+  (reason arithmetic-error-reason)
+  "Cannot evaluate Prolog arithmetic expression ~S: ~A."
+  "Signalled when a Prolog arithmetic expression cannot be evaluated.")
 
 (defun %arithmetic-error (expression reason &rest arguments)
   (let ((message (apply #'format nil reason arguments)))
@@ -266,74 +263,54 @@
                (%evaluate-arithmetic-expression expression environment)
                environment emit))
 
-(define-builtin (|=:=| left right) (rulebase environment depth emit)
-  (when (= (%evaluate-arithmetic-expression left environment)
-           (%evaluate-arithmetic-expression right environment))
-    (funcall emit environment)))
+(defmacro define-arithmetic-comparison (&body definitions)
+  "Define ISO arithmetic comparison builtins.  Each of DEFINITIONS is
+(NAME CL-OPERATOR); the builtin succeeds once, without bindings, when
+CL-OPERATOR holds between the evaluated LEFT and RIGHT expressions."
+  `(progn
+     ,@(loop for (name operator) in definitions
+             collect `(define-builtin (,name left right) (rulebase environment depth emit)
+                        (when (,operator (%evaluate-arithmetic-expression left environment)
+                                         (%evaluate-arithmetic-expression right environment))
+                          (funcall emit environment))))))
 
-(define-builtin (|=\\=| left right) (rulebase environment depth emit)
-  (unless (= (%evaluate-arithmetic-expression left environment)
-             (%evaluate-arithmetic-expression right environment))
-    (funcall emit environment)))
+(define-arithmetic-comparison
+  (|=:=| =)
+  (|=\\=| /=)
+  (< <)
+  (=< <=)
+  (> >)
+  (>= >=))
 
-(define-builtin (< left right) (rulebase environment depth emit)
-  (when (< (%evaluate-arithmetic-expression left environment)
-           (%evaluate-arithmetic-expression right environment))
-    (funcall emit environment)))
+(define-iso-builtin (between low high value) "BETWEEN"
+  (when (or (logic-var-p resolved-low) (logic-var-p resolved-high))
+    (%raise-instantiation-error environment operation
+                                "lower and upper bounds must be instantiated"))
+  (dolist (argument (list resolved-low resolved-high resolved-value))
+    (unless (or (logic-var-p argument) (integerp argument))
+      (%raise-type-error "INTEGER" argument environment operation
+                         "arguments must be integers")))
+  (if (logic-var-p resolved-value)
+      (loop for candidate from resolved-low to resolved-high
+            do (%unify-emit value candidate environment emit))
+      (when (<= resolved-low resolved-value resolved-high)
+        (funcall emit environment))))
 
-(define-builtin (=< left right) (rulebase environment depth emit)
-  (when (<= (%evaluate-arithmetic-expression left environment)
-            (%evaluate-arithmetic-expression right environment))
-    (funcall emit environment)))
-
-(define-builtin (> left right) (rulebase environment depth emit)
-  (when (> (%evaluate-arithmetic-expression left environment)
-           (%evaluate-arithmetic-expression right environment))
-    (funcall emit environment)))
-
-(define-builtin (>= left right) (rulebase environment depth emit)
-  (when (>= (%evaluate-arithmetic-expression left environment)
-            (%evaluate-arithmetic-expression right environment))
-    (funcall emit environment)))
-
-(define-builtin (between low high value) (rulebase environment depth emit)
-  (declare (cl:ignore rulebase depth))
-  (let* ((operation (%iso-atom "BETWEEN"))
-         (resolved-low (%term-resolve low environment))
-         (resolved-high (%term-resolve high environment))
-         (resolved-value (%term-resolve value environment)))
-    (when (or (logic-var-p resolved-low) (logic-var-p resolved-high))
-      (%raise-instantiation-error environment operation
-                                  "lower and upper bounds must be instantiated"))
-    (dolist (argument (list resolved-low resolved-high resolved-value))
-      (unless (or (logic-var-p argument) (integerp argument))
+(define-iso-builtin (succ predecessor successor) "SUCC"
+  (when (and (logic-var-p resolved-predecessor)
+             (logic-var-p resolved-successor))
+    (%raise-instantiation-error environment operation
+                                "one argument must be instantiated"))
+  (dolist (argument (list resolved-predecessor resolved-successor))
+    (unless (logic-var-p argument)
+      (unless (integerp argument)
         (%raise-type-error "INTEGER" argument environment operation
-                           "arguments must be integers")))
-    (if (logic-var-p resolved-value)
-        (loop for candidate from resolved-low to resolved-high
-              do (%unify-emit value candidate environment emit))
-        (when (<= resolved-low resolved-value resolved-high)
-          (funcall emit environment)))))
-
-(define-builtin (succ predecessor successor) (rulebase environment depth emit)
-  (declare (cl:ignore rulebase depth))
-  (let* ((operation (%iso-atom "SUCC"))
-         (resolved-predecessor (%term-resolve predecessor environment))
-         (resolved-successor (%term-resolve successor environment)))
-    (when (and (logic-var-p resolved-predecessor)
-               (logic-var-p resolved-successor))
-      (%raise-instantiation-error environment operation
-                                  "one argument must be instantiated"))
-    (dolist (argument (list resolved-predecessor resolved-successor))
-      (unless (logic-var-p argument)
-        (unless (integerp argument)
-          (%raise-type-error "INTEGER" argument environment operation
-                             "arguments must be integers"))
-        (when (minusp argument)
-          (%raise-domain-error "NOT_LESS_THAN_ZERO" argument environment operation
-                               "arguments must not be negative"))))
-    (cond
-      ((not (logic-var-p resolved-predecessor))
-       (%unify-emit successor (1+ resolved-predecessor) environment emit))
-      ((plusp resolved-successor)
-       (%unify-emit predecessor (1- resolved-successor) environment emit)))))
+                           "arguments must be integers"))
+      (when (minusp argument)
+        (%raise-domain-error "NOT_LESS_THAN_ZERO" argument environment operation
+                             "arguments must not be negative"))))
+  (cond
+    ((not (logic-var-p resolved-predecessor))
+     (%unify-emit successor (1+ resolved-predecessor) environment emit))
+    ((plusp resolved-successor)
+     (%unify-emit predecessor (1- resolved-successor) environment emit))))

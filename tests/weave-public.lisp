@@ -54,6 +54,47 @@
       '(((?y . two) (?x . one))))
      :to-be-falsy)))
 
+(cl-weave:describe-sequential "query-spec-parsing-rejects-malformed-input"
+  (cl-weave:it "an :ordered/:set/:first kind requires an expected value"
+    (cl-weave:expect
+     (lambda () (cl-prolog/weave::%split-query-assertion :ordered '()))
+     :to-throw))
+
+  (cl-weave:it "an unknown assertion kind is rejected"
+    (cl-weave:expect
+     (lambda () (cl-prolog/weave::%split-query-assertion :bogus '(1)))
+     :to-throw))
+
+  (cl-weave:it "a non-list query specification is rejected"
+    (cl-weave:expect
+     (lambda () (cl-prolog/weave::%parse-query-spec 'not-a-list))
+     :to-throw))
+
+  (cl-weave:it "a query specification missing an assertion kind is rejected"
+    (cl-weave:expect
+     (lambda () (cl-prolog/weave::%parse-query-spec '((parent alice ?child))))
+     :to-throw))
+
+  (cl-weave:it "a :signals kind with a non-keyword leading argument treats it as the expected type"
+    (cl-weave:expect
+     (multiple-value-list
+      (cl-prolog/weave::%split-query-assertion
+       :signals '(prolog-type-error :limit 5)))
+     :to-equal '(prolog-type-error (:limit 5))))
+
+  (cl-weave:it "a :signals kind with only keyword options has no expected type"
+    (cl-weave:expect
+     (multiple-value-list
+      (cl-prolog/weave::%split-query-assertion :signals '(:max-depth 16)))
+     :to-equal '(nil (:max-depth 16))))
+
+  (cl-weave:it "a :signals kind without an expected type builds a bare throw assertion"
+    (cl-weave:expect
+     (cl-prolog/weave::%query-assertion-form 'rulebase '(true) :signals '())
+     :to-equal '(cl-weave:expect
+                 (lambda () (cl-prolog:query-prolog rulebase '(true)))
+                 :to-throw))))
+
 (cl-weave:describe-sequential "copy-rulebase"
   (cl-weave:it "isolates dynamic facts from the original rulebase"
     (let* ((original (make-weave-rulebase))

@@ -99,9 +99,9 @@ sub-query) keep the ordinals of variables created by their caller."
                  (setf term (car entry)))
             finally (return term))))
 
-  (defun %walk-term (term env)
-    "Chase TERM through ENV until it is unbound or not a variable."
-    (%walk-term-indexed term (%make-environment-index env))))
+  (defun %walk-term (term environment)
+    "Chase TERM through ENVIRONMENT until it is unbound or not a variable."
+    (%walk-term-indexed term (%make-environment-index environment))))
 
 (progn
   (defun %occurs-p-indexed (var term index)
@@ -119,15 +119,15 @@ sub-query) keep the ordinals of variables created by their caller."
                           (occurs-p (cdr resolved))))))))
         (occurs-p term))))
 
-  (defun %occurs-p (var term env)
-    "Return true when VAR occurs inside TERM under ENV (prevents cyclic terms)."
-    (%occurs-p-indexed var term (%make-environment-index env))))
+  (defun %occurs-p (var term environment)
+    "Return true when VAR occurs inside TERM under ENVIRONMENT (prevents cyclic terms)."
+    (%occurs-p-indexed var term (%make-environment-index environment))))
 
-(defun unify (left right &optional (env '()))
-  "Unify LEFT and RIGHT against ENV.
+(defun unify (left right &optional (environment '()))
+  "Unify LEFT and RIGHT against ENVIRONMENT.
 
-Returns (VALUES EXTENDED-ENV T) on success and (VALUES NIL NIL) on failure."
-  (let ((index (%make-environment-index env))
+Returns (VALUES EXTENDED-ENVIRONMENT T) on success and (VALUES NIL NIL) on failure."
+  (let ((index (%make-environment-index environment))
         (next-binding-rank -1)
         (seen-pairs (make-hash-table :test #'eq)))
     (labels ((extend-environment (variable term environment)
@@ -163,11 +163,11 @@ Returns (VALUES EXTENDED-ENV T) on success and (VALUES NIL NIL) on failure."
                   (values environment t))
                  ((equal left right) (values environment t))
                  (t (values nil nil)))))
-      (unify-terms left right env))))
+      (unify-terms left right environment))))
 
-(defun logic-substitute (template env)
-  "Recursively apply ENV to TEMPLATE, preserving dotted structure."
-  (let ((index (%make-environment-index env))
+(defun logic-substitute (template environment)
+  "Recursively apply ENVIRONMENT to TEMPLATE, preserving dotted structure."
+  (let ((index (%make-environment-index environment))
         (copies (make-hash-table :test #'eq)))
     (labels ((substitute-term (term)
                (let ((resolved (%walk-term-indexed term index)))
