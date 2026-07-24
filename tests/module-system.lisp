@@ -1,36 +1,52 @@
 (in-package #:cl-prolog.tests)
 
 (deftest module-registry-declaration-and-resolution ()
-  (let ((registry (cl-prolog::make-module-registry)))
+  (let ((registry (cl-prolog::make-module-registry))
+        (calls (quote ())))
     (cl-prolog::module-registry-declare!
-     registry 'lists '((/ member 2) (/ append 3)))
-    (cl-prolog::module-registry-declare! registry 'client '())
-    (cl-prolog::module-registry-import! registry 'client 'lists '((/ member 2)))
-    (is (cl-prolog::module-registry-exported-p registry 'lists 'member 2))
-    (is (not (cl-prolog::module-registry-exported-p registry 'lists 'member 3)))
-    (is-equal 'lists
+     registry (quote lists) (quote ((/ member 2) (/ append 3))))
+    (cl-prolog::module-registry-declare! registry (quote client) (quote ()))
+    (cl-prolog::module-registry-import!
+     registry (quote client) (quote lists) (quote ((/ member 2))))
+    (is (cl-prolog::module-registry-exported-p
+         registry (quote lists) (quote member) 2))
+    (is (not (cl-prolog::module-registry-exported-p
+              registry (quote lists) (quote member) 3)))
+    (is-equal (quote lists)
               (cl-prolog::module-registry-resolve
-               registry 'client 'member 2
+               registry (quote client) (quote member) 2
                (lambda (module predicate arity)
-                 (declare (ignore module predicate arity)) nil)))
-    (is-equal 'client
+                 (push (list module predicate arity) calls)
+                 nil)))
+    (is-equal (quote ((client member 2))) calls)
+    (setf calls (quote ()))
+    (is-equal (quote client)
               (cl-prolog::module-registry-resolve
-               registry 'client 'member 2
+               registry (quote client) (quote member) 2
                (lambda (module predicate arity)
-                 (declare (ignore predicate arity)) (eq module 'client))))))
+                 (push (list module predicate arity) calls)
+                 (eq module (quote client)))))
+    (is-equal (quote ((client member 2))) calls)))
 
 (deftest module-registry-qualified-resolution ()
-  (let ((registry (cl-prolog::make-module-registry)))
-    (cl-prolog::module-registry-declare! registry 'hidden '())
-    (is-equal 'hidden
+  (let ((registry (cl-prolog::make-module-registry))
+        (calls (quote ())))
+    (cl-prolog::module-registry-declare! registry (quote hidden) (quote ()))
+    (is-equal (quote hidden)
               (cl-prolog::module-registry-resolve-qualified
-               registry 'hidden 'private 1
+               registry (quote hidden) (quote private) 1
                (lambda (module predicate arity)
-                 (equal (list module predicate arity) '(hidden private 1)))))
+                 (push (list module predicate arity) calls)
+                 (equal (list module predicate arity)
+                        (quote (hidden private 1))))))
+    (is-equal (quote ((hidden private 1))) calls)
+    (setf calls (quote ()))
     (is (not (cl-prolog::module-registry-resolve-qualified
-              registry 'hidden 'missing 0
+              registry (quote hidden) (quote missing) 0
               (lambda (module predicate arity)
-                (declare (ignore module predicate arity)) nil))))))
+                (push (list module predicate arity) calls)
+                nil))))
+    (is-equal (quote ((hidden missing 0))) calls)))
 
 (deftest module-registry-declare-rejects-malformed-declarations ()
   (let ((registry (cl-prolog::make-module-registry)))
