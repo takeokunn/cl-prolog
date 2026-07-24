@@ -7,6 +7,41 @@ section at the top of the file.
 
 ## Unreleased
 
+## 0.7.0 - 2026-07-24
+
+### Added
+
+- an SLG tabling engine (`table-variant.lisp`, `tabling.lisp`): variant-check
+  keys, per-query table sessions, answer tables, and fixpoint iteration,
+  threaded through the proof-state continuation so builtin-dispatched goals
+  inherit the active tabling context
+- a benchmarks harness (`benchmarks/`): in-process micro-benchmarks and a
+  cross-engine comparison script against SWI-Prolog, Trealla, and Scryer
+  Prolog on a shared, checksum-verified workload
+- a CI matrix covering `x86_64-linux` and `aarch64-linux`
+
+### Changed
+
+- `get_code`/`peek_code` track end-of-stream identically to
+  `get_char`/`peek_char` per ISO 8.11.3/8.11.4; stream alias validation is
+  shared across the IO builtins
+- goal-dispatch and DCG expansion hardened; finite-domain constraint
+  handling refined
+- environment indexing in unification uses a bounded overlay over an
+  immutable base table instead of a full rehash on every binding, avoiding
+  an O(n) rebuild per variable binding
+- the parser, term/atom builtins, and source-loader were split into focused
+  modules (lexer/grammar layers, term-inspect/compare/construct,
+  atom-ops/text-conversion/atom-number-conversion,
+  source-io/directives/registry/rollback) with no behavior change
+- the regression suite was reorganized into thematic files (engine-runtime
+  index-and-depth/foreign-and-registration/error-contract,
+  builtin-collections/list/dynamic-database/arithmetic-and-flags) with a
+  shared query helper lifted into `tests/support/core.lisp`
+- documentation (architecture, API reference, builtin goals, querying,
+  semantics, development, troubleshooting) synced with the module split and
+  the new tabling and benchmarking surfaces
+
 ## 0.6.0 - 2026-07-19
 
 ### Added
