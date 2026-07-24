@@ -109,6 +109,32 @@ Use `assert-query` inside an existing cl-weave case when a table is not needed:
     (parent alice ?child) :first ((?child . bob))))
 ```
 
+## Benchmarks
+
+`benchmarks/performance.lisp` runs in-process micro-benchmarks (alias-chain
+resolution, predicate/first-argument indexing, recursive and branching path
+queries) and reports warm-steady-state timing and allocation per operation:
+
+```sh
+sbcl --script benchmarks/performance.lisp
+```
+
+`benchmarks/external-comparison.sh` cross-checks `cl-prolog` against
+SWI-Prolog, Trealla, and Scryer Prolog on a shared workload
+(`benchmarks/external-workload.pl` / `benchmarks/external-cl-prolog.lisp`),
+verifying each engine returns an identical solution count, checksum, and
+fingerprint before comparing wall-clock time. It shells out to
+`nix shell nixpkgs#{swi-prolog,trealla,scryer-prolog}`, so it requires Nix and
+network access to the binary cache; each engine run is capped at 60 seconds
+per iteration count:
+
+```sh
+ITERATIONS=5000 benchmarks/external-comparison.sh
+```
+
+These scripts are diagnostic tools, not part of `nix flake check` or the
+regression suite.
+
 ## Documentation
 
 ```sh
